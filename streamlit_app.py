@@ -149,6 +149,8 @@ def upload_template_page(supabase: SupabaseManager, user_id: str):
         st.subheader("📋 Validation Results")
         parser = ExcelParser(str(temp_path))
         success, errors, warnings = parser.parse()
+        # ADD THIS DEBUG LINE:
+        st.write(f"DEBUG: Parser has {len(parser.attributes)} attributes after parsing")
         
         # Show stats
         col1, col2, col3 = st.columns(3)
