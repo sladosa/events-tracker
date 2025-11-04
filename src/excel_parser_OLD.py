@@ -228,18 +228,7 @@ class ExcelParser:
         
         for idx, row in df.iterrows():
             try:
-                # Handle NaN values in optional fields
-                row_dict = row.to_dict()
-                
-                # Convert NaN to empty string for default_value
-                if pd.isna(row_dict.get('default_value')):
-                    row_dict['default_value'] = ''
-                
-                # Convert NaN to empty string for unit
-                if pd.isna(row_dict.get('unit')):
-                    row_dict['unit'] = ''
-                
-                attribute = Attribute(**row_dict)
+                attribute = Attribute(**row.to_dict())
                 self.attributes.append(attribute)
             except Exception as e:
                 self.errors.append(f"Attributes row {idx + 2}: {str(e)}")
