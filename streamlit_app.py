@@ -225,10 +225,14 @@ def export_structure_page(supabase: SupabaseManager, user_id: str):
             # Get current structure (filtered by user_id)
             areas, categories, attributes = supabase.get_current_structure(user_id)
             
-            # Export to Excel
-            reverse = ReverseEngineer()
-            excel_bytes = reverse.export_to_excel(areas, categories, attributes)
-            
+            # Export to Excel           
+            reverse = ReverseEngineer(supabase.client)  # ✅ Dodaj client
+            success, excel_bytes, message = reverse.export_to_bytes(user_id)  # ✅ Koristi novu metodu
+
+            if not success:
+                st.error(f"❌ {message}")
+                return
+
             # Show summary
             st.success("Exported successfully:")
             col1, col2, col3 = st.columns(3)
