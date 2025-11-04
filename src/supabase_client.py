@@ -316,3 +316,71 @@ Please execute the SQL using one of these methods:
             
         except Exception as e:
             return False, f"Failed to delete items: {str(e)}"
+
+    def get_current_structure(self, user_id: str) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+        """
+        Get current structure from database for a specific user.
+
+        Args:
+            user_id: UUID of the user whose data to retrieve
+
+        Returns:
+            Tuple of (areas, categories, attributes) as lists of dicts
+        """
+        try:
+            # Get areas for this user
+            areas_result = self.client.table('areas').select('*').eq('user_id', user_id).execute()
+            areas = areas_result.data if areas_result.data else []
+
+            # Get categories for user's areas
+            categories = []
+            if areas:
+                area_ids = [a['id'] for a in areas]
+                categories_result = self.client.table('categories').select('*').in_('area_id', area_ids).execute()
+                categories = categories_result.data if categories_result.data else []
+
+            # Get attributes for user's categories
+            attributes = []
+            if categories:
+                cat_ids = [c['id'] for c in categories]
+                attributes_result = self.client.table('attribute_definitions').select('*').in_('category_id', cat_ids).execute()
+                attributes = attributes_result.data if attributes_result.data else []
+
+            return areas, categories, attributes
+
+        except Exception as e:
+            raise Exception(f"Failed to get current structure: {str(e)}")
+
+    def apply_template(self, areas: List, categories: List, attributes: List, user_id: str) -> Tuple[bool, str]:
+        """
+        Apply a complete template to the database.
+        This is a wrapper that combines apply_changes and delete_removed_items.
+
+        Args:
+            areas: List of Area objects from ExcelParser
+            categories: List of Category objects from ExcelParser
+            attributes: List of Attribute objects from ExcelParser
+            user_id: UUID of the user
+
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        try:
+            # First, create a backup of current structure
+            backup = self.backup_metadata(user_id)
+
+            # Apply the new structure (upsert)
+            success, msg = self.apply_changes(user_id, areas, categories, attributes)
+            if not success:
+                return False, msg
+
+            # Delete items that were removed
+            success, msg = self.delete_removed_items(backup, areas, categories, attributes)
+            if not success:
+                return False, msg
+
+            return True, "Template applied successfully"
+
+        except Exception as e:
+            return False, f"Failed to apply template: {str(e)}"
+

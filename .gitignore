@@ -1,5 +1,6 @@
 # Temporary directory with Perplexity files
 Claude-temp/
+Perplexity-temp/
 
 # Streamlit secrets file
 .streamlit/secrets.toml
