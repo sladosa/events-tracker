@@ -1,6 +1,6 @@
 """
-Events Tracker - Main Streamlit Application (WITH AUTHENTICATION)
-Flexible event tracking system with customizable metadata structure
+Events Tracker - Main Streamlit Application
+Flexible event tracking with NAME-BASED templates and automatic rename detection
 """
 import streamlit as st
 import sys
@@ -8,14 +8,15 @@ from pathlib import Path
 import json
 import os
 from datetime import datetime
+import io
 
 # Add src to path
 sys.path.append(str(Path(__file__).parent / 'src'))
 
-from excel_parser import ExcelParser
-from sql_generator import SQLGenerator
+from validators import validate_template
+from excel_parser_new import ExcelTemplateParser, load_from_database
+from rename_detector import RenameDetector
 from supabase_client import SupabaseManager
-from reverse_engineer import ReverseEngineer
 from auth import AuthManager
 
 # Page config
@@ -29,20 +30,18 @@ st.set_page_config(
 # Initialize session state
 if 'backup_data' not in st.session_state:
     st.session_state.backup_data = None
-if 'parsed_excel' not in st.session_state:
-    st.session_state.parsed_excel = None
-if 'changes_preview' not in st.session_state:
-    st.session_state.changes_preview = None
+if 'validation_result' not in st.session_state:
+    st.session_state.validation_result = None
+if 'operations' not in st.session_state:
+    st.session_state.operations = None
 
 
 def init_supabase():
     """Initialize Supabase client from secrets or env."""
     try:
-        # Try Streamlit secrets first
         url = st.secrets.get("SUPABASE_URL")
         key = st.secrets.get("SUPABASE_KEY")
     except:
-        # Fall back to environment variables
         url = os.getenv("SUPABASE_URL")
         key = os.getenv("SUPABASE_KEY")
     
@@ -78,19 +77,18 @@ def main():
     
     # Check authentication
     if not auth.is_authenticated():
-        # Show login page
         auth.show_login_page()
         return
     
     # User is authenticated - show main app
     st.title("📊 Events Tracker")
-    st.markdown("*Flexible event tracking with customizable metadata structure*")
+    st.markdown("*Name-based templates with automatic rename detection*")
     
     # Sidebar navigation
     st.sidebar.title("Navigation")
     page = st.sidebar.radio(
         "Select Action",
-        ["📤 Upload Template", "📥 Export Structure", "📄 Generate SQL", "ℹ️ Help"]
+        ["📤 Upload Template", "📥 Download Structure", "ℹ️ Help"]
     )
     
     # Show user info and logout button
@@ -106,37 +104,36 @@ def main():
             else:
                 st.error(message)
     
-    # Page routing (passing user_id to functions that need it)
+    # Page routing
     user_id = auth.get_user_id()
     
     if page == "📤 Upload Template":
         upload_template_page(supabase, user_id)
-    elif page == "📥 Export Structure":
-        export_structure_page(supabase, user_id)
-    elif page == "📄 Generate SQL":
-        generate_sql_page()
+    elif page == "📥 Download Structure":
+        download_structure_page(supabase, user_id)
     elif page == "ℹ️ Help":
         help_page()
 
 
 def upload_template_page(supabase: SupabaseManager, user_id: str):
-    """Page for uploading and applying Excel templates."""
+    """Page for uploading name-based templates with rename detection."""
     
-    st.header("Upload Template")
+    st.header("📤 Upload Template")
     st.markdown("""
-    Upload an Excel template to configure your tracking structure. The system will:
-    1. Validate the template
-    2. Show you what will change
-    3. Create a backup before applying
-    4. Apply changes to your database
+    Upload an Excel template using **names as identifiers** (no UUID management needed!). 
+    The system will:
+    1. ✅ Validate the template for errors
+    2. 🔍 Detect renamed objects automatically
+    3. 📊 Show you what will change
+    4. 🚀 Apply changes atomically
     """)
     
-    st.info("ℹ️ **Note**: Changes are applied to YOUR data only (secured with RLS)")
+    st.info("💡 **New**: Just use names! System handles UUID mapping automatically.")
     
     uploaded_file = st.file_uploader(
         "Choose Excel template",
         type=['xlsx'],
-        help="Upload an Excel file with Areas, Categories, and Attributes sheets"
+        help="Upload template with Areas, Categories, and Attributes sheets"
     )
     
     if uploaded_file:
@@ -145,269 +142,503 @@ def upload_template_page(supabase: SupabaseManager, user_id: str):
         with open(temp_path, 'wb') as f:
             f.write(uploaded_file.getvalue())
         
-        # Parse Excel
-        st.subheader("📋 Validation Results")
-        parser = ExcelParser(str(temp_path))
-        success, errors, warnings = parser.parse()
-        # ADD THIS DEBUG LINE:
-        st.write(f"DEBUG: Parser has {len(parser.attributes)} attributes after parsing")
+        # ==========================================
+        # STEP 1: VALIDATION
+        # ==========================================
+        st.subheader("📋 Step 1: Validation")
         
-        # Show stats
+        with st.spinner("Validating template..."):
+            is_valid, report, error_file = validate_template(str(temp_path))
+        
+        if not is_valid:
+            st.error("❌ Validation failed!")
+            st.text(report)
+            
+            if error_file:
+                with open(error_file, 'rb') as f:
+                    st.download_button(
+                        label="⬇️ Download Template with Errors Highlighted",
+                        data=f.read(),
+                        file_name="template_with_errors.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+            
+            if temp_path.exists():
+                temp_path.unlink()
+            return
+        
+        st.success("✅ Validation passed!")
+        
+        # ==========================================
+        # STEP 2: PARSE EXCEL
+        # ==========================================
+        st.subheader("📖 Step 2: Parsing Template")
+        
+        with st.spinner("Reading Excel file..."):
+            parser = ExcelTemplateParser(str(temp_path))
+            new_areas, new_categories, new_attributes = parser.parse()
+            summary = parser.get_summary()
+        
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Areas", len(parser.areas))
+            st.metric("Areas", summary['areas_count'])
         with col2:
-            st.metric("Categories", len(parser.categories))
+            st.metric("Categories", summary['categories_count'])
         with col3:
-            st.metric("Attributes", len(parser.attributes))
+            st.metric("Attributes", summary['attributes_count'])
         
-        if errors:
-            st.error("❌ Validation failed!")
-            for error in errors:
-                st.error(f"• {error}")
+        # ==========================================
+        # STEP 3: LOAD FROM DATABASE
+        # ==========================================
+        st.subheader("📥 Step 3: Loading Existing Data")
+        
+        with st.spinner("Loading from database..."):
+            old_areas, old_categories, old_attributes = load_from_database(
+                supabase.client, user_id
+            )
+        
+        st.info(f"Found {len(old_areas)} areas, {len(old_categories)} categories, "
+                f"{len(old_attributes)} attributes in database")
+        
+        # ==========================================
+        # STEP 4: RENAME DETECTION
+        # ==========================================
+        st.subheader("🔍 Step 4: Detecting Changes")
+        
+        with st.spinner("Analyzing changes..."):
+            # Process Areas
+            area_detector = RenameDetector(confidence_threshold=0.65)
+            area_matches = area_detector.match_objects(old_areas, new_areas)
+            area_operations = area_detector.generate_operations()
+            
+            # Process Categories
+            cat_detector = RenameDetector(confidence_threshold=0.65)
+            cat_matches = cat_detector.match_objects(old_categories, new_categories)
+            cat_operations = cat_detector.generate_operations()
+            
+            # Process Attributes
+            attr_detector = RenameDetector(confidence_threshold=0.65)
+            attr_matches = attr_detector.match_objects(old_attributes, new_attributes)
+            attr_operations = attr_detector.generate_operations()
+            
+            # Combine all operations
+            all_operations = area_operations + cat_operations + attr_operations
+            st.session_state.operations = all_operations
+        
+        # ==========================================
+        # STEP 5: DISPLAY CHANGES
+        # ==========================================
+        st.subheader("📊 Step 5: Changes Preview")
+        
+        # Categorize operations
+        renames = [op for op in all_operations 
+                   if op['operation'] == 'UPDATE' and 'new_name' in op]
+        inserts = [op for op in all_operations if op['operation'] == 'INSERT']
+        deletes = [op for op in all_operations if op['operation'] == 'DELETE']
+        updates = [op for op in all_operations 
+                   if op['operation'] == 'UPDATE' and 'changes' in op]
+        
+        # Summary metrics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("🔄 Renames", len(renames))
+        with col2:
+            st.metric("➕ New Objects", len(inserts))
+        with col3:
+            st.metric("🗑️ Deletions", len(deletes))
+        with col4:
+            st.metric("✏️ Updates", len(updates))
+        
+        # Detailed view in tabs
+        tab1, tab2, tab3, tab4 = st.tabs(["🔄 Renames", "➕ New", "🗑️ Deletions", "✏️ Updates"])
+        
+        with tab1:
+            if renames:
+                st.markdown("**Detected Renames:**")
+                for op in renames:
+                    confidence = op.get('confidence', 1.0)
+                    
+                    # Color based on confidence
+                    if confidence > 0.85:
+                        emoji = "🟢"
+                        conf_color = "green"
+                    elif confidence > 0.70:
+                        emoji = "🟡"
+                        conf_color = "orange"
+                    else:
+                        emoji = "🟠"
+                        conf_color = "red"
+                    
+                    table = op['table_name'].replace('_', ' ').title()
+                    old_name = op.get('old_name', 'Unknown')
+                    new_name = op['new_name']
+                    
+                    st.markdown(
+                        f"{emoji} **[{table}]** `{old_name}` → `{new_name}` "
+                        f"<span style='color:{conf_color}'>(confidence: {confidence:.0%})</span>",
+                        unsafe_allow_html=True
+                    )
+                    
+                    # Show warning for low confidence
+                    if confidence < 0.70:
+                        st.warning(
+                            f"⚠️ Low confidence! Please verify this is actually a rename "
+                            f"of '{old_name}' and not a new object."
+                        )
+                        with st.expander("View matching signals"):
+                            st.json(op.get('signals', {}))
+            else:
+                st.info("No renames detected")
+        
+        with tab2:
+            if inserts:
+                st.markdown(f"**{len(inserts)} new objects will be created:**")
+                for op in inserts:
+                    table = op['table_name'].replace('_', ' ').title()
+                    name = op['name']
+                    
+                    if op['table_name'] == 'categories':
+                        area = op.get('area_name', '')
+                        parent = op.get('parent_name', '')
+                        context = f" in {area}" + (f" > {parent}" if parent else "")
+                    elif op['table_name'] == 'attribute_definitions':
+                        category = op.get('category_name', '')
+                        context = f" for {category}"
+                    else:
+                        context = ""
+                    
+                    st.markdown(f"• **[{table}]** {name}{context}")
+            else:
+                st.info("No new objects to create")
+        
+        with tab3:
+            if deletes:
+                st.warning(f"⚠️ **{len(deletes)} objects will be deleted:**")
+                for op in deletes:
+                    table = op['table_name'].replace('_', ' ').title()
+                    name = op['name']
+                    st.markdown(f"• **[{table}]** {name}")
+                
+                if any(op['table_name'] == 'categories' for op in deletes):
+                    st.error(
+                        "⚠️ **WARNING**: Deleting categories may fail if they have events. "
+                        "Events must be reassigned or deleted first."
+                    )
+            else:
+                st.info("No objects will be deleted")
+        
+        with tab4:
+            if updates:
+                st.markdown(f"**{len(updates)} objects will have attribute changes:**")
+                for op in updates:
+                    table = op['table_name'].replace('_', ' ').title()
+                    changes = op.get('changes', {})
+                    st.markdown(f"**[{table}]**")
+                    for key, (old_val, new_val) in changes.items():
+                        st.markdown(f"  • {key}: `{old_val}` → `{new_val}`")
+            else:
+                st.info("No attribute updates")
+        
+        # ==========================================
+        # STEP 6: CONFIRMATION & APPLY
+        # ==========================================
+        st.divider()
+        
+        if len(all_operations) == 0:
+            st.success("✅ No changes detected - your template matches the database!")
         else:
-            st.success("✅ Template is valid!")
+            st.warning("⚠️ **Review changes carefully before applying!**")
             
-            if warnings:
-                st.warning("⚠️ Warnings:")
-                for warning in warnings:
-                    st.warning(f"• {warning}")
-            
-            # Get current structure from database (for this user only)
-            current_areas, current_categories, current_attributes = supabase.get_current_structure(user_id)
-            
-            # Detect changes
-            st.subheader("📊 Changes Preview")
-            
-            # Compare and show changes
-            # ... (keep existing change detection logic but filter by user_id)
-            
-            st.info("💡 Review the changes above carefully before applying.")
-            
-            if st.button("🚀 Apply Changes", type="primary"):
-                try:
-                    # Create backup
-                    backup_data = {
-                        'areas': current_areas,
-                        'categories': current_categories,
-                        'attributes': current_attributes,
+            if st.checkbox("I have reviewed the changes and want to proceed"):
+                if st.button("🚀 Apply Changes", type="primary"):
+                    
+                    # Create backup info
+                    backup_info = {
                         'timestamp': datetime.now().isoformat(),
-                        'user_id': user_id
+                        'user_id': user_id,
+                        'operation_count': len(all_operations)
                     }
-                    st.session_state.backup_data = backup_data
+                    st.session_state.backup_data = backup_info
                     
-                    # Apply changes (with user_id)
-                    supabase.apply_template(parser.areas, parser.categories, parser.attributes, user_id)
-                    
-                    st.success("✅ Changes applied successfully!")
-                    st.balloons()
-                    
-                except Exception as e:
-                    st.error(f"❌ Failed to apply changes: {e}")
+                    # Apply changes via stored procedure
+                    with st.spinner("Applying changes to database..."):
+                        try:
+                            result = supabase.client.rpc(
+                                'update_template_from_excel',
+                                {
+                                    'p_user_id': user_id,
+                                    'p_template_data': all_operations
+                                }
+                            ).execute()
+                            
+                            if result.data.get('success'):
+                                st.success("✅ Changes applied successfully!")
+                                
+                                # Show summary
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("Inserted", result.data.get('inserted', 0))
+                                with col2:
+                                    st.metric("Updated", result.data.get('updated', 0))
+                                with col3:
+                                    st.metric("Renamed", result.data.get('renamed', 0))
+                                with col4:
+                                    st.metric("Deleted", result.data.get('deleted', 0))
+                                
+                                st.balloons()
+                                
+                                # Clear session state
+                                st.session_state.operations = None
+                                
+                            else:
+                                st.error(f"❌ Error: {result.data.get('error')}")
+                                st.error(f"Details: {result.data.get('error_detail')}")
+                        
+                        except Exception as e:
+                            st.error(f"❌ Failed to apply changes: {str(e)}")
+                            st.error("Check Supabase logs for more details")
         
         # Clean up
         if temp_path.exists():
             temp_path.unlink()
 
 
-def export_structure_page(supabase: SupabaseManager, user_id: str):
-    """Page for exporting current structure to Excel."""
+def download_structure_page(supabase: SupabaseManager, user_id: str):
+    """Page for downloading current structure as name-based template."""
     
-    st.header("Export Structure")
+    st.header("📥 Download Current Structure")
     st.markdown("""
-    Export your current tracking structure to an Excel template. You can then edit it and re-upload to make changes.
+    Download your current structure as an **Excel template** that you can:
+    - ✏️ Edit names (renames detected automatically on re-upload)
+    - ➕ Add new areas, categories, or attributes
+    - 🗑️ Delete items (remove rows)
+    - 📤 Upload back to apply changes
     """)
     
-    st.info("ℹ️ **Note**: Only YOUR data will be exported (secured with RLS)")
+    st.info("💡 **No UUID management needed** - just work with names!")
     
-    if st.button("📥 Export to Excel", type="primary"):
-        try:
-            # Get current structure (filtered by user_id)
-            areas, categories, attributes = supabase.get_current_structure(user_id)
-            
-            # Export to Excel           
-            reverse = ReverseEngineer(supabase.client)  # ✅ Dodaj client
-            success, excel_bytes, message = reverse.export_to_bytes(user_id)  # ✅ Koristi novu metodu
-
-            if not success:
-                st.error(f"❌ {message}")
-                return
-
-            # Show summary
-            st.success("Exported successfully:")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Areas", len(areas))
-            with col2:
-                st.metric("Categories", len(categories))
-            with col3:
-                st.metric("Attributes", len(attributes))
-            
-            # Download button
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"structure_export_{timestamp}.xlsx"
-            
-            st.download_button(
-                label="📥 Download Excel File",
-                data=excel_bytes,
-                file_name=filename,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            
-        except Exception as e:
-            st.error(f"❌ Export failed: {e}")
-
-
-def generate_sql_page():
-    """Page for generating SQL from Excel template."""
-    
-    st.header("Generate SQL")
-    st.markdown("""
-    Generate SQL schema from an Excel template.
-    Use this to create a new database or understand the structure.
-    """)
-    
-    st.warning("⚠️ **Note**: This generates schema WITHOUT authentication. Use only for initial setup!")
-    
-    uploaded_file = st.file_uploader(
-        "Choose Excel template",
-        type=['xlsx'],
-        key="sql_gen_upload"
-    )
-    
-    if uploaded_file:
-        # Save temporarily
-        temp_path = Path("temp_sql_gen.xlsx")
-        with open(temp_path, 'wb') as f:
-            f.write(uploaded_file.getvalue())
-        
-        # Parse
-        parser = ExcelParser(str(temp_path))
-        success, errors, warnings = parser.parse()
-        
-        if errors:
-            st.error("Template has validation errors. Fix them first.")
-            for error in errors:
-                st.error(f"• {error}")
-        else:
-            # Generate SQL
-            generator = SQLGenerator(
-                parser.areas,
-                parser.categories,
-                parser.attributes
-            )
-            
-            sql = generator.generate_full_schema()
-            
-            st.subheader("Generated SQL")
-            st.code(sql, language='sql')
-            
-            # Download button
-            st.download_button(
-                label="⬇️ Download SQL File",
-                data=sql,
-                file_name="events_tracker_schema.sql",
-                mime="text/plain"
-            )
-            
-            st.info("""
-            **How to use this SQL:**
-            
-            1. Copy the SQL or download the file
-            2. Go to Supabase Dashboard → SQL Editor
-            3. Paste and run the SQL
-            4. Verify tables were created in Table Editor
-            5. Run the authentication setup SQL
-            6. Sign up as a user in the app
-            """)
-        
-        # Clean up
-        if temp_path.exists():
-            temp_path.unlink()
+    if st.button("📥 Generate Template", type="primary"):
+        with st.spinner("Generating Excel template..."):
+            try:
+                # Load from database
+                areas, categories, attributes = load_from_database(
+                    supabase.client, user_id
+                )
+                
+                if not areas and not categories and not attributes:
+                    st.warning("⚠️ No data found. Upload a template first!")
+                    return
+                
+                # Convert to DataFrames
+                import pandas as pd
+                
+                df_areas = pd.DataFrame([
+                    {
+                        'area_id': obj.uuid,
+                        'area_name': obj.name,
+                        'icon': obj.attributes.get('icon', ''),
+                        'color': obj.attributes.get('color', ''),
+                        'sort_order': obj.attributes.get('sort_order', 0),
+                        'description': obj.attributes.get('description', '')
+                    }
+                    for obj in areas
+                ])
+                
+                df_categories = pd.DataFrame([
+                    {
+                        'category_id': obj.uuid,
+                        'area_name': obj.area_name,
+                        'parent_category': obj.parent_name or '',
+                        'category_name': obj.name,
+                        'level': obj.level,
+                        'sort_order': obj.attributes.get('sort_order', 0),
+                        'description': obj.attributes.get('description', '')
+                    }
+                    for obj in categories
+                ])
+                
+                df_attributes = pd.DataFrame([
+                    {
+                        'attribute_id': obj.uuid,
+                        'category_name': obj.category_name,
+                        'attribute_name': obj.name,
+                        'data_type': obj.attributes.get('data_type'),
+                        'unit': obj.attributes.get('unit', ''),
+                        'is_required': obj.attributes.get('is_required', False),
+                        'default_value': obj.attributes.get('default_value', ''),
+                        'validation_rules': obj.attributes.get('validation_rules', '{}'),
+                        'sort_order': obj.attributes.get('sort_order', 0)
+                    }
+                    for obj in attributes
+                ])
+                
+                # Write to Excel in memory
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df_areas.to_excel(writer, sheet_name='Areas', index=False)
+                    df_categories.to_excel(writer, sheet_name='Categories', index=False)
+                    df_attributes.to_excel(writer, sheet_name='Attributes', index=False)
+                
+                excel_bytes = output.getvalue()
+                
+                # Show summary
+                st.success("✅ Template generated!")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Areas", len(df_areas))
+                with col2:
+                    st.metric("Categories", len(df_categories))
+                with col3:
+                    st.metric("Attributes", len(df_attributes))
+                
+                # Download button
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"template_{timestamp}.xlsx"
+                
+                st.download_button(
+                    label="⬇️ Download Excel Template",
+                    data=excel_bytes,
+                    file_name=filename,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+                
+                st.info("""
+                **How to use this template:**
+                
+                1. Open in Excel
+                2. Edit names, add/remove rows
+                3. Save and upload via "Upload Template"
+                4. System will detect renames automatically!
+                
+                **Note:** Keep the `*_id` columns - they help detect renames. 
+                Leave them empty for new items.
+                """)
+                
+            except Exception as e:
+                st.error(f"❌ Failed to generate template: {str(e)}")
 
 
 def help_page():
     """Help and documentation page."""
     
-    st.header("Help & Documentation")
+    st.header("ℹ️ Help & Documentation")
     
-    with st.expander("📖 Quick Start Guide", expanded=True):
+    with st.expander("🚀 What's New - Name-Based Templates", expanded=True):
         st.markdown("""
-        ### 1. Setup Supabase Project
+        ### No More UUID Management! 🎉
         
-        1. Go to [supabase.com](https://supabase.com)
-        2. Create new project: `events-tracker`
-        3. Note your Project URL and anon key
-        4. Add to `.streamlit/secrets.toml`:
-           ```toml
-           SUPABASE_URL = "https://xxx.supabase.co"
-           SUPABASE_KEY = "your-anon-key"
-           ```
+        **Old Way (UUID-based):**
+        - ❌ Manually generate UUIDs for each item
+        - ❌ Complex to rename (had to keep UUID, change name)
+        - ❌ Easy to break relationships
         
-        ### 2. Setup Database
+        **New Way (Name-based):**
+        - ✅ Just use names - system handles UUIDs automatically
+        - ✅ Rename by simply changing the name
+        - ✅ Automatic rename detection
+        - ✅ Relationships preserved
         
-        1. Download template: `templates/garmin_fitness_template.xlsx`
-        2. Go to "Generate SQL" page
-        3. Upload template → Download SQL
-        4. Run SQL in Supabase Dashboard
-        5. Run authentication setup SQL
+        ### How Rename Detection Works
         
-        ### 3. Sign Up
+        System uses multiple signals:
+        - Position in file (20%)
+        - Name similarity (40%)
+        - Parent matching (20%)
+        - Sibling context (10%)
+        - Other attributes (10%)
         
-        1. Return to app
-        2. Click "Sign Up" tab
-        3. Enter email and password
-        4. Check email for confirmation
-        5. Login!
+        = **Confidence Score** (0-100%)
         
-        ### 4. Customize Structure
+        - 🟢 High (>85%): Auto-accepted
+        - 🟡 Medium (70-85%): Shows for review
+        - 🟠 Low (<70%): Treated as new object
+        """)
+    
+    with st.expander("📋 Excel Template Format"):
+        st.markdown("""
+        ### Areas Sheet
         
-        1. Export your current structure
-        2. Edit in Excel (add/remove/rename items)
-        3. Upload modified template
-        4. Review changes and apply
+        | Column | Required | Description |
+        |--------|----------|-------------|
+        | area_id | Optional | Leave empty for new, keep for renames |
+        | area_name | ✅ Yes | **Unique name** |
+        | icon | No | Emoji or icon |
+        | color | No | Hex color code |
+        | sort_order | Yes | Display order |
+        | description | No | Text description |
         
-        ### 5. Track Events
+        ### Categories Sheet
         
-        (Coming soon - Event entry interface)
+        | Column | Required | Description |
+        |--------|----------|-------------|
+        | category_id | Optional | Leave empty for new |
+        | area_name | ✅ Yes | Reference to parent area |
+        | parent_category | No | Parent category name (empty for root) |
+        | category_name | ✅ Yes | **Unique within parent** |
+        | level | ✅ Yes | 1-10 (depth in hierarchy) |
+        | sort_order | Yes | Display order |
+        | description | No | Text description |
+        
+        ### Attributes Sheet
+        
+        | Column | Required | Description |
+        |--------|----------|-------------|
+        | attribute_id | Optional | Leave empty for new |
+        | category_name | ✅ Yes | Which category this belongs to |
+        | attribute_name | ✅ Yes | **Unique within category** |
+        | data_type | ✅ Yes | number, text, datetime, boolean, link, image |
+        | unit | No | e.g., "km", "kg", "hours" |
+        | is_required | No | TRUE/FALSE |
+        | default_value | No | Default value |
+        | validation_rules | No | JSON rules |
+        | sort_order | Yes | Display order |
+        
+        ### Uniqueness Rules
+        
+        - ✅ Area names must be unique
+        - ✅ Category names must be unique within their parent
+        - ✅ Attribute names must be unique within their category
+        - ❌ Different parents CAN have categories with same name
+        """)
+    
+    with st.expander("🔧 Troubleshooting"):
+        st.markdown("""
+        ### Common Issues
+        
+        **Q: Validation failed with "duplicate name"**
+        - Check that names are unique within their scope
+        - Download the error-highlighted template to see exact issues
+        
+        **Q: Low confidence rename detected**
+        - Review the signals in the expander
+        - If it's not a rename, leave `*_id` column empty
+        - If it IS a rename, keep the UUID from previous download
+        
+        **Q: Can't delete category - has events**
+        - Categories with events cannot be deleted
+        - Reassign events to another category first
+        - Or delete events via Supabase dashboard
+        
+        **Q: Template shows more changes than expected**
+        - Download current structure first
+        - Make small incremental changes
+        - Test with renames first, then additions/deletions
         """)
     
     with st.expander("🔒 Security & Privacy"):
         st.markdown("""
         ### Row Level Security (RLS)
         
-        - All your data is **private** and secured
-        - You can only see and modify YOUR data
-        - Other users cannot access your data
-        - Implemented via PostgreSQL RLS policies
+        - ✅ All your data is private
+        - ✅ Only you can see/modify your data
+        - ✅ Other users cannot access your structure
+        - ✅ Enforced at PostgreSQL level
         
-        ### Authentication
+        ### Audit Trail
         
-        - Powered by Supabase Auth
-        - Email/password authentication
-        - Email confirmation required
-        - Secure token-based sessions
-        """)
-    
-    with st.expander("📋 Excel Template Format"):
-        st.markdown("""
-        ### Required Sheets
-        
-        1. **Areas** - Top-level organization
-           - uuid, name, icon, color, sort_order, description
-        
-        2. **Categories** - Hierarchical subcategories
-           - uuid, area_uuid, parent_uuid, name, description, level, sort_order
-        
-        3. **Attributes** - What data to capture
-           - uuid, category_uuid, name, data_type, unit, is_required, default_value, validation_rules, sort_order
-        
-        ### UUID Management
-        
-        - Every item has a UUID (unique identifier)
-        - UUIDs allow renaming without breaking relationships
-        - Generate new UUIDs with Python: `import uuid; str(uuid.uuid4())`
-        - Never reuse UUIDs from deleted items
+        - All name changes are logged
+        - Check `name_change_history` table in Supabase
+        - See who changed what and when
         """)
 
 
