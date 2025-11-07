@@ -1,5 +1,5 @@
 """
-Events Tracker - Main Streamlit Application
+Events Tracker - Main Streamlit Application 20251107-1400
 Flexible event tracking with NAME-BASED templates and automatic rename detection
 """
 import streamlit as st
@@ -13,11 +13,12 @@ import io
 # Add src to path
 sys.path.append(str(Path(__file__).parent / 'src'))
 
-from validators import validate_template
-from excel_parser_new import ExcelTemplateParser, load_from_database
-from rename_detector import RenameDetector
-from supabase_client import SupabaseManager
-from auth import AuthManager
+# FIXED: Use explicit src. prefix to avoid conflicts with system packages
+from src.excel_validators import validate_template
+from src.excel_parser_new import ExcelTemplateParser, load_from_database
+from src.rename_detector import RenameDetector
+from src.supabase_client import SupabaseManager
+from src.auth import AuthManager
 
 # Page config
 st.set_page_config(
