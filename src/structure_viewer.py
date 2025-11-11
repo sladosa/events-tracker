@@ -114,6 +114,13 @@ class StructureViewer:
                     description=row.get('description', ''),
                     path=str(row.get('path', '')) if row.get('path') else ''
                 )
+                
+                # EXPLICIT initialization to ensure lists exist
+                if not hasattr(cat, 'children') or cat.children is None:
+                    cat.children = []
+                if not hasattr(cat, 'attributes') or cat.attributes is None:
+                    cat.attributes = []
+                
                 self.categories[cat.id] = cat
             
             # Build parent names and hierarchy
@@ -229,36 +236,57 @@ def render_category_tree(category: CategoryNode, depth: int = 0):
     
     indent = "    " * depth
     
-    # Safe access to attributes
-    attrs = getattr(category, 'attributes', [])
+    # Safe access to attributes with explicit checks
+    attrs = []
+    if hasattr(category, 'attributes') and category.attributes is not None:
+        attrs = category.attributes
     attrs_count = len(attrs) if attrs else 0
     
+    # Safe string conversion for all values
+    try:
+        cat_name = str(category.name) if category.name else "Unnamed"
+        cat_level = int(category.level) if hasattr(category, 'level') else 0
+        expander_title = f"{indent}📁 **{cat_name}** (Level {cat_level}) - {attrs_count} attributes"
+    except Exception as e:
+        # Ultimate fallback
+        expander_title = f"{indent}📁 Category - {attrs_count} attributes"
+    
     # Category header
-    with st.expander(
-        f"{indent}📁 **{category.name}** (Level {category.level}) - {attrs_count} attributes",
-        expanded=(depth < 2)  # Auto-expand first 2 levels
-    ):
+    with st.expander(expander_title, expanded=(depth < 2)):
         # Description
-        if category.description:
-            st.caption(category.description)
+        desc = getattr(category, 'description', '')
+        if desc:
+            st.caption(str(desc))
         
         # Attributes
         if attrs:
             st.markdown("**Attributes:**")
-            for attr in sorted(attrs, key=lambda x: x.sort_order):
+            try:
+                sorted_attrs = sorted(attrs, key=lambda x: getattr(x, 'sort_order', 0))
+            except (AttributeError, TypeError):
+                sorted_attrs = attrs
+            
+            for attr in sorted_attrs:
                 st.markdown(f"• {render_attribute_line(attr)}")
         else:
             st.info("No attributes defined")
         
         # Metadata
         with st.expander("🔍 Metadata", expanded=False):
-            st.text(f"Category ID: {category.id}")
-            st.text(f"Sort Order: {category.sort_order}")
-            if category.path and str(category.path).strip():
-                st.text(f"Path: {category.path}")
+            cat_id = getattr(category, 'id', 'N/A')
+            cat_sort = getattr(category, 'sort_order', 'N/A')
+            cat_path = getattr(category, 'path', '')
+            
+            st.text(f"Category ID: {cat_id}")
+            st.text(f"Sort Order: {cat_sort}")
+            if cat_path and str(cat_path).strip():
+                st.text(f"Path: {cat_path}")
         
         # Children categories
-        children = getattr(category, 'children', [])
+        children = []
+        if hasattr(category, 'children') and category.children is not None:
+            children = category.children
+        
         if children:
             st.markdown(f"**Subcategories ({len(children)}):**")
             # Safe sort with fallback
@@ -385,8 +413,20 @@ def render_structure_viewer(supabase_client, user_id: str):
                 st.info("No categories in this area")
                 continue
             
-            for root_cat in sorted(root_categories, key=lambda x: x.sort_order):
-                render_category_tree(root_cat)
+            # Safe sort with try/except
+            try:
+                sorted_roots = sorted(root_categories, key=lambda x: getattr(x, 'sort_order', 0))
+            except (AttributeError, TypeError):
+                sorted_roots = root_categories
+            
+            for root_cat in sorted_roots:
+                # Extra safety check
+                if root_cat and hasattr(root_cat, 'name'):
+                    try:
+                        render_category_tree(root_cat)
+                    except Exception as e:
+                        st.error(f"Error rendering category: {str(e)}")
+                        continue
     
     # ============================================
     # STATISTICS
