@@ -1,6 +1,10 @@
 """
 Structure Viewer Module
 Displays hierarchical Area → Category → Attribute structure
+
+VERSION: 3.0
+LAST UPDATED: 2025-11-11 12:00 UTC
+CHANGES: Ultra-defensive coding + error reporting + explicit list initialization
 """
 
 import streamlit as st
