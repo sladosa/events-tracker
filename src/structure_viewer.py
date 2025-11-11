@@ -223,11 +223,19 @@ def render_attribute_line(attr: AttributeNode):
 
 def render_category_tree(category: CategoryNode, depth: int = 0):
     """Recursively render category with children and attributes"""
+    # Safety check
+    if not category or not hasattr(category, 'name'):
+        return
+    
     indent = "    " * depth
+    
+    # Safe access to attributes
+    attrs = getattr(category, 'attributes', [])
+    attrs_count = len(attrs) if attrs else 0
     
     # Category header
     with st.expander(
-        f"{indent}📁 **{category.name}** (Level {category.level}) - {len(category.attributes)} attributes",
+        f"{indent}📁 **{category.name}** (Level {category.level}) - {attrs_count} attributes",
         expanded=(depth < 2)  # Auto-expand first 2 levels
     ):
         # Description
@@ -235,9 +243,9 @@ def render_category_tree(category: CategoryNode, depth: int = 0):
             st.caption(category.description)
         
         # Attributes
-        if category.attributes:
+        if attrs:
             st.markdown("**Attributes:**")
-            for attr in sorted(category.attributes, key=lambda x: x.sort_order):
+            for attr in sorted(attrs, key=lambda x: x.sort_order):
                 st.markdown(f"• {render_attribute_line(attr)}")
         else:
             st.info("No attributes defined")
@@ -250,9 +258,16 @@ def render_category_tree(category: CategoryNode, depth: int = 0):
                 st.text(f"Path: {category.path}")
         
         # Children categories
-        if category.children:
-            st.markdown(f"**Subcategories ({len(category.children)}):**")
-            for child in sorted(category.children, key=lambda x: x.sort_order):
+        children = getattr(category, 'children', [])
+        if children:
+            st.markdown(f"**Subcategories ({len(children)}):**")
+            # Safe sort with fallback
+            try:
+                sorted_children = sorted(children, key=lambda x: getattr(x, 'sort_order', 0))
+            except (AttributeError, TypeError):
+                sorted_children = children
+            
+            for child in sorted_children:
                 render_category_tree(child, depth + 1)
 
 
@@ -352,14 +367,17 @@ def render_structure_viewer(supabase_client, user_id: str):
             
             # Display flat list
             for cat in sorted(filtered_cats, key=lambda x: x.sort_order):
+                attrs = getattr(cat, 'attributes', [])
+                attrs_count = len(attrs) if attrs else 0
                 parent_text = f" (parent: {cat.parent_name})" if cat.parent_name else ""
-                with st.expander(f"📁 {cat.name}{parent_text} - {len(cat.attributes)} attributes"):
+                
+                with st.expander(f"📁 {cat.name}{parent_text} - {attrs_count} attributes"):
                     if cat.description:
                         st.caption(cat.description)
                     
-                    if cat.attributes:
+                    if attrs:
                         st.markdown("**Attributes:**")
-                        for attr in sorted(cat.attributes, key=lambda x: x.sort_order):
+                        for attr in sorted(attrs, key=lambda x: x.sort_order):
                             st.markdown(f"• {render_attribute_line(attr)}")
         else:
             # Display hierarchical tree
@@ -396,7 +414,8 @@ def render_structure_viewer(supabase_client, user_id: str):
     with st.expander("📊 Breakdown by Area"):
         for area in sorted(viewer.areas.values(), key=lambda x: x.sort_order):
             area_cats = [cat for cat in viewer.categories.values() if cat.area_id == area.id]
-            area_attrs = sum(len(cat.attributes) for cat in area_cats)
+            # Safe sum with fallback for categories without attributes list
+            area_attrs = sum(len(getattr(cat, 'attributes', [])) for cat in area_cats)
             
             st.markdown(f"**{area.icon} {area.name}**")
             st.text(f"  Categories: {len(area_cats)} | Attributes: {area_attrs}")
