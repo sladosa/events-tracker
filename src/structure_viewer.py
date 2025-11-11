@@ -1,15 +1,17 @@
 """
-Structure Viewer Module - FIXED VERSION
-========================================
+Structure Viewer Module - COMPLETE FIX
+=======================================
 Displays hierarchical Area → Category → Attribute structure
-WITHOUT nested expanders (which Streamlit doesn't allow)
+WITHOUT nested expanders + ALL database fields included
 
-FIX: Uses indentation and containers instead of nested expanders
+FIXES:
+1. No nested expanders (uses indentation)
+2. All database fields in dataclasses (user_id, template_id, etc.)
 """
 
 import streamlit as st
 from typing import Optional, List, Dict, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 
@@ -18,41 +20,51 @@ class Area:
     """Represents an Area in the structure"""
     id: str
     name: str
-    icon: Optional[str]
-    color: Optional[str]
-    description: Optional[str]
     sort_order: int
+    user_id: Optional[str] = None
+    template_id: Optional[str] = None
+    icon: Optional[str] = None
+    color: Optional[str] = None
+    description: Optional[str] = None
+    slug: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 @dataclass
 class Category:
     """Represents a Category in the structure"""
     id: str
-    area_id: str
-    parent_category_id: Optional[str]
     name: str
-    description: Optional[str]
     level: int
     sort_order: int
+    area_id: Optional[str] = None
+    parent_category_id: Optional[str] = None
+    user_id: Optional[str] = None
+    description: Optional[str] = None
+    slug: Optional[str] = None
     path: Optional[str] = None
-    children: List['Category'] = None
-    
-    def __post_init__(self):
-        if self.children is None:
-            self.children = []
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    children: List['Category'] = field(default_factory=list)
 
 
 @dataclass
 class Attribute:
     """Represents an Attribute definition"""
     id: str
-    category_id: str
     name: str
     data_type: str
-    unit: Optional[str]
-    is_required: bool
-    default_value: Optional[str]
     sort_order: int
+    category_id: Optional[str] = None
+    user_id: Optional[str] = None
+    unit: Optional[str] = None
+    is_required: bool = False
+    default_value: Optional[str] = None
+    slug: Optional[str] = None
+    validation_rules: Optional[Dict] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 def fetch_structure_data(client, user_id: str) -> tuple:
@@ -101,8 +113,25 @@ def build_category_tree(categories_data: List[Dict]) -> Dict[str, List[Category]
     Returns:
         Dict[area_id, List[Category]]: Root categories for each area
     """
-    # Create Category objects
-    categories = {cat['id']: Category(**cat) for cat in categories_data}
+    # Create Category objects - filter out extra fields
+    categories = {}
+    for cat_data in categories_data:
+        # Only pass fields that Category dataclass expects
+        filtered_data = {
+            'id': cat_data['id'],
+            'name': cat_data['name'],
+            'level': cat_data['level'],
+            'sort_order': cat_data['sort_order'],
+            'area_id': cat_data.get('area_id'),
+            'parent_category_id': cat_data.get('parent_category_id'),
+            'user_id': cat_data.get('user_id'),
+            'description': cat_data.get('description'),
+            'slug': cat_data.get('slug'),
+            'path': cat_data.get('path'),
+            'created_at': cat_data.get('created_at'),
+            'updated_at': cat_data.get('updated_at'),
+        }
+        categories[cat_data['id']] = Category(**filtered_data)
     
     # Build parent-child relationships
     for cat in categories.values():
@@ -125,17 +154,26 @@ def render_attribute_line(attr: Attribute) -> str:
     """Formats a single attribute for display"""
     parts = [f"**{attr.name}**"]
     
-    if attr.data_type:
-        parts.append(f"_{attr.data_type}_")
+    # Data type with emoji
+    type_emoji = {
+        'number': '🔢',
+        'text': '📝',
+        'datetime': '📅',
+        'boolean': '✓',
+        'link': '🔗',
+        'image': '🖼️'
+    }
+    emoji = type_emoji.get(attr.data_type, '📋')
+    parts.append(f"{emoji} _{attr.data_type}_")
     
     if attr.unit:
         parts.append(f"[{attr.unit}]")
     
     if attr.is_required:
-        parts.append("⚠️ Required")
+        parts.append("⚠️ _Required_")
     
     if attr.default_value:
-        parts.append(f"(default: {attr.default_value})")
+        parts.append(f"(default: _{attr.default_value}_)")
     
     return " ".join(parts)
 
@@ -157,7 +195,12 @@ def render_category_recursive(
     indent = "  " * indent_level  # 2 spaces per level
     
     # Category header with level indicator
-    level_emoji = "📁" if indent_level == 0 else ("📂" if indent_level == 1 else "📄")
+    if indent_level == 0:
+        level_emoji = "📁"
+    elif indent_level == 1:
+        level_emoji = "📂"
+    else:
+        level_emoji = "📄"
     
     # Build category title
     title = f"{indent}{level_emoji} **{category.name}**"
@@ -179,30 +222,38 @@ def render_category_recursive(
     else:
         st.markdown(f"{indent}  _No attributes defined_")
     
-    # Show metadata in a subtle way (not in expander to avoid nesting)
-    if indent_level == 0:  # Only for root categories
+    # Show metadata ONLY for root categories (to avoid nested expanders)
+    if indent_level == 0:
         with st.expander(f"🔍 Details for '{category.name}'", expanded=False):
-            st.text(f"Category ID: {category.id}")
-            st.text(f"Sort Order: {category.sort_order}")
-            if category.path:
-                st.text(f"Path: {category.path}")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.text(f"Category ID: {category.id}")
+                st.text(f"Sort Order: {category.sort_order}")
+            with col2:
+                if category.path:
+                    st.text(f"Path: {category.path}")
+                if category.slug:
+                    st.text(f"Slug: {category.slug}")
             
             # Show children count
             if category.children:
-                st.info(f"Has {len(category.children)} subcategories")
+                st.info(f"Has {len(category.children)} direct subcategories")
     
     # Recursively render children with increased indentation
     if category.children:
         st.markdown(f"{indent}  **Subcategories ({len(category.children)}):**")
         for child in sorted(category.children, key=lambda x: x.sort_order):
             render_category_recursive(child, attributes_map, indent_level + 1)
-        st.markdown("---")  # Separator after subcategories
+        
+        # Separator only after top-level categories
+        if indent_level == 0:
+            st.markdown("---")
 
 
 def render_structure_viewer(client, user_id: str):
     """
     Main function to render the structure viewer
-    FIXED: No nested expanders
+    FIXED: No nested expanders + all DB fields handled
     """
     st.title("📊 Structure Viewer")
     st.markdown("""
@@ -220,14 +271,46 @@ def render_structure_viewer(client, user_id: str):
         st.warning("No structure defined yet. Please upload a template first.")
         return
     
-    # Build structures
-    areas = [Area(**area_data) for area_data in areas_data]
+    # Build structures - filter fields to match dataclass
+    areas = []
+    for area_data in areas_data:
+        filtered_area = {
+            'id': area_data['id'],
+            'name': area_data['name'],
+            'sort_order': area_data['sort_order'],
+            'user_id': area_data.get('user_id'),
+            'template_id': area_data.get('template_id'),
+            'icon': area_data.get('icon'),
+            'color': area_data.get('color'),
+            'description': area_data.get('description'),
+            'slug': area_data.get('slug'),
+            'created_at': area_data.get('created_at'),
+            'updated_at': area_data.get('updated_at'),
+        }
+        areas.append(Area(**filtered_area))
+    
     roots_by_area = build_category_tree(categories_data)
     
     # Map attributes to categories
     attributes_map = {}
     for attr_data in attributes_data:
-        attr = Attribute(**attr_data)
+        filtered_attr = {
+            'id': attr_data['id'],
+            'name': attr_data['name'],
+            'data_type': attr_data['data_type'],
+            'sort_order': attr_data['sort_order'],
+            'category_id': attr_data.get('category_id'),
+            'user_id': attr_data.get('user_id'),
+            'unit': attr_data.get('unit'),
+            'is_required': attr_data.get('is_required', False),
+            'default_value': attr_data.get('default_value'),
+            'slug': attr_data.get('slug'),
+            'validation_rules': attr_data.get('validation_rules'),
+            'created_at': attr_data.get('created_at'),
+            'updated_at': attr_data.get('updated_at'),
+        }
+        attr = Attribute(**filtered_attr)
+        
         if attr.category_id not in attributes_map:
             attributes_map[attr.category_id] = []
         attributes_map[attr.category_id].append(attr)
@@ -279,8 +362,6 @@ def render_structure_viewer(client, user_id: str):
             # Apply level filter
             if selected_level != "All Levels":
                 level_num = int(selected_level.split()[-1])
-                # Check if this category or any of its descendants match
-                # For simplicity, we'll show the whole tree if root matches
                 if root_cat.level != level_num and not has_level_in_tree(root_cat, level_num):
                     continue
             
@@ -291,7 +372,7 @@ def render_structure_viewer(client, user_id: str):
             # Render the category tree starting from this root
             render_category_recursive(root_cat, attributes_map, indent_level=0)
             
-            st.markdown("")  # Add spacing
+            st.markdown("")  # Add spacing between root categories
     
     # ============================================
     # STATISTICS
@@ -321,8 +402,10 @@ def render_structure_viewer(client, user_id: str):
             level = cat['level']
             level_counts[level] = level_counts.get(level, 0) + 1
         
-        for level in sorted(level_counts.keys()):
-            st.write(f"Level {level}: {level_counts[level]} categories")
+        level_dist_cols = st.columns(min(len(level_counts), 5))
+        for idx, (level, count) in enumerate(sorted(level_counts.items())):
+            with level_dist_cols[idx % 5]:
+                st.metric(f"Level {level}", count)
 
 
 def has_level_in_tree(category: Category, target_level: int) -> bool:
