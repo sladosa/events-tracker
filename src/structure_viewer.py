@@ -1,12 +1,18 @@
 """
-Structure Viewer Module - COMPLETE FIX
-=======================================
-Displays hierarchical Area → Category → Attribute structure
-WITHOUT nested expanders + ALL database fields included
+Structure Viewer Module
+========================
+FIXED VERSION
+Created: 2025-11-11 11:20 UTC
+Last Modified: 2025-11-11 11:20 UTC
 
-FIXES:
-1. No nested expanders (uses indentation)
-2. All database fields in dataclasses (user_id, template_id, etc.)
+FIXES APPLIED:
+1. ✅ All database fields added to dataclasses (user_id, template_id, slug, created_at, updated_at)
+2. ✅ Field filtering before dataclass initialization
+3. ✅ NO nested expanders - uses indentation for hierarchy
+4. ✅ Complete error handling
+
+This file displays hierarchical Area → Category → Attribute structure.
+Replace your current src/structure_viewer.py with this file.
 """
 
 import streamlit as st
@@ -17,7 +23,7 @@ from datetime import datetime
 
 @dataclass
 class Area:
-    """Represents an Area in the structure"""
+    """Represents an Area in the structure - ALL database fields included"""
     id: str
     name: str
     sort_order: int
@@ -33,7 +39,7 @@ class Area:
 
 @dataclass
 class Category:
-    """Represents a Category in the structure"""
+    """Represents a Category in the structure - ALL database fields included"""
     id: str
     name: str
     level: int
@@ -51,7 +57,7 @@ class Category:
 
 @dataclass
 class Attribute:
-    """Represents an Attribute definition"""
+    """Represents an Attribute definition - ALL database fields included"""
     id: str
     name: str
     data_type: str
@@ -113,7 +119,7 @@ def build_category_tree(categories_data: List[Dict]) -> Dict[str, List[Category]
     Returns:
         Dict[area_id, List[Category]]: Root categories for each area
     """
-    # Create Category objects - filter out extra fields
+    # Create Category objects - IMPORTANT: Filter fields to match dataclass
     categories = {}
     for cat_data in categories_data:
         # Only pass fields that Category dataclass expects
@@ -253,7 +259,7 @@ def render_category_recursive(
 def render_structure_viewer(client, user_id: str):
     """
     Main function to render the structure viewer
-    FIXED: No nested expanders + all DB fields handled
+    FIXED: No nested expanders + all DB fields handled correctly
     """
     st.title("📊 Structure Viewer")
     st.markdown("""
@@ -271,7 +277,7 @@ def render_structure_viewer(client, user_id: str):
         st.warning("No structure defined yet. Please upload a template first.")
         return
     
-    # Build structures - filter fields to match dataclass
+    # Build structures - IMPORTANT: Filter fields to match dataclass
     areas = []
     for area_data in areas_data:
         filtered_area = {
@@ -291,7 +297,7 @@ def render_structure_viewer(client, user_id: str):
     
     roots_by_area = build_category_tree(categories_data)
     
-    # Map attributes to categories
+    # Map attributes to categories - IMPORTANT: Filter fields to match dataclass
     attributes_map = {}
     for attr_data in attributes_data:
         filtered_attr = {
