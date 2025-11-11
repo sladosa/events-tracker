@@ -14,6 +14,9 @@ import io
 sys.path.append(str(Path(__file__).parent / 'src'))
 
 # FIXED: Use explicit src. prefix to avoid conflicts with system packages
+from dotenv import load_dotenv
+load_dotenv()
+
 from src.excel_validators import validate_template
 from src.excel_parser_new import ExcelTemplateParser, load_from_database
 from src.rename_detector import RenameDetector

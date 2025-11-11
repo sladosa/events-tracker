@@ -5,7 +5,7 @@ Displays hierarchical Area → Category → Attribute structure
 
 import streamlit as st
 from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections import defaultdict
 
 
@@ -34,14 +34,8 @@ class CategoryNode:
     sort_order: int
     description: str
     path: str
-    children: List['CategoryNode'] = None
-    attributes: List['AttributeNode'] = None
-    
-    def __post_init__(self):
-        if self.children is None:
-            self.children = []
-        if self.attributes is None:
-            self.attributes = []
+    children: List['CategoryNode'] = field(default_factory=list)
+    attributes: List['AttributeNode'] = field(default_factory=list)
 
 
 @dataclass
@@ -118,7 +112,7 @@ class StructureViewer:
                     level=row['level'],
                     sort_order=row['sort_order'],
                     description=row.get('description', ''),
-                    path=row.get('path', '')
+                    path=str(row.get('path', '')) if row.get('path') else ''
                 )
                 self.categories[cat.id] = cat
             
@@ -252,7 +246,7 @@ def render_category_tree(category: CategoryNode, depth: int = 0):
         with st.expander("🔍 Metadata", expanded=False):
             st.text(f"Category ID: {category.id}")
             st.text(f"Sort Order: {category.sort_order}")
-            if category.path:
+            if category.path and str(category.path).strip():
                 st.text(f"Path: {category.path}")
         
         # Children categories
