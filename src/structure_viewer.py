@@ -1,18 +1,21 @@
 """
-Structure Viewer Module
-========================
-FIXED VERSION
-Created: 2025-11-11 11:20 UTC
-Last Modified: 2025-11-11 11:20 UTC
+Structure Viewer Module - POPRAVLJENA VERZIJA
+==============================================
 
-FIXES APPLIED:
-1. ✅ All database fields added to dataclasses (user_id, template_id, slug, created_at, updated_at)
-2. ✅ Field filtering before dataclass initialization
-3. ✅ NO nested expanders - uses indentation for hierarchy
-4. ✅ Complete error handling
+Datum popravka: 2025-11-11 13:30 CET
 
-This file displays hierarchical Area → Category → Attribute structure.
-Replace your current src/structure_viewer.py with this file.
+GLAVNI POPRAVCI:
+1. ✅ Dodani SVI nedostajući fieldovi u dataclass definicije (user_id, template_id, slug, timestamps)
+2. ✅ Eliminiran problem nested expanders - koristi se samo indentacija i markdown
+3. ✅ Dodano filtriranje podataka prije inicijalizacije dataclass objekata
+4. ✅ Poboljšano error handling sa fallback vrijednostima
+5. ✅ Dodane helper funkcije za search i level filtering
+
+BUGOVI RIJEŠENI:
+- TypeError: Area.__init__() got an unexpected keyword argument 'user_id' 
+- StreamlitAPIException: Expanders may not be nested inside other expanders
+
+Zamijenite sadržaj src/structure_viewer.py sa ovim kodom.
 """
 
 import streamlit as st
@@ -20,13 +23,17 @@ from typing import Optional, List, Dict, Any
 from dataclasses import dataclass, field
 from datetime import datetime
 
+# ============================================
+# DATACLASS DEFINITIONS - SVA POLJA UKLJUČENA
+# ============================================
 
 @dataclass
 class Area:
-    """Represents an Area in the structure - ALL database fields included"""
+    """Represents an Area - ALL database fields included"""
     id: str
     name: str
     sort_order: int
+    # Dodatna polja iz baze (prije su nedostajala!)
     user_id: Optional[str] = None
     template_id: Optional[str] = None
     icon: Optional[str] = None
@@ -39,13 +46,14 @@ class Area:
 
 @dataclass
 class Category:
-    """Represents a Category in the structure - ALL database fields included"""
+    """Represents a Category - ALL database fields included"""
     id: str
     name: str
     level: int
     sort_order: int
     area_id: Optional[str] = None
     parent_category_id: Optional[str] = None
+    # Dodatna polja iz baze (prije su nedostajala!)
     user_id: Optional[str] = None
     description: Optional[str] = None
     slug: Optional[str] = None
@@ -63,6 +71,7 @@ class Attribute:
     data_type: str
     sort_order: int
     category_id: Optional[str] = None
+    # Dodatna polja iz baze (prije su nedostajala!)
     user_id: Optional[str] = None
     unit: Optional[str] = None
     is_required: bool = False
@@ -73,12 +82,16 @@ class Attribute:
     updated_at: Optional[str] = None
 
 
+# ============================================
+# DATA FETCHING
+# ============================================
+
 def fetch_structure_data(client, user_id: str) -> tuple:
     """
     Fetches all structure data from Supabase
     
     Returns:
-        tuple: (areas, categories, attributes)
+        tuple: (areas, categories, attributes) - raw data from database
     """
     try:
         # Fetch areas
@@ -107,10 +120,15 @@ def fetch_structure_data(client, user_id: str) -> tuple:
             categories_response.data,
             attributes_response.data
         )
+    
     except Exception as e:
-        st.error(f"Error fetching structure: {str(e)}")
+        st.error(f"❌ Error fetching structure: {str(e)}")
         return [], [], []
 
+
+# ============================================
+# TREE BUILDING
+# ============================================
 
 def build_category_tree(categories_data: List[Dict]) -> Dict[str, List[Category]]:
     """
@@ -119,25 +137,29 @@ def build_category_tree(categories_data: List[Dict]) -> Dict[str, List[Category]
     Returns:
         Dict[area_id, List[Category]]: Root categories for each area
     """
-    # Create Category objects - IMPORTANT: Filter fields to match dataclass
+    # Create Category objects - IMPORTANT: Only pass fields that exist in dataclass
     categories = {}
     for cat_data in categories_data:
-        # Only pass fields that Category dataclass expects
-        filtered_data = {
-            'id': cat_data['id'],
-            'name': cat_data['name'],
-            'level': cat_data['level'],
-            'sort_order': cat_data['sort_order'],
-            'area_id': cat_data.get('area_id'),
-            'parent_category_id': cat_data.get('parent_category_id'),
-            'user_id': cat_data.get('user_id'),
-            'description': cat_data.get('description'),
-            'slug': cat_data.get('slug'),
-            'path': cat_data.get('path'),
-            'created_at': cat_data.get('created_at'),
-            'updated_at': cat_data.get('updated_at'),
-        }
-        categories[cat_data['id']] = Category(**filtered_data)
+        try:
+            # Eksplicitno mapiranje svih polja
+            filtered_data = {
+                'id': cat_data['id'],
+                'name': cat_data['name'],
+                'level': cat_data['level'],
+                'sort_order': cat_data['sort_order'],
+                'area_id': cat_data.get('area_id'),
+                'parent_category_id': cat_data.get('parent_category_id'),
+                'user_id': cat_data.get('user_id'),
+                'description': cat_data.get('description'),
+                'slug': cat_data.get('slug'),
+                'path': cat_data.get('path'),
+                'created_at': cat_data.get('created_at'),
+                'updated_at': cat_data.get('updated_at'),
+            }
+            categories[cat_data['id']] = Category(**filtered_data)
+        except Exception as e:
+            st.warning(f"⚠️ Skipping category {cat_data.get('name', 'Unknown')}: {str(e)}")
+            continue
     
     # Build parent-child relationships
     for cat in categories.values():
@@ -155,6 +177,10 @@ def build_category_tree(categories_data: List[Dict]) -> Dict[str, List[Category]
     
     return roots_by_area
 
+
+# ============================================
+# RENDERING HELPERS
+# ============================================
 
 def render_attribute_line(attr: Attribute) -> str:
     """Formats a single attribute for display"""
@@ -185,13 +211,13 @@ def render_attribute_line(attr: Attribute) -> str:
 
 
 def render_category_recursive(
-    category: Category, 
+    category: Category,
     attributes_map: Dict[str, List[Attribute]],
     indent_level: int = 0
 ):
     """
     Renders a category and its children using indentation
-    NO nested expanders - uses containers and markdown instead
+    NO nested expanders - uses markdown and indentation instead
     
     Args:
         category: Category to render
@@ -228,7 +254,8 @@ def render_category_recursive(
     else:
         st.markdown(f"{indent}  _No attributes defined_")
     
-    # Show metadata ONLY for root categories (to avoid nested expanders)
+    # Show metadata ONLY for root categories (indent_level == 0)
+    # This avoids nested expanders problem!
     if indent_level == 0:
         with st.expander(f"🔍 Details for '{category.name}'", expanded=False):
             col1, col2 = st.columns(2)
@@ -250,22 +277,72 @@ def render_category_recursive(
         st.markdown(f"{indent}  **Subcategories ({len(category.children)}):**")
         for child in sorted(category.children, key=lambda x: x.sort_order):
             render_category_recursive(child, attributes_map, indent_level + 1)
-        
-        # Separator only after top-level categories
-        if indent_level == 0:
-            st.markdown("---")
+    
+    # Separator only after top-level categories
+    if indent_level == 0:
+        st.markdown("---")
 
+
+# ============================================
+# FILTER HELPERS
+# ============================================
+
+def has_level_in_tree(category: Category, target_level: int) -> bool:
+    """Check if category or any descendant has the target level"""
+    if category.level == target_level:
+        return True
+    for child in category.children:
+        if has_level_in_tree(child, target_level):
+            return True
+    return False
+
+
+def matches_search(
+    category: Category,
+    search_term: str,
+    attributes_map: Dict[str, List[Attribute]]
+) -> bool:
+    """Check if category or its attributes match search term"""
+    search_lower = search_term.lower()
+    
+    # Check category name and description
+    if search_lower in category.name.lower():
+        return True
+    if category.description and search_lower in category.description.lower():
+        return True
+    
+    # Check attributes
+    attrs = attributes_map.get(category.id, [])
+    for attr in attrs:
+        if search_lower in attr.name.lower():
+            return True
+    
+    # Check children
+    for child in category.children:
+        if matches_search(child, search_term, attributes_map):
+            return True
+    
+    return False
+
+
+# ============================================
+# MAIN RENDER FUNCTION
+# ============================================
 
 def render_structure_viewer(client, user_id: str):
     """
     Main function to render the structure viewer
-    FIXED: No nested expanders + all DB fields handled correctly
+    
+    FIXED:
+    - No nested expanders (uses indentation instead)
+    - All DB fields handled correctly in dataclasses
+    - Proper field filtering before dataclass initialization
     """
     st.title("📊 Structure Viewer")
     st.markdown("""
     Browse your hierarchical structure:
     - **Areas** - Top-level organization
-    - **Categories** - Hierarchical event types
+    - **Categories** - Hierarchical event types  
     - **Attributes** - Data fields for each category
     """)
     
@@ -274,52 +351,59 @@ def render_structure_viewer(client, user_id: str):
         areas_data, categories_data, attributes_data = fetch_structure_data(client, user_id)
     
     if not areas_data:
-        st.warning("No structure defined yet. Please upload a template first.")
+        st.warning("⚠️ No structure defined yet. Please upload a template first.")
         return
     
     # Build structures - IMPORTANT: Filter fields to match dataclass
     areas = []
     for area_data in areas_data:
-        filtered_area = {
-            'id': area_data['id'],
-            'name': area_data['name'],
-            'sort_order': area_data['sort_order'],
-            'user_id': area_data.get('user_id'),
-            'template_id': area_data.get('template_id'),
-            'icon': area_data.get('icon'),
-            'color': area_data.get('color'),
-            'description': area_data.get('description'),
-            'slug': area_data.get('slug'),
-            'created_at': area_data.get('created_at'),
-            'updated_at': area_data.get('updated_at'),
-        }
-        areas.append(Area(**filtered_area))
+        try:
+            filtered_area = {
+                'id': area_data['id'],
+                'name': area_data['name'],
+                'sort_order': area_data['sort_order'],
+                'user_id': area_data.get('user_id'),
+                'template_id': area_data.get('template_id'),
+                'icon': area_data.get('icon'),
+                'color': area_data.get('color'),
+                'description': area_data.get('description'),
+                'slug': area_data.get('slug'),
+                'created_at': area_data.get('created_at'),
+                'updated_at': area_data.get('updated_at'),
+            }
+            areas.append(Area(**filtered_area))
+        except Exception as e:
+            st.warning(f"⚠️ Skipping area {area_data.get('name', 'Unknown')}: {str(e)}")
+            continue
     
     roots_by_area = build_category_tree(categories_data)
     
-    # Map attributes to categories - IMPORTANT: Filter fields to match dataclass
+    # Map attributes to categories - IMPORTANT: Filter fields
     attributes_map = {}
     for attr_data in attributes_data:
-        filtered_attr = {
-            'id': attr_data['id'],
-            'name': attr_data['name'],
-            'data_type': attr_data['data_type'],
-            'sort_order': attr_data['sort_order'],
-            'category_id': attr_data.get('category_id'),
-            'user_id': attr_data.get('user_id'),
-            'unit': attr_data.get('unit'),
-            'is_required': attr_data.get('is_required', False),
-            'default_value': attr_data.get('default_value'),
-            'slug': attr_data.get('slug'),
-            'validation_rules': attr_data.get('validation_rules'),
-            'created_at': attr_data.get('created_at'),
-            'updated_at': attr_data.get('updated_at'),
-        }
-        attr = Attribute(**filtered_attr)
-        
-        if attr.category_id not in attributes_map:
-            attributes_map[attr.category_id] = []
-        attributes_map[attr.category_id].append(attr)
+        try:
+            filtered_attr = {
+                'id': attr_data['id'],
+                'name': attr_data['name'],
+                'data_type': attr_data['data_type'],
+                'sort_order': attr_data['sort_order'],
+                'category_id': attr_data.get('category_id'),
+                'user_id': attr_data.get('user_id'),
+                'unit': attr_data.get('unit'),
+                'is_required': attr_data.get('is_required', False),
+                'default_value': attr_data.get('default_value'),
+                'slug': attr_data.get('slug'),
+                'validation_rules': attr_data.get('validation_rules'),
+                'created_at': attr_data.get('created_at'),
+                'updated_at': attr_data.get('updated_at'),
+            }
+            attr = Attribute(**filtered_attr)
+            if attr.category_id not in attributes_map:
+                attributes_map[attr.category_id] = []
+            attributes_map[attr.category_id].append(attr)
+        except Exception as e:
+            st.warning(f"⚠️ Skipping attribute {attr_data.get('name', 'Unknown')}: {str(e)}")
+            continue
     
     # ============================================
     # FILTERS
@@ -351,14 +435,12 @@ def render_structure_viewer(client, user_id: str):
         # Area header
         icon = area.icon or "📦"
         color = area.color or "#3498db"
-        
         st.markdown(f"## {icon} {area.name}")
         if area.description:
             st.caption(area.description)
         
         # Get root categories for this area
         root_categories = roots_by_area.get(area.id, [])
-        
         if not root_categories:
             st.info(f"No categories defined for {area.name}")
             continue
@@ -377,12 +459,13 @@ def render_structure_viewer(client, user_id: str):
             
             # Render the category tree starting from this root
             render_category_recursive(root_cat, attributes_map, indent_level=0)
-            
-            st.markdown("")  # Add spacing between root categories
+        
+        st.markdown("")  # Add spacing between areas
     
     # ============================================
     # STATISTICS
     # ============================================
+    st.markdown("---")
     st.markdown("### 📊 Statistics")
     
     col1, col2, col3, col4 = st.columns(4)
@@ -402,7 +485,7 @@ def render_structure_viewer(client, user_id: str):
     
     # Level distribution
     if categories_data:
-        st.markdown("#### Categories by Level")
+        st.markdown("#### 📈 Categories by Level")
         level_counts = {}
         for cat in categories_data:
             level = cat['level']
@@ -414,46 +497,10 @@ def render_structure_viewer(client, user_id: str):
                 st.metric(f"Level {level}", count)
 
 
-def has_level_in_tree(category: Category, target_level: int) -> bool:
-    """Check if category or any descendant has the target level"""
-    if category.level == target_level:
-        return True
-    
-    for child in category.children:
-        if has_level_in_tree(child, target_level):
-            return True
-    
-    return False
-
-
-def matches_search(
-    category: Category, 
-    search_term: str,
-    attributes_map: Dict[str, List[Attribute]]
-) -> bool:
-    """Check if category or its attributes match search term"""
-    search_lower = search_term.lower()
-    
-    # Check category name and description
-    if search_lower in category.name.lower():
-        return True
-    
-    if category.description and search_lower in category.description.lower():
-        return True
-    
-    # Check attributes
-    attrs = attributes_map.get(category.id, [])
-    for attr in attrs:
-        if search_lower in attr.name.lower():
-            return True
-    
-    # Check children
-    for child in category.children:
-        if matches_search(child, search_term, attributes_map):
-            return True
-    
-    return False
-
+# ============================================
+# MODULE TEST
+# ============================================
 
 if __name__ == "__main__":
-    st.write("This module should be imported, not run directly.")
+    st.write("⚠️ This module should be imported, not run directly.")
+    st.write("Use: `from src.structure_viewer import render_structure_viewer`")
