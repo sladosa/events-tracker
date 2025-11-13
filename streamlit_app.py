@@ -1,16 +1,11 @@
 """
 Events Tracker - Main Application
 ==================================
-Created: 2025-11-13 09:35 UTC
-Last Modified: 2025-11-13 09:35 UTC
+Created: 2025-11-13 10:20 UTC
+Last Modified: 2025-11-13 10:20 UTC
 Python: 3.11
 
-Streamlit application for tracking hierarchical events with:
-- Template-based structure definition
-- Structure viewer
-- Single event entry
-- Bulk import from Excel/CSV
-- User authentication
+Fully integrated with AuthManager class from src/auth.py
 """
 
 import streamlit as st
@@ -18,7 +13,7 @@ import os
 from dotenv import load_dotenv
 
 # Import local modules
-from src import auth
+from src.auth import AuthManager
 from src import supabase_client
 from src import structure_viewer
 from src import event_entry
@@ -36,7 +31,7 @@ st.set_page_config(
 # Load environment variables
 load_dotenv()
 
-# Initialize Supabase
+
 @st.cache_resource
 def init_supabase():
     """Initialize Supabase client"""
@@ -56,13 +51,17 @@ def main():
     # Initialize Supabase
     supabase = init_supabase()
     
-    # Authentication
-    if not auth.check_authentication():
-        auth.render_auth_page(supabase.client)
+    # Initialize AuthManager
+    auth_manager = AuthManager(supabase.client)
+    
+    # Check authentication
+    if not auth_manager.is_authenticated():
+        auth_manager.show_login_page()
         return
     
-    # Get user ID
-    user_id = auth.get_user_id()
+    # Get user info
+    user_id = auth_manager.get_user_id()
+    user_email = auth_manager.get_user_email()
     
     # Sidebar navigation
     st.sidebar.title("🗂️ Events Tracker")
@@ -84,14 +83,12 @@ def main():
     
     st.sidebar.markdown("---")
     
-    # User info
+    # User info and logout
     st.sidebar.markdown("### 👤 User")
-    user_email = st.session_state.get('user_email', 'Unknown')
-    st.sidebar.text(user_email)
+    st.sidebar.text(f"📧 {user_email}")
     
     if st.sidebar.button("🚪 Logout", use_container_width=True):
-        auth.logout()
-        st.rerun()
+        auth_manager.logout()
     
     # Connection status
     with st.sidebar.expander("🔌 Connection Status", expanded=False):
@@ -101,7 +98,7 @@ def main():
         else:
             st.error(f"❌ {message}")
     
-    # Main content area
+    # Main content area styling
     st.markdown(
         """
         <style>
@@ -138,8 +135,8 @@ def render_download_page(supabase, user_id: str):
     st.title("📥 Download Structure")
     st.markdown("Export your current structure to Excel")
     
-    # Implementation would go here - keeping existing logic
-    st.info("Download functionality - to be implemented")
+    st.info("📝 Download functionality - to be integrated with existing logic")
+    st.caption("This will use your existing download template code")
 
 
 def render_upload_page(supabase, user_id: str):
@@ -147,8 +144,8 @@ def render_upload_page(supabase, user_id: str):
     st.title("📤 Upload Template")
     st.markdown("Define or update your structure using Excel template")
     
-    # Implementation would go here - keeping existing logic
-    st.info("Upload functionality - to be implemented")
+    st.info("📝 Upload functionality - to be integrated with existing logic")
+    st.caption("This will use your existing upload template code")
 
 
 def render_help_page():
@@ -201,7 +198,7 @@ def render_help_page():
     
     # Version info
     st.markdown("---")
-    st.caption("Version: 2025-11-13 | Python: 3.11 | Streamlit: 1.28.0")
+    st.caption("Version: 2025-11-13 10:20 UTC | Python: 3.11 | Streamlit: 1.28.0")
 
 
 if __name__ == "__main__":
