@@ -1,5 +1,5 @@
 """
-Events Tracker - Main Application
+Events Tracker - Main Application - SSL checking
 ==================================
 Created: 2025-11-13 10:20 UTC
 Last Modified: 2025-11-13 10:20 UTC

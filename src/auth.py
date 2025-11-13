@@ -1,6 +1,12 @@
 """
 Authentication Module
+=====================
+Created: 2025-11-13 10:20 UTC
+Last Modified: 2025-11-13 10:20 UTC
+Python: 3.11
+
 Handles user signup, login, logout with Supabase Auth
+Uses AuthManager class for clean authentication flow
 """
 import streamlit as st
 from supabase import Client
