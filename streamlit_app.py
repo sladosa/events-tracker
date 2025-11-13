@@ -14,11 +14,15 @@ import io
 sys.path.append(str(Path(__file__).parent / 'src'))
 
 # FIXED: Use explicit src. prefix to avoid conflicts with system packages
+from dotenv import load_dotenv
+load_dotenv()
+
 from src.excel_validators import validate_template
 from src.excel_parser_new import ExcelTemplateParser, load_from_database
 from src.rename_detector import RenameDetector
 from src.supabase_client import SupabaseManager
 from src.auth import AuthManager
+from src.structure_viewer import render_structure_viewer
 
 # Page config
 st.set_page_config(
@@ -89,7 +93,7 @@ def main():
     st.sidebar.title("Navigation")
     page = st.sidebar.radio(
         "Select Action",
-        ["📤 Upload Template", "📥 Download Structure", "ℹ️ Help"]
+        ["📊 View Structure", "📤 Upload Template", "📥 Download Structure", "ℹ️ Help"]
     )
     
     # Show user info and logout button
@@ -108,7 +112,9 @@ def main():
     # Page routing
     user_id = auth.get_user_id()
     
-    if page == "📤 Upload Template":
+    if page == "📊 View Structure":
+        render_structure_viewer(supabase.client, user_id)
+    elif page == "📤 Upload Template":
         upload_template_page(supabase, user_id)
     elif page == "📥 Download Structure":
         download_structure_page(supabase, user_id)
@@ -479,6 +485,100 @@ def download_structure_page(supabase: SupabaseManager, user_id: str):
                     df_areas.to_excel(writer, sheet_name='Areas', index=False)
                     df_categories.to_excel(writer, sheet_name='Categories', index=False)
                     df_attributes.to_excel(writer, sheet_name='Attributes', index=False)
+                    
+                    # ============================================
+                    # NEW: Hierarchical View Sheet
+                    # ============================================
+                    hierarchical_rows = []
+                    
+                    # Build hierarchical structure
+                    for area in areas:
+                        # Area row
+                        hierarchical_rows.append({
+                            'Type': 'Area',
+                            'Level': 0,
+                            'Area': area.name,
+                            'Category_Path': area.name,
+                            'Category': '',
+                            'Attributes': '',
+                            'Sort_Order': area.attributes.get('sort_order', 0),
+                            'ID': area.uuid,
+                            'Description': area.attributes.get('description', '')
+                        })
+                        
+                        # Get categories for this area
+                        area_categories = [c for c in categories if c.area_name == area.name]
+                        
+                        # Build category tree recursively
+                        def add_category_recursive(cat, indent_level):
+                            # Get attributes for this category
+                            cat_attrs = [a for a in attributes if a.category_name == cat.name]
+                            attr_names = ', '.join([a.name for a in sorted(cat_attrs, key=lambda x: x.attributes.get('sort_order', 0))])
+                            
+                            # Category path with indentation
+                            indent = '  ' * indent_level
+                            path_parts = [area.name]
+                            
+                            # Build full path
+                            current = cat
+                            path_to_root = [current.name]
+                            while current.parent_name:
+                                parent = next((c for c in categories if c.name == current.parent_name and c.area_name == area.name), None)
+                                if parent:
+                                    path_to_root.insert(0, parent.name)
+                                    current = parent
+                                else:
+                                    break
+                            
+                            category_path = area.name + ' > ' + ' > '.join(path_to_root)
+                            
+                            hierarchical_rows.append({
+                                'Type': 'Category',
+                                'Level': cat.level,
+                                'Area': area.name,
+                                'Category_Path': category_path,
+                                'Category': indent + cat.name,
+                                'Attributes': attr_names,
+                                'Sort_Order': cat.attributes.get('sort_order', 0),
+                                'ID': cat.uuid,
+                                'Description': cat.attributes.get('description', '')
+                            })
+                            
+                            # Add children
+                            children = [c for c in area_categories if c.parent_name == cat.name]
+                            for child in sorted(children, key=lambda x: x.attributes.get('sort_order', 0)):
+                                add_category_recursive(child, indent_level + 1)
+                        
+                        # Add root categories
+                        root_cats = [c for c in area_categories if not c.parent_name]
+                        for root_cat in sorted(root_cats, key=lambda x: x.attributes.get('sort_order', 0)):
+                            add_category_recursive(root_cat, 1)
+                    
+                    df_hierarchical = pd.DataFrame(hierarchical_rows)
+                    
+                    # Write hierarchical view
+                    df_hierarchical.to_excel(writer, sheet_name='Hierarchical_View', index=False)
+                    
+                    # Format the Hierarchical View sheet
+                    workbook = writer.book
+                    worksheet = writer.sheets['Hierarchical_View']
+                    
+                    # Set column widths
+                    worksheet.column_dimensions['A'].width = 12  # Type
+                    worksheet.column_dimensions['B'].width = 8   # Level
+                    worksheet.column_dimensions['C'].width = 15  # Area
+                    worksheet.column_dimensions['D'].width = 40  # Category_Path
+                    worksheet.column_dimensions['E'].width = 30  # Category (with indent)
+                    worksheet.column_dimensions['F'].width = 40  # Attributes
+                    worksheet.column_dimensions['G'].width = 12  # Sort_Order
+                    worksheet.column_dimensions['H'].width = 36  # ID
+                    worksheet.column_dimensions['I'].width = 30  # Description
+                    
+                    # Add autofilter
+                    worksheet.auto_filter.ref = worksheet.dimensions
+                    
+                    # Freeze top row
+                    worksheet.freeze_panes = 'A2'
                 
                 excel_bytes = output.getvalue()
                 
@@ -524,7 +624,46 @@ def help_page():
     
     st.header("ℹ️ Help & Documentation")
     
-    with st.expander("🚀 What's New - Name-Based Templates", expanded=True):
+    with st.expander("🆕 What's New", expanded=True):
+        st.markdown("""
+        ### 📊 Structure Viewer (NEW!)
+        
+        **Browse your hierarchical structure interactively:**
+        - 🌳 Expandable tree view of Areas → Categories → Attributes
+        - 🔍 Filter by Area, Level, or search by name
+        - 📈 Statistics and breakdowns
+        - 💡 Visual hierarchy with indentation
+        
+        **Perfect for:**
+        - Understanding your current structure
+        - Finding specific categories or attributes
+        - Seeing relationships between objects
+        - Planning changes before editing templates
+        
+        ### 📥 Hierarchical View Sheet in Downloads (NEW!)
+        
+        When you download your structure, you now get **4 sheets**:
+        1. **Areas** - Raw area data
+        2. **Categories** - Raw category data  
+        3. **Attributes** - Raw attribute data
+        4. **Hierarchical_View** - NEW! Visual tree with:
+           - Indented category names showing hierarchy
+           - Full category paths (Area > Parent > Category)
+           - Attributes listed for each category
+           - **Editable Sort_Order column**
+           - Autofilters for easy browsing
+        
+        **How to use Hierarchical_View for sorting:**
+        1. Download template
+        2. Open "Hierarchical_View" sheet
+        3. See your structure visually
+        4. Edit Sort_Order numbers as needed
+        5. Save and upload - sort will be updated!
+        
+        *Note: Other columns in Hierarchical_View are read-only references*
+        """)
+    
+    with st.expander("🚀 Name-Based Templates"):
         st.markdown("""
         ### No More UUID Management! 🎉
         

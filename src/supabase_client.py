@@ -383,4 +383,3 @@ Please execute the SQL using one of these methods:
 
         except Exception as e:
             return False, f"Failed to apply template: {str(e)}"
-
