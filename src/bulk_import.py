@@ -1,14 +1,15 @@
 """
-Bulk Import Module - IMPROVED ERROR REPORTING -
-==============================================
-Created: 2025-11-13 10:40 UTC
-Last Modified: 2025-11-13 10:40 UTC
+Bulk Import Module - FLEXIBLE SEPARATOR SUPPORT
+================================================
+Created: 2025-11-13 10:50 UTC
+Last Modified: 2025-11-13 10:50 UTC
 Python: 3.11
 
-CHANGES:
-- Better error messages showing exact mismatches
-- Prints available categories for debugging
-- Shows which attributes are missing
+FEATURES:
+- Supports both "→" and ">" as category separators
+- Better error messages with available categories
+- Multiple date format support
+- Detailed validation feedback
 """
 
 import streamlit as st
@@ -19,37 +20,46 @@ import json
 from io import BytesIO
 
 
-def get_structure_for_import(client, user_id: str) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+def normalize_category_path(path: str) -> str:
     """
-    Fetch complete structure needed for import
+    Normalize category path by converting all separators to →
     
-    Returns:
-        Tuple of (areas, categories, attributes)
+    Supports:
+    - "Health → Sleep"
+    - "Health > Sleep"
+    - "Health>Sleep" (no spaces)
+    - "Health->Sleep"
     """
+    if not path:
+        return ""
+    
+    # Replace various separators with standard arrow
+    path = path.replace(' > ', ' → ')
+    path = path.replace('>', ' → ')
+    path = path.replace(' -> ', ' → ')
+    path = path.replace('->', ' → ')
+    
+    # Clean up multiple arrows or spaces
+    import re
+    path = re.sub(r'\s*→\s*', ' → ', path)
+    path = re.sub(r'\s+', ' ', path)
+    
+    return path.strip()
+
+
+def get_structure_for_import(client, user_id: str) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+    """Fetch complete structure needed for import"""
     try:
-        # Get areas
-        areas_response = client.table('areas')\
-            .select('*')\
-            .eq('user_id', user_id)\
-            .execute()
+        areas_response = client.table('areas').select('*').eq('user_id', user_id).execute()
         areas = areas_response.data
         
-        # Get categories
-        categories_response = client.table('categories')\
-            .select('*')\
-            .eq('user_id', user_id)\
-            .execute()
+        categories_response = client.table('categories').select('*').eq('user_id', user_id).execute()
         categories = categories_response.data
         
-        # Get attributes
-        attributes_response = client.table('attribute_definitions')\
-            .select('*')\
-            .eq('user_id', user_id)\
-            .execute()
+        attributes_response = client.table('attribute_definitions').select('*').eq('user_id', user_id).execute()
         attributes = attributes_response.data
         
         return areas, categories, attributes
-    
     except Exception as e:
         st.error(f"Error fetching structure: {str(e)}")
         return [], [], []
@@ -58,40 +68,40 @@ def get_structure_for_import(client, user_id: str) -> Tuple[List[Dict], List[Dic
 def build_category_lookup(categories: List[Dict]) -> Dict[str, str]:
     """
     Build lookup from category path to category ID
-    
-    Returns:
-        Dict mapping full path (e.g., "Fitness → Running → Trail Run") to category_id
+    Supports BOTH → and > separators
     """
     cat_map = {cat['id']: cat for cat in categories}
     lookup = {}
     
-    def get_full_path(cat_id: str) -> str:
+    def get_full_path(cat_id: str, separator: str = ' → ') -> str:
         cat = cat_map.get(cat_id)
         if not cat:
             return ""
         
         if cat['parent_category_id'] and cat['parent_category_id'] in cat_map:
-            parent_path = get_full_path(cat['parent_category_id'])
-            return f"{parent_path} → {cat['name']}"
+            parent_path = get_full_path(cat['parent_category_id'], separator)
+            return f"{parent_path}{separator}{cat['name']}"
         else:
             return cat['name']
     
+    # Create lookups with BOTH separators
     for cat_id, cat in cat_map.items():
-        path = get_full_path(cat_id)
-        lookup[path] = cat_id
-        # Also add just the name for simple matching
+        # Standard arrow separator
+        path_arrow = get_full_path(cat_id, ' → ')
+        lookup[path_arrow] = cat_id
+        
+        # Greater-than separator (for compatibility)
+        path_gt = get_full_path(cat_id, ' > ')
+        lookup[path_gt] = cat_id
+        
+        # Just the name (for simple matching)
         lookup[cat['name']] = cat_id
     
     return lookup
 
 
-def build_attribute_map(attributes: List[Dict]) -> Dict[str, Dict]:
-    """
-    Build map of category_id -> list of attributes
-    
-    Returns:
-        Dict mapping category_id to list of attribute definitions
-    """
+def build_attribute_map(attributes: List[Dict]) -> Dict[str, List[Dict]]:
+    """Build map of category_id -> list of attributes"""
     attr_map = {}
     for attr in attributes:
         cat_id = attr['category_id']
@@ -103,12 +113,7 @@ def build_attribute_map(attributes: List[Dict]) -> Dict[str, Dict]:
 
 def validate_import_file(df: pd.DataFrame, category_lookup: Dict, 
                         attribute_map: Dict) -> Tuple[bool, List[str], List[Dict]]:
-    """
-    Validate import file structure and data - IMPROVED ERROR MESSAGES
-    
-    Returns:
-        Tuple of (is_valid: bool, errors: List[str], validated_rows: List[Dict])
-    """
+    """Validate import file with flexible category matching"""
     errors = []
     validated_rows = []
     
@@ -120,39 +125,61 @@ def validate_import_file(df: pd.DataFrame, category_lookup: Dict,
         errors.append(f"❌ Missing required columns: {', '.join(missing_cols)}")
         return False, errors, []
     
-    # DEBUGGING: Show available categories
-    st.info(f"🔍 Available categories in database: {len(category_lookup)}")
-    with st.expander("📋 See All Available Category Paths"):
-        for path in sorted(category_lookup.keys()):
+    # Show available categories
+    unique_categories = {}
+    for path, cat_id in category_lookup.items():
+        if cat_id not in unique_categories:
+            unique_categories[cat_id] = path
+    
+    st.info(f"🔍 Found {len(unique_categories)} categories in database")
+    with st.expander("📋 Available Category Paths (click to expand)"):
+        for path in sorted(unique_categories.values()):
             st.text(path)
     
     # Validate each row
     for idx, row in df.iterrows():
-        row_num = idx + 2  # +2 for Excel row (header is row 1)
+        row_num = idx + 2
         row_errors = []
         
         # Validate category
-        category_path = str(row['Category']).strip()
-        if pd.isna(row['Category']) or not category_path:
+        category_path_raw = str(row['Category']).strip()
+        if pd.isna(row['Category']) or not category_path_raw:
             row_errors.append(f"Row {row_num}: ❌ Missing category")
             errors.extend(row_errors)
             continue
         
-        if category_path not in category_lookup:
-            row_errors.append(f"Row {row_num}: ❌ Unknown category '{category_path}'")
-            
-            # HELPFUL: Find closest match
-            from difflib import get_close_matches
-            close_matches = get_close_matches(category_path, category_lookup.keys(), n=3, cutoff=0.6)
-            if close_matches:
-                row_errors.append(f"           💡 Did you mean: {', '.join(close_matches)}")
-            
-            errors.extend(row_errors)
-            continue
+        # Normalize the category path
+        category_path = normalize_category_path(category_path_raw)
         
-        category_id = category_lookup[category_path]
+        # Try to find match
+        category_id = None
         
-        # Validate date - TRY MULTIPLE FORMATS
+        # Try exact match with normalized path
+        if category_path in category_lookup:
+            category_id = category_lookup[category_path]
+        else:
+            # Try original path
+            if category_path_raw in category_lookup:
+                category_id = category_lookup[category_path_raw]
+            else:
+                # Try fuzzy matching
+                from difflib import get_close_matches
+                close_matches = get_close_matches(
+                    category_path, 
+                    list(unique_categories.values()), 
+                    n=3, 
+                    cutoff=0.6
+                )
+                
+                row_errors.append(f"Row {row_num}: ❌ Unknown category '{category_path_raw}'")
+                if close_matches:
+                    row_errors.append(f"           💡 Did you mean: {close_matches[0]}")
+                    row_errors.append(f"           (Use either → or > as separator)")
+                
+                errors.extend(row_errors)
+                continue
+        
+        # Validate date with multiple formats
         event_date = None
         date_formats = [
             '%Y-%m-%d',      # 2025-11-10
@@ -162,23 +189,24 @@ def validate_import_file(df: pd.DataFrame, category_lookup: Dict,
             '%Y/%m/%d',      # 2025/11/10
         ]
         
+        date_str = str(row['Date']).strip()
         for fmt in date_formats:
             try:
-                if isinstance(row['Date'], str):
-                    event_date = datetime.strptime(row['Date'].strip(), fmt).date()
-                    break
-                elif isinstance(row['Date'], datetime):
-                    event_date = row['Date'].date()
-                    break
-                elif isinstance(row['Date'], date):
-                    event_date = row['Date']
-                    break
+                event_date = datetime.strptime(date_str, fmt).date()
+                break
             except:
                 continue
         
+        # Try pandas datetime as fallback
         if not event_date:
-            row_errors.append(f"Row {row_num}: ❌ Invalid date format '{row['Date']}'")
-            row_errors.append(f"           💡 Supported formats: YYYY-MM-DD, DD.MM.YYYY, DD/MM/YYYY")
+            try:
+                event_date = pd.to_datetime(row['Date']).date()
+            except:
+                pass
+        
+        if not event_date:
+            row_errors.append(f"Row {row_num}: ❌ Invalid date '{date_str}'")
+            row_errors.append(f"           💡 Use: YYYY-MM-DD or DD.MM.YYYY")
             errors.extend(row_errors)
             continue
         
@@ -186,48 +214,53 @@ def validate_import_file(df: pd.DataFrame, category_lookup: Dict,
         attributes = attribute_map.get(category_id, [])
         attr_values = {}
         
-        # DEBUGGING: Show expected attributes
-        expected_attr_names = [attr['name'] for attr in attributes]
-        csv_attr_names = [col for col in df.columns if col not in ['Category', 'Date', 'Comment']]
+        # Show attribute comparison
+        expected_attrs = {attr['name']: attr for attr in attributes}
+        csv_columns = [col for col in df.columns if col not in ['Category', 'Date', 'Comment']]
         
-        missing_in_csv = set(expected_attr_names) - set(csv_attr_names)
-        extra_in_csv = set(csv_attr_names) - set(expected_attr_names)
+        missing_attrs = set(expected_attrs.keys()) - set(csv_columns)
+        extra_attrs = set(csv_columns) - set(expected_attrs.keys())
         
-        if missing_in_csv:
-            st.warning(f"Row {row_num}: ⚠️ These attributes are defined in DB but missing in CSV: {', '.join(missing_in_csv)}")
+        if row_num == 2:  # Only show once for first data row
+            if missing_attrs:
+                st.warning(f"⚠️ Expected attributes not in CSV: {', '.join(missing_attrs)}")
+            if extra_attrs:
+                st.warning(f"⚠️ CSV columns not matching any attribute: {', '.join(extra_attrs)}")
         
-        if extra_in_csv:
-            st.warning(f"Row {row_num}: ⚠️ These columns in CSV don't match any attributes: {', '.join(extra_in_csv)}")
-        
+        # Process attributes
         for attr in attributes:
             attr_name = attr['name']
-            if attr_name in df.columns:
-                value = row[attr_name]
-                
-                # Skip if NaN or empty
-                if pd.isna(value) or (isinstance(value, str) and not value.strip()):
-                    if attr.get('is_required', False):
-                        row_errors.append(f"Row {row_num}: ❌ Required field '{attr_name}' is empty")
-                    continue
-                
-                # Type validation
-                try:
-                    if attr['data_type'] == 'number':
-                        attr_values[attr['id']] = float(value)
-                    elif attr['data_type'] == 'boolean':
-                        if isinstance(value, bool):
-                            attr_values[attr['id']] = value
-                        else:
-                            attr_values[attr['id']] = str(value).lower() in ['true', '1', 'yes', 'y']
-                    elif attr['data_type'] == 'datetime':
-                        dt = pd.to_datetime(value)
-                        attr_values[attr['id']] = dt.isoformat()
+            if attr_name not in df.columns:
+                if attr.get('is_required', False):
+                    row_errors.append(f"Row {row_num}: ❌ Required field '{attr_name}' missing")
+                continue
+            
+            value = row[attr_name]
+            
+            # Skip if empty
+            if pd.isna(value) or (isinstance(value, str) and not value.strip()):
+                if attr.get('is_required', False):
+                    row_errors.append(f"Row {row_num}: ❌ Required field '{attr_name}' is empty")
+                continue
+            
+            # Type conversion
+            try:
+                if attr['data_type'] == 'number':
+                    attr_values[attr['id']] = float(value)
+                elif attr['data_type'] == 'boolean':
+                    if isinstance(value, bool):
+                        attr_values[attr['id']] = value
                     else:
-                        attr_values[attr['id']] = str(value)
-                except Exception as e:
-                    row_errors.append(f"Row {row_num}: ❌ Invalid value for '{attr_name}' - {str(e)}")
+                        attr_values[attr['id']] = str(value).lower() in ['true', '1', 'yes', 'y']
+                elif attr['data_type'] == 'datetime':
+                    dt = pd.to_datetime(value)
+                    attr_values[attr['id']] = dt.isoformat()
+                else:
+                    attr_values[attr['id']] = str(value)
+            except Exception as e:
+                row_errors.append(f"Row {row_num}: ❌ Invalid '{attr_name}': {str(e)}")
         
-        # Get comment if exists
+        # Get comment
         comment = ""
         if 'Comment' in df.columns and not pd.isna(row['Comment']):
             comment = str(row['Comment'])
@@ -249,19 +282,13 @@ def validate_import_file(df: pd.DataFrame, category_lookup: Dict,
 
 
 def import_events(client, user_id: str, validated_rows: List[Dict]) -> Tuple[int, int, List[str]]:
-    """
-    Import validated events to database
-    
-    Returns:
-        Tuple of (success_count: int, fail_count: int, errors: List[str])
-    """
+    """Import validated events to database"""
     success_count = 0
     fail_count = 0
     errors = []
     
     for row in validated_rows:
         try:
-            # Create event
             event_data = {
                 'user_id': user_id,
                 'category_id': row['category_id'],
@@ -278,7 +305,6 @@ def import_events(client, user_id: str, validated_rows: List[Dict]) -> Tuple[int
             
             event_id = event_response.data[0]['id']
             
-            # Create attribute records
             if row['attributes']:
                 attr_records = []
                 for attr_def_id, value in row['attributes'].items():
@@ -288,7 +314,6 @@ def import_events(client, user_id: str, validated_rows: List[Dict]) -> Tuple[int
                         'user_id': user_id
                     }
                     
-                    # Determine which column to use
                     if isinstance(value, bool):
                         record['value_boolean'] = value
                     elif isinstance(value, (int, float)):
@@ -314,13 +339,7 @@ def import_events(client, user_id: str, validated_rows: List[Dict]) -> Tuple[int
 
 def generate_template(areas: List[Dict], categories: List[Dict], 
                      attributes: List[Dict]) -> BytesIO:
-    """
-    Generate Excel template for bulk import
-    
-    Returns:
-        BytesIO object containing Excel file
-    """
-    # Build category paths
+    """Generate Excel template - uses > separator for compatibility"""
     cat_map = {cat['id']: cat for cat in categories}
     
     def get_full_path(cat_id: str) -> str:
@@ -329,18 +348,12 @@ def generate_template(areas: List[Dict], categories: List[Dict],
             return ""
         if cat['parent_category_id'] and cat['parent_category_id'] in cat_map:
             parent_path = get_full_path(cat['parent_category_id'])
-            return f"{parent_path} → {cat['name']}"
+            return f"{parent_path} > {cat['name']}"  # Use > for Excel compatibility
         else:
             return cat['name']
     
-    # Get all attribute names (unique)
-    attr_names = set()
-    for attr in attributes:
-        attr_names.add(attr['name'])
-    
-    # Create example data
     example_rows = []
-    for cat in categories[:3]:  # First 3 categories as examples
+    for cat in categories[:3]:
         cat_path = get_full_path(cat['id'])
         cat_attrs = [a for a in attributes if a['category_id'] == cat['id']]
         
@@ -354,41 +367,40 @@ def generate_template(areas: List[Dict], categories: List[Dict],
                 row[attr['name']] = 0
             elif attr['data_type'] == 'boolean':
                 row[attr['name']] = 'FALSE'
-            elif attr['data_type'] == 'datetime':
-                row[attr['name']] = datetime.now().isoformat()
             else:
                 row[attr['name']] = ''
         
-        row['Comment'] = 'Optional comment'
+        row['Comment'] = 'Optional'
         example_rows.append(row)
     
-    # Create DataFrame
     df = pd.DataFrame(example_rows)
     
-    # Create Excel file
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, sheet_name='Events', index=False)
         
-        # Add instructions sheet
         instructions = pd.DataFrame({
             'Instructions': [
-                '1. Fill in Category column with EXACT category path',
-                '2. Fill in Date column (YYYY-MM-DD or DD.MM.YYYY format)',
-                '3. Fill in attribute columns as needed',
-                '4. Add optional Comment',
-                '5. Save and upload',
+                'CATEGORY FORMAT:',
+                '- Use either ">" or "→" as separator',
+                '- Examples: "Health > Sleep" OR "Health → Sleep"',
+                '- Both formats work!',
                 '',
-                'IMPORTANT: Category paths must match EXACTLY',
-                'Use arrow → between levels',
-                'Example: "Health → Sleep → Night Sleep"',
+                'DATE FORMAT:',
+                '- YYYY-MM-DD (e.g., 2025-11-10)',
+                '- DD.MM.YYYY (e.g., 10.11.2025)',
+                '- DD/MM/YYYY (e.g., 10/11/2025)',
                 '',
-                'Date formats supported:',
-                '- YYYY-MM-DD (recommended)',
-                '- DD.MM.YYYY',
-                '- DD/MM/YYYY',
+                'ATTRIBUTES:',
+                '- Column names must match exactly',
+                '- Check attribute names in Structure Viewer',
                 '',
-                'Attribute names must match EXACTLY as defined in structure'
+                'STEPS:',
+                '1. Fill Category (with > or → separator)',
+                '2. Fill Date',
+                '3. Fill attribute values',
+                '4. Optional Comment',
+                '5. Save and upload'
             ]
         })
         instructions.to_excel(writer, sheet_name='README', index=False)
@@ -401,9 +413,11 @@ def render_bulk_import(client, user_id: str):
     """Main render function for bulk import page"""
     
     st.title("📤 Bulk Import Events")
-    st.markdown("Upload Excel or CSV file to import multiple events at once")
+    st.markdown("Upload Excel or CSV file to import multiple events")
     
-    # Fetch structure
+    # Info box about separators
+    st.info("💡 **Tip:** Use either `>` or `→` as category separator - both work!")
+    
     with st.spinner("Loading structure..."):
         areas, categories, attributes = get_structure_for_import(client, user_id)
     
@@ -411,19 +425,16 @@ def render_bulk_import(client, user_id: str):
         st.warning("No structure defined. Please upload a template first.")
         return
     
-    # Build lookup tables
     category_lookup = build_category_lookup(categories)
     attribute_map = build_attribute_map(attributes)
     
-    # Download template button
+    # Download template
     st.markdown("### 📥 Step 1: Download Template")
-    st.info("💡 Download the template file to see the correct format")
-    
     template_file = generate_template(areas, categories, attributes)
     st.download_button(
         label="⬇️ Download Excel Template",
         data=template_file,
-        file_name=f"events_import_template_{datetime.now().strftime('%Y%m%d')}.xlsx",
+        file_name=f"events_import_{datetime.now().strftime('%Y%m%d')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
     
@@ -431,13 +442,11 @@ def render_bulk_import(client, user_id: str):
     st.markdown("### 📤 Step 2: Upload Your File")
     uploaded_file = st.file_uploader(
         "Choose Excel or CSV file",
-        type=['xlsx', 'xls', 'csv'],
-        help="File should have Category, Date, and attribute columns"
+        type=['xlsx', 'xls', 'csv']
     )
     
     if uploaded_file:
         try:
-            # Read file
             if uploaded_file.name.endswith('.csv'):
                 df = pd.read_csv(uploaded_file)
             else:
@@ -445,77 +454,59 @@ def render_bulk_import(client, user_id: str):
             
             st.success(f"✅ File loaded: {len(df)} rows")
             
-            # Preview
-            with st.expander("📊 Preview Data (first 5 rows)", expanded=True):
+            with st.expander("📊 Preview Data", expanded=True):
                 st.dataframe(df.head(), use_container_width=True)
             
             # Validate
             st.markdown("### 🔍 Step 3: Validation")
-            with st.spinner("Validating data..."):
-                is_valid, errors, validated_rows = validate_import_file(
-                    df, category_lookup, attribute_map
-                )
+            is_valid, errors, validated_rows = validate_import_file(
+                df, category_lookup, attribute_map
+            )
             
             if errors:
-                st.error(f"❌ Found {len(errors)} validation errors:")
-                for error in errors[:20]:  # Show first 20
-                    st.write(f"- {error}")
+                st.error(f"❌ Found {len(errors)} errors:")
+                for error in errors[:20]:
+                    st.write(error)
                 if len(errors) > 20:
-                    st.write(f"... and {len(errors) - 20} more errors")
-                
-                st.warning("Please fix errors and re-upload")
+                    st.write(f"... and {len(errors) - 20} more")
                 return
             
-            st.success(f"✅ All {len(validated_rows)} rows validated successfully!")
+            st.success(f"✅ {len(validated_rows)} rows validated!")
             
-            # Preview validated data
+            # Preview
             with st.expander("📋 Preview Import", expanded=True):
                 if validated_rows:
-                    preview_data = []
-                    for row in validated_rows[:10]:  # First 10
-                        preview_data.append({
-                            'Row': row['row_number'],
-                            'Category': row['category_path'],
-                            'Date': row['event_date'],
-                            'Attributes': len(row['attributes']),
-                            'Comment': '✓' if row['comment'] else ''
-                        })
-                    st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
-                    
-                    if len(validated_rows) > 10:
-                        st.caption(f"... and {len(validated_rows) - 10} more rows")
-                else:
-                    st.warning("No valid rows to import")
-                    return
+                    preview = [{
+                        'Row': r['row_number'],
+                        'Category': r['category_path'],
+                        'Date': r['event_date'],
+                        'Attrs': len(r['attributes']),
+                        'Comment': '✓' if r['comment'] else ''
+                    } for r in validated_rows[:10]]
+                    st.dataframe(pd.DataFrame(preview), use_container_width=True)
             
-            # Import button
+            # Import
             st.markdown("### ✅ Step 4: Import")
-            st.warning(f"⚠️ This will create {len(validated_rows)} new events in the database")
+            st.warning(f"⚠️ Creating {len(validated_rows)} events")
             
             col1, col2, col3 = st.columns([1, 1, 1])
             with col2:
                 if st.button("🚀 Import Events", type="primary", use_container_width=True):
-                    with st.spinner("Importing events..."):
-                        success_count, fail_count, import_errors = import_events(
-                            client, user_id, validated_rows
-                        )
+                    success, fail, errs = import_events(client, user_id, validated_rows)
                     
-                    st.markdown("---")
-                    if fail_count == 0:
-                        st.success(f"🎉 Successfully imported {success_count} events!")
+                    if fail == 0:
+                        st.success(f"🎉 Imported {success} events!")
                         st.balloons()
                     else:
-                        st.warning(f"⚠️ Imported {success_count} events, {fail_count} failed")
-                        
-                        if import_errors:
-                            with st.expander("Error Details"):
-                                for error in import_errors:
-                                    st.write(f"- {error}")
+                        st.warning(f"⚠️ {success} success, {fail} failed")
+                        if errs:
+                            with st.expander("Errors"):
+                                for e in errs:
+                                    st.write(e)
         
         except Exception as e:
-            st.error(f"Error reading file: {str(e)}")
-            st.info("Make sure the file format is correct")
+            st.error(f"Error: {str(e)}")
 
 
 if __name__ == "__main__":
-    st.write("This module should be imported by streamlit_app.py")
+    st.write("Import by streamlit_app.py")
