@@ -1,35 +1,29 @@
 """
-Bulk Import Module - COMPREHENSIVE VERSION
-===========================================
-Created: 2025-11-13 11:00 UTC
-Last Modified: 2025-11-13 11:00 UTC
+Bulk Import Module - SMART VERSION
+===================================
+Created: 2025-11-13 11:20 UTC
+Last Modified: 2025-11-13 11:20 UTC
 Python: 3.11
 
 FEATURES:
-1. Uses ONLY ">" separator (matches Hierarchical_View template)
-2. Supports Excel AND CSV direct input
-3. Duplicate detection and handling options
-4. Mixed categories with different attributes in same file
-5. Empty cells for non-applicable attributes are OK
-6. Detailed validation with clear error messages
-
-USAGE:
-- Download template (uses ">" separator)
-- Fill in Excel directly (no need for CSV)
-- Mix different categories in same file
-- Leave non-applicable attribute cells empty
+- AUTO-DETECTS flat vs hierarchical categories
+- Shows ACTUAL category names from database
+- Works with both structures
+- Duplicate detection
+- Mixed categories support
+- Excel direct input
 """
 
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date
-from typing import Dict, List, Optional, Tuple, Any, Set
+from typing import Dict, List, Optional, Tuple, Any
 import json
 from io import BytesIO
 
 
 def get_structure_for_import(client, user_id: str) -> Tuple[List[Dict], List[Dict], List[Dict]]:
-    """Fetch complete structure needed for import"""
+    """Fetch complete structure"""
     try:
         areas_response = client.table('areas').select('*').eq('user_id', user_id).execute()
         categories_response = client.table('categories').select('*').eq('user_id', user_id).execute()
@@ -41,40 +35,47 @@ def get_structure_for_import(client, user_id: str) -> Tuple[List[Dict], List[Dic
         return [], [], []
 
 
-def build_category_lookup(categories: List[Dict]) -> Dict[str, str]:
+def build_category_lookup(categories: List[Dict]) -> Tuple[Dict[str, str], bool]:
     """
-    Build lookup from category path to category ID
-    Uses ONLY ">" as separator (matches Hierarchical_View)
+    Build lookup and detect if structure is hierarchical or flat
+    
+    Returns:
+        Tuple of (lookup_dict, is_hierarchical)
     """
     cat_map = {cat['id']: cat for cat in categories}
     lookup = {}
+    has_hierarchy = False
     
     def get_full_path(cat_id: str) -> str:
-        """Build hierarchical path with > separator"""
+        """Build path - will be just name if flat"""
         cat = cat_map.get(cat_id)
         if not cat:
             return ""
         
         if cat['parent_category_id'] and cat['parent_category_id'] in cat_map:
+            has_hierarchy = True
             parent_path = get_full_path(cat['parent_category_id'])
             return f"{parent_path} > {cat['name']}"
-        else:
-            return cat['name']
+        return cat['name']
     
-    # Create lookups with > separator ONLY
+    # Build lookup
     for cat_id, cat in cat_map.items():
+        # Check if this category has parent
+        if cat.get('parent_category_id'):
+            has_hierarchy = True
+        
+        # Build full path
         path = get_full_path(cat_id)
         lookup[path] = cat_id
         
-        # Also store just the name for simple categories
-        if ' > ' not in path:
-            lookup[cat['name']] = cat_id
+        # Also add just name as fallback
+        lookup[cat['name']] = cat_id
     
-    return lookup
+    return lookup, has_hierarchy
 
 
 def build_attribute_map(attributes: List[Dict]) -> Dict[str, List[Dict]]:
-    """Build map of category_id -> list of attributes"""
+    """Build map of category_id -> attributes"""
     attr_map = {}
     for attr in attributes:
         cat_id = attr['category_id']
@@ -84,23 +85,15 @@ def build_attribute_map(attributes: List[Dict]) -> Dict[str, List[Dict]]:
     return attr_map
 
 
-def check_for_duplicates(client, user_id: str, validated_rows: List[Dict]) -> Dict[str, List[int]]:
-    """
-    Check if events with same category and date already exist
-    
-    Returns:
-        Dict mapping "category_id|date" to list of existing event IDs
-    """
+def check_for_duplicates(client, user_id: str, validated_rows: List[Dict]) -> Dict[str, List[str]]:
+    """Check for existing events with same category + date"""
     duplicates = {}
     
     try:
-        # Get unique category-date combinations from import
         checks = set()
         for row in validated_rows:
-            key = f"{row['category_id']}|{row['event_date'].isoformat()}"
             checks.add((row['category_id'], row['event_date'].isoformat()))
         
-        # Check each combination
         for cat_id, event_date in checks:
             response = client.table('events')\
                 .select('id')\
@@ -112,23 +105,15 @@ def check_for_duplicates(client, user_id: str, validated_rows: List[Dict]) -> Di
             if response.data:
                 key = f"{cat_id}|{event_date}"
                 duplicates[key] = [e['id'] for e in response.data]
-    
     except Exception as e:
-        st.warning(f"Could not check for duplicates: {str(e)}")
+        st.warning(f"Could not check duplicates: {str(e)}")
     
     return duplicates
 
 
 def validate_import_file(df: pd.DataFrame, category_lookup: Dict, 
-                        attribute_map: Dict) -> Tuple[bool, List[str], List[Dict]]:
-    """
-    Validate import file
-    
-    KEY FEATURES:
-    - Supports mixed categories in same file
-    - Empty cells for non-applicable attributes are OK
-    - Clear error messages for each row
-    """
+                        attribute_map: Dict, is_hierarchical: bool) -> Tuple[bool, List[str], List[Dict]]:
+    """Validate import file"""
     errors = []
     validated_rows = []
     
@@ -137,51 +122,54 @@ def validate_import_file(df: pd.DataFrame, category_lookup: Dict,
         errors.append("❌ Missing required columns: Category and/or Date")
         return False, errors, []
     
-    # Show available categories
-    st.info(f"🔍 Found {len(category_lookup)} category paths in database")
-    with st.expander("📋 Available Category Paths (click to expand)"):
-        for path in sorted(category_lookup.keys()):
-            st.text(f"  {path}")
-        st.caption("💡 Copy exact path from above to use in your file")
+    # Show available categories with clear indication
+    structure_type = "HIERARCHICAL (use > separator)" if is_hierarchical else "FLAT (no separator)"
+    st.info(f"🔍 Database structure: **{structure_type}**")
+    st.info(f"📋 Found {len(category_lookup)} category paths")
     
-    # Collect all unique categories used in file
-    categories_in_file = set()
+    with st.expander("📋 Available Category Names (click to expand) - COPY THESE EXACTLY!", expanded=True):
+        unique_cats = {}
+        for path, cat_id in category_lookup.items():
+            if cat_id not in unique_cats:
+                unique_cats[cat_id] = path
+        
+        st.markdown("**Use these EXACT names in your Category column:**")
+        for path in sorted(unique_cats.values()):
+            st.code(path)
+        
+        if is_hierarchical:
+            st.warning("⚠️ Your structure is HIERARCHICAL - use format: 'Parent > Child'")
+        else:
+            st.success("✓ Your structure is FLAT - use simple names (no > separator)")
+    
+    # Validate rows
     for idx, row in df.iterrows():
-        if not pd.isna(row.get('Category')):
-            categories_in_file.add(str(row['Category']).strip())
-    
-    st.info(f"📊 Your file uses {len(categories_in_file)} different categories")
-    
-    # Validate each row
-    for idx, row in df.iterrows():
-        row_num = idx + 2  # Excel row number
+        row_num = idx + 2
         row_errors = []
         
-        # 1. VALIDATE CATEGORY
+        # Category
         category_str = str(row['Category']).strip()
         if pd.isna(row['Category']) or not category_str:
             row_errors.append(f"Row {row_num}: ❌ Missing category")
             errors.extend(row_errors)
             continue
         
-        # Try to find exact match
+        # Try exact match
         if category_str not in category_lookup:
             row_errors.append(f"Row {row_num}: ❌ Unknown category '{category_str}'")
             
-            # Find similar matches
+            # Find similar
             from difflib import get_close_matches
             matches = get_close_matches(category_str, category_lookup.keys(), n=3, cutoff=0.5)
             if matches:
                 row_errors.append(f"           💡 Did you mean: '{matches[0]}'?")
-            else:
-                row_errors.append(f"           💡 Check 'Available Category Paths' above")
             
             errors.extend(row_errors)
             continue
         
         category_id = category_lookup[category_str]
         
-        # 2. VALIDATE DATE
+        # Date
         event_date = None
         date_formats = ['%Y-%m-%d', '%d.%m.%Y', '%d/%m/%Y', '%m/%d/%Y']
         
@@ -201,61 +189,46 @@ def validate_import_file(df: pd.DataFrame, category_lookup: Dict,
         
         if not event_date:
             row_errors.append(f"Row {row_num}: ❌ Invalid date '{date_str}'")
-            row_errors.append(f"           💡 Use: YYYY-MM-DD or DD.MM.YYYY")
             errors.extend(row_errors)
             continue
         
-        # 3. VALIDATE ATTRIBUTES
-        # Get expected attributes for THIS category
+        # Attributes
         expected_attrs = attribute_map.get(category_id, [])
         attr_values = {}
         
-        # Get all column names (excluding Category, Date, Comment)
-        data_columns = [col for col in df.columns if col not in ['Category', 'Date', 'Comment']]
-        
-        # Process each expected attribute
         for attr in expected_attrs:
             attr_name = attr['name']
             
-            # Check if this attribute column exists in file
             if attr_name not in df.columns:
-                # Missing column - only error if REQUIRED
                 if attr.get('is_required', False):
-                    row_errors.append(f"Row {row_num}: ❌ Required attribute '{attr_name}' missing")
+                    row_errors.append(f"Row {row_num}: ❌ Required '{attr_name}' missing")
                 continue
             
-            # Get value from cell
             value = row[attr_name]
             
-            # Empty cell - only error if REQUIRED
             if pd.isna(value) or (isinstance(value, str) and not value.strip()):
                 if attr.get('is_required', False):
-                    row_errors.append(f"Row {row_num}: ❌ Required '{attr_name}' is empty")
-                continue  # Empty but optional - skip
+                    row_errors.append(f"Row {row_num}: ❌ Required '{attr_name}' empty")
+                continue
             
-            # Type conversion and validation
+            # Type conversion
             try:
                 if attr['data_type'] == 'number':
                     attr_values[attr['id']] = float(value)
                 elif attr['data_type'] == 'boolean':
-                    if isinstance(value, bool):
-                        attr_values[attr['id']] = value
-                    else:
-                        attr_values[attr['id']] = str(value).lower() in ['true', '1', 'yes', 'y']
+                    attr_values[attr['id']] = str(value).lower() in ['true', '1', 'yes', 'y'] if not isinstance(value, bool) else value
                 elif attr['data_type'] == 'datetime':
-                    dt = pd.to_datetime(value)
-                    attr_values[attr['id']] = dt.isoformat()
+                    attr_values[attr['id']] = pd.to_datetime(value).isoformat()
                 else:
                     attr_values[attr['id']] = str(value)
             except Exception as e:
                 row_errors.append(f"Row {row_num}: ❌ Invalid '{attr_name}': {str(e)}")
         
-        # 4. GET COMMENT (optional)
+        # Comment
         comment = ""
         if 'Comment' in df.columns and not pd.isna(row['Comment']):
             comment = str(row['Comment'])
         
-        # Add to validated rows if no errors
         if row_errors:
             errors.extend(row_errors)
         else:
@@ -269,41 +242,28 @@ def validate_import_file(df: pd.DataFrame, category_lookup: Dict,
             })
     
     is_valid = len(errors) == 0
-    
-    # Show summary of mixed categories
-    if is_valid and len(categories_in_file) > 1:
-        st.success(f"✅ Mixed categories validated successfully! ({len(categories_in_file)} different types)")
-    
     return is_valid, errors, validated_rows
 
 
 def import_events(client, user_id: str, validated_rows: List[Dict], 
                  skip_duplicates: bool = False) -> Tuple[int, int, int, List[str]]:
-    """
-    Import validated events to database
-    
-    Returns:
-        Tuple of (success_count, fail_count, skipped_count, errors)
-    """
+    """Import events"""
     success_count = 0
     fail_count = 0
     skipped_count = 0
     errors = []
     
-    # Check for duplicates if requested
     duplicates = {}
     if skip_duplicates:
         duplicates = check_for_duplicates(client, user_id, validated_rows)
     
     for row in validated_rows:
         try:
-            # Check if duplicate
             dup_key = f"{row['category_id']}|{row['event_date'].isoformat()}"
             if skip_duplicates and dup_key in duplicates:
                 skipped_count += 1
                 continue
             
-            # Create event
             event_data = {
                 'user_id': user_id,
                 'category_id': row['category_id'],
@@ -314,13 +274,12 @@ def import_events(client, user_id: str, validated_rows: List[Dict],
             event_response = client.table('events').insert(event_data).execute()
             
             if not event_response.data:
-                errors.append(f"Row {row['row_number']}: Failed to create event")
+                errors.append(f"Row {row['row_number']}: Failed")
                 fail_count += 1
                 continue
             
             event_id = event_response.data[0]['id']
             
-            # Create attribute records
             if row['attributes']:
                 attr_records = []
                 for attr_def_id, value in row['attributes'].items():
@@ -345,7 +304,6 @@ def import_events(client, user_id: str, validated_rows: List[Dict],
                     client.table('event_attributes').insert(attr_records).execute()
             
             success_count += 1
-        
         except Exception as e:
             errors.append(f"Row {row['row_number']}: {str(e)}")
             fail_count += 1
@@ -354,8 +312,8 @@ def import_events(client, user_id: str, validated_rows: List[Dict],
 
 
 def generate_template(areas: List[Dict], categories: List[Dict], 
-                     attributes: List[Dict]) -> BytesIO:
-    """Generate Excel template with ">" separator"""
+                     attributes: List[Dict], is_hierarchical: bool) -> BytesIO:
+    """Generate template based on actual structure"""
     
     cat_map = {cat['id']: cat for cat in categories}
     
@@ -363,109 +321,62 @@ def generate_template(areas: List[Dict], categories: List[Dict],
         cat = cat_map.get(cat_id)
         if not cat:
             return ""
-        if cat['parent_category_id'] and cat['parent_category_id'] in cat_map:
+        
+        if is_hierarchical and cat.get('parent_category_id') and cat['parent_category_id'] in cat_map:
             parent_path = get_full_path(cat['parent_category_id'])
             return f"{parent_path} > {cat['name']}"
         return cat['name']
     
-    # Collect ALL unique attribute names
-    all_attr_names = set()
-    for attr in attributes:
-        all_attr_names.add(attr['name'])
+    # Get all attributes
+    all_attrs = set(attr['name'] for attr in attributes)
     
-    # Create example rows for first few categories
+    # Create examples
     example_rows = []
-    for cat in categories[:5]:  # First 5 as examples
+    for cat in categories[:5]:
         cat_path = get_full_path(cat['id'])
         cat_attrs = [a for a in attributes if a['category_id'] == cat['id']]
         
-        row = {
-            'Category': cat_path,
-            'Date': datetime.now().date().isoformat()
-        }
+        row = {'Category': cat_path, 'Date': datetime.now().date().isoformat()}
         
-        # Add columns for THIS category's attributes
         for attr in cat_attrs:
-            if attr['data_type'] == 'number':
-                row[attr['name']] = 0
-            elif attr['data_type'] == 'boolean':
-                row[attr['name']] = 'FALSE'
-            else:
-                row[attr['name']] = ''
+            row[attr['name']] = 0 if attr['data_type'] == 'number' else ''
         
-        # Add empty columns for OTHER attributes (will be ignored)
-        for attr_name in all_attr_names:
+        for attr_name in all_attrs:
             if attr_name not in row:
-                row[attr_name] = ''  # Empty for non-applicable
+                row[attr_name] = ''
         
         row['Comment'] = ''
         example_rows.append(row)
     
     df = pd.DataFrame(example_rows)
     
-    # Create Excel
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, sheet_name='Events', index=False)
         
-        # Instructions
         instructions = pd.DataFrame({
-            'BULK IMPORT INSTRUCTIONS': [
+            'INSTRUCTIONS': [
                 '',
-                '═══════════════════════════════════════',
-                '1. CATEGORY FORMAT',
-                '═══════════════════════════════════════',
+                f'DATABASE STRUCTURE: {"HIERARCHICAL" if is_hierarchical else "FLAT"}',
                 '',
-                '✓ Use ">" as separator (NOT arrow →)',
-                '✓ Example: Health > Sleep',
-                '✓ Example: Training > Cardio > Running',
-                '✓ Copy exact paths from Structure Viewer',
+                'CATEGORY FORMAT:',
+                f'- {"Use > separator (e.g., Health > Sleep)" if is_hierarchical else "Use simple names (e.g., Sleep)"}',
+                '- Copy exact names from Structure Viewer or Available Category Paths',
                 '',
-                '═══════════════════════════════════════',
-                '2. DATE FORMAT',
-                '═══════════════════════════════════════',
+                'DATE FORMAT:',
+                '- YYYY-MM-DD (recommended)',
+                '- DD.MM.YYYY, DD/MM/YYYY also work',
                 '',
-                '✓ YYYY-MM-DD (recommended)',
-                '✓ DD.MM.YYYY (also works)',
-                '✓ DD/MM/YYYY (also works)',
+                'ATTRIBUTES:',
+                '- Fill only applicable columns',
+                '- Leave non-applicable columns empty',
                 '',
-                '═══════════════════════════════════════',
-                '3. MIXED CATEGORIES - YES!',
-                '═══════════════════════════════════════',
+                'MIXED CATEGORIES:',
+                '- You can mix different categories in same file',
+                '- Each row can be different category type',
                 '',
-                '✓ You CAN mix different categories in same file',
-                '✓ Each row can be different category',
-                '✓ Leave non-applicable attribute cells EMPTY',
-                '',
-                'Example:',
-                'Row 1: Health > Sleep (uses Sleep attrs)',
-                'Row 2: Training > Cardio (uses Cardio attrs)',
-                'Row 3: Health > Sleep (uses Sleep attrs again)',
-                '',
-                '═══════════════════════════════════════',
-                '4. ATTRIBUTES',
-                '═══════════════════════════════════════',
-                '',
-                '✓ Only fill attributes for that category',
-                '✓ Leave other columns EMPTY',
-                '✓ Empty = OK (unless marked Required)',
-                '',
-                '═══════════════════════════════════════',
-                '5. DUPLICATES',
-                '═══════════════════════════════════════',
-                '',
-                '✓ Same category + same date = duplicate',
-                '✓ You can choose to skip or import anyway',
-                '✓ Useful for: updating data, avoiding mistakes',
-                '',
-                '═══════════════════════════════════════',
-                'TIPS:',
-                '',
-                '• Work directly in Excel (no CSV needed)',
-                '• Download template first',
-                '• Copy category paths from Structure Viewer',
-                '• Test with 1-2 rows first',
-                '• Check validation before importing',
+                'DUPLICATES:',
+                '- Enable "Skip duplicates" to avoid same category+date',
                 ''
             ]
         })
@@ -476,137 +387,95 @@ def generate_template(areas: List[Dict], categories: List[Dict],
 
 
 def render_bulk_import(client, user_id: str):
-    """Main render function for bulk import page"""
+    """Main render function"""
     
     st.title("📤 Bulk Import Events")
-    st.markdown("""
-    Import multiple events from **Excel** (recommended) or CSV file.
-    
-    ✅ Mix different categories in same file  
-    ✅ Leave non-applicable attribute cells empty  
-    ✅ Duplicate detection  
-    """)
+    st.markdown("Import multiple events from Excel or CSV")
     
     with st.spinner("Loading structure..."):
         areas, categories, attributes = get_structure_for_import(client, user_id)
     
     if not categories:
-        st.warning("No structure defined. Upload a template first.")
+        st.warning("No structure defined")
         return
     
-    category_lookup = build_category_lookup(categories)
+    category_lookup, is_hierarchical = build_category_lookup(categories)
     attribute_map = build_attribute_map(attributes)
     
-    # Step 1: Download template
+    # Step 1: Download
     st.markdown("### 📥 Step 1: Download Template")
-    st.info("💡 Work directly in Excel - no need to convert to CSV!")
-    
-    template_file = generate_template(areas, categories, attributes)
+    template = generate_template(areas, categories, attributes, is_hierarchical)
     st.download_button(
-        label="⬇️ Download Excel Template",
-        data=template_file,
-        file_name=f"bulk_import_template_{datetime.now().strftime('%Y%m%d')}.xlsx",
+        "⬇️ Download Excel Template",
+        data=template,
+        file_name=f"bulk_import_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
     
     # Step 2: Upload
-    st.markdown("### 📤 Step 2: Upload Your File")
-    uploaded_file = st.file_uploader(
-        "Choose Excel (.xlsx) or CSV (.csv) file",
-        type=['xlsx', 'xls', 'csv'],
-        help="Excel format recommended for mixed categories"
-    )
+    st.markdown("### 📤 Step 2: Upload File")
+    uploaded = st.file_uploader("Choose Excel or CSV", type=['xlsx', 'xls', 'csv'])
     
-    if uploaded_file:
+    if uploaded:
         try:
-            # Read file
-            if uploaded_file.name.endswith('.csv'):
-                df = pd.read_csv(uploaded_file)
-                st.info("📄 CSV file detected")
-            else:
-                df = pd.read_excel(uploaded_file)
-                st.success("📊 Excel file detected (recommended)")
-            
+            df = pd.read_csv(uploaded) if uploaded.name.endswith('.csv') else pd.read_excel(uploaded)
             st.success(f"✅ Loaded {len(df)} rows")
             
-            with st.expander("📊 Preview Data", expanded=True):
+            with st.expander("📊 Preview", expanded=True):
                 st.dataframe(df.head(10), use_container_width=True)
             
-            # Step 3: Validation
+            # Step 3: Validate
             st.markdown("### 🔍 Step 3: Validation")
-            is_valid, errors, validated_rows = validate_import_file(
-                df, category_lookup, attribute_map
-            )
+            is_valid, errors, validated = validate_import_file(df, category_lookup, attribute_map, is_hierarchical)
             
             if errors:
-                st.error(f"❌ Found {len(errors)} validation errors:")
-                for error in errors[:25]:
-                    st.write(error)
+                st.error(f"❌ Found {len(errors)} errors:")
+                for err in errors[:25]:
+                    st.write(err)
                 if len(errors) > 25:
-                    st.write(f"... and {len(errors) - 25} more errors")
-                
-                st.warning("Please fix errors and re-upload")
+                    st.write(f"... {len(errors)-25} more")
                 return
             
-            st.success(f"✅ All {len(validated_rows)} rows validated!")
+            st.success(f"✅ {len(validated)} rows validated!")
             
-            # Preview
             with st.expander("📋 Preview Import", expanded=True):
-                if validated_rows:
-                    preview = []
-                    for r in validated_rows[:15]:
-                        preview.append({
-                            'Row': r['row_number'],
-                            'Category': r['category_path'],
-                            'Date': r['event_date'],
-                            'Attrs': len(r['attributes']),
-                            'Comment': '✓' if r['comment'] else ''
-                        })
-                    st.dataframe(pd.DataFrame(preview), use_container_width=True)
-                    if len(validated_rows) > 15:
-                        st.caption(f"... and {len(validated_rows) - 15} more rows")
+                preview = [{
+                    'Row': r['row_number'],
+                    'Category': r['category_path'],
+                    'Date': r['event_date'],
+                    'Attrs': len(r['attributes'])
+                } for r in validated[:15]]
+                st.dataframe(pd.DataFrame(preview), use_container_width=True)
             
-            # Step 4: Import options
+            # Step 4: Import
             st.markdown("### ✅ Step 4: Import")
+            skip = st.checkbox("⚠️ Skip duplicates (same category + date)", value=False)
+            st.warning(f"Will create up to {len(validated)} events")
             
-            # Duplicate handling
-            skip_dupes = st.checkbox(
-                "⚠️ Skip duplicates (same category + date)",
-                value=False,
-                help="Check this to avoid importing events that already exist"
-            )
-            
-            st.warning(f"This will create up to {len(validated_rows)} new events")
-            
-            col1, col2, col3 = st.columns([1, 1, 1])
+            col1, col2, col3 = st.columns([1,1,1])
             with col2:
                 if st.button("🚀 Import Events", type="primary", use_container_width=True):
-                    with st.spinner("Importing..."):
-                        success, fail, skipped, errs = import_events(
-                            client, user_id, validated_rows, skip_dupes
-                        )
+                    success, fail, skipped, errs = import_events(client, user_id, validated, skip)
                     
                     st.markdown("---")
                     if fail == 0 and skipped == 0:
-                        st.success(f"🎉 Successfully imported {success} events!")
+                        st.success(f"🎉 Imported {success} events!")
                         st.balloons()
-                    elif skipped > 0:
-                        st.success(f"✅ Imported {success} events")
-                        st.info(f"⏭️ Skipped {skipped} duplicates")
-                        if fail > 0:
-                            st.warning(f"❌ Failed: {fail}")
                     else:
-                        st.warning(f"⚠️ Success: {success}, Failed: {fail}")
+                        if success > 0:
+                            st.success(f"✅ Imported: {success}")
+                        if skipped > 0:
+                            st.info(f"⏭️ Skipped: {skipped}")
+                        if fail > 0:
+                            st.error(f"❌ Failed: {fail}")
                     
                     if errs:
-                        with st.expander("Error Details"):
+                        with st.expander("Errors"):
                             for e in errs:
                                 st.write(e)
         
         except Exception as e:
-            st.error(f"Error reading file: {str(e)}")
-            import traceback
-            st.code(traceback.format_exc())
+            st.error(f"Error: {str(e)}")
 
 
 if __name__ == "__main__":
