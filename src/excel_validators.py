@@ -1,8 +1,14 @@
 """
-Excel Template Validator
-=========================
+Events Tracker - Excel Template Validator Module
+=================================================
+Created: 2025-11-07 13:11 UTC
+Last Modified: 2025-11-15 18:30 UTC
+Python: 3.11
+
+Description:
 Validates Excel templates using names as identifiers.
-Detects uniqueness violations within hierarchical scopes and highlights errors.
+Detects uniqueness violations within hierarchical scopes.
+Highlights errors and provides detailed validation reports.
 """
 
 from openpyxl import load_workbook
