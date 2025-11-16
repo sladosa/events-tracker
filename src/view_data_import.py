@@ -79,9 +79,9 @@ def get_current_event_data(client: Client, user_id: str, event_id: str) -> dict:
     
     event = event_response.data[0]
     
-    # Get event_data
-    event_data_response = client.table("event_data").select(
-        "attribute_id, value_numeric, value_text, attributes(name, data_type)"
+    # Get event_attributes
+    event_data_response = client.table("event_attributes").select(
+        "attribute_id, value_numeric, value_text, attribute_definitions(name, data_type)"
     ).eq("event_id", event_id).execute()
     
     event_data = event_data_response.data if event_data_response.data else []
@@ -89,8 +89,8 @@ def get_current_event_data(client: Client, user_id: str, event_id: str) -> dict:
     # Build attribute dict
     attributes = {}
     for ed in event_data:
-        attr_name = ed["attributes"]["name"]
-        data_type = ed["attributes"]["data_type"]
+        attr_name = ed["attribute_definitions"]["name"]
+        data_type = ed["attribute_definitions"]["data_type"]
         
         if data_type == "numeric":
             attributes[attr_name] = ed.get("value_numeric")
@@ -241,13 +241,13 @@ def apply_changes(client: Client, user_id: str, modified_changes: list[dict]) ->
                     attr_id = attr["id"]
                     data_type = attr["data_type"]
                     
-                    # Check if event_data exists
-                    existing_response = client.table("event_data").select("id").eq("event_id", event_id).eq("attribute_id", attr_id).execute()
+                    # Check if event_attributes exists
+                    existing_response = client.table("event_attributes").select("id").eq("event_id", event_id).eq("attribute_id", attr_id).execute()
                     
                     if new_value is None:
                         # Delete if exists
                         if existing_response.data:
-                            client.table("event_data").delete().eq("event_id", event_id).eq("attribute_id", attr_id).execute()
+                            client.table("event_attributes").delete().eq("event_id", event_id).eq("attribute_id", attr_id).execute()
                     else:
                         # Prepare update data
                         if data_type == "numeric":
@@ -268,12 +268,12 @@ def apply_changes(client: Client, user_id: str, modified_changes: list[dict]) ->
                         
                         if existing_response.data:
                             # Update existing
-                            client.table("event_data").update(update_data).eq("event_id", event_id).eq("attribute_id", attr_id).execute()
+                            client.table("event_attributes").update(update_data).eq("event_id", event_id).eq("attribute_id", attr_id).execute()
                         else:
                             # Insert new
                             update_data["event_id"] = event_id
                             update_data["attribute_id"] = attr_id
-                            client.table("event_data").insert(update_data).execute()
+                            client.table("event_attributes").insert(update_data).execute()
             
             success_count += 1
         

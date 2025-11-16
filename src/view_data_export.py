@@ -45,7 +45,7 @@ def get_all_areas_categories(client: Client, user_id: str) -> tuple[list[dict], 
 def get_category_attributes(client: Client, category_id: str) -> list[dict]:
     """Get all attributes for a category"""
     
-    response = client.table("attributes").select("*").eq("category_id", category_id).order("sort_order").execute()
+    response = client.table("attribute_definitions").select("*").eq("category_id", category_id).order("sort_order").execute()
     
     return response.data if response.data else []
 
@@ -85,9 +85,9 @@ def get_events_with_data(
     # Get all event IDs
     event_ids = [e["id"] for e in events]
     
-    # Get all event_data for these events
-    event_data_response = client.table("event_data").select(
-        "event_id, attribute_id, value_numeric, value_text, attributes(name, data_type)"
+    # Get all event_attributes for these events
+    event_data_response = client.table("event_attributes").select(
+        "event_id, attribute_id, value_numeric, value_text, attribute_definitions(name, data_type)"
     ).in_("event_id", event_ids).execute()
     
     event_data = event_data_response.data if event_data_response.data else []
@@ -140,7 +140,7 @@ def create_excel_export(events: list[dict], selected_attributes: list[str] = Non
         selected_attributes = set()
         for event in events:
             for ed in event.get("event_data", []):
-                attr_name = ed["attributes"]["name"]
+                attr_name = ed["attribute_definitions"]["name"]
                 selected_attributes.add(attr_name)
         selected_attributes = sorted(list(selected_attributes))
     
@@ -181,8 +181,8 @@ def create_excel_export(events: list[dict], selected_attributes: list[str] = Non
         # Build attribute data dict
         attr_data = {}
         for ed in event.get("event_data", []):
-            attr_name = ed["attributes"]["name"]
-            data_type = ed["attributes"]["data_type"]
+            attr_name = ed["attribute_definitions"]["name"]
+            data_type = ed["attribute_definitions"]["data_type"]
             
             if data_type == "numeric":
                 attr_data[attr_name] = ed.get("value_numeric")
