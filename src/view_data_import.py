@@ -1,5 +1,5 @@
 """
-Events Tracker - View Data Import Module - ssl
+Events Tracker - View Data Import Module
 =========================================
 Created: 2025-11-15 17:00 UTC
 Last Modified: 2025-11-15 18:30 UTC
@@ -217,7 +217,7 @@ def apply_changes(client: Client, user_id: str, modified_changes: list[dict]) ->
             category_id = event["category_id"]
             
             # Get attributes for this category
-            attributes_response = client.table("attributes").select("id, name, data_type").eq("category_id", category_id).execute()
+            attributes_response = client.table("attribute_definitions").select("id, name, data_type").eq("category_id", category_id).execute()
             attributes = {attr["name"]: attr for attr in attributes_response.data} if attributes_response.data else {}
             
             # Process each change
