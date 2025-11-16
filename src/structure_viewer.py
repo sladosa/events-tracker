@@ -1,5 +1,5 @@
 """
-Events Tracker - Structure Viewer Module
+Events Tracker - Structure Viewer Module - ssl
 =========================================
 Created: 2025-11-11 12:37 UTC
 Last Modified: 2025-11-15 18:30 UTC
