@@ -87,7 +87,7 @@ def get_events_with_data(
     
     # Get all event_attributes for these events
     event_data_response = client.table("event_attributes").select(
-        "event_id, attribute_id, value_numeric, value_text, attribute_definitions(name, data_type)"
+        "event_id, attribute_definition_id, value_numeric, value_text, attribute_definitions(name, data_type)"
     ).in_("event_id", event_ids).execute()
     
     event_data = event_data_response.data if event_data_response.data else []
