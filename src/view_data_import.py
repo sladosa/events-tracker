@@ -2,7 +2,7 @@
 Events Tracker - View Data Import Module
 =========================================
 Created: 2025-11-15 17:00 UTC
-Last Modified: 2025-11-15 18:30 UTC
+Last Modified: 2025-11-16 09:30 UTC
 Python: 3.11
 
 Description:
@@ -81,7 +81,7 @@ def get_current_event_data(client: Client, user_id: str, event_id: str) -> dict:
     
     # Get event_attributes
     event_data_response = client.table("event_attributes").select(
-        "attribute_definition_id, value_numeric, value_text, attribute_definitions(name, data_type)"
+        "attribute_definition_id, value_number, value_text, attribute_definitions(name, data_type)"
     ).eq("event_id", event_id).execute()
     
     event_data = event_data_response.data if event_data_response.data else []
@@ -93,7 +93,7 @@ def get_current_event_data(client: Client, user_id: str, event_id: str) -> dict:
         data_type = ed["attribute_definitions"]["data_type"]
         
         if data_type == "numeric":
-            attributes[attr_name] = ed.get("value_numeric")
+            attributes[attr_name] = ed.get("value_number")
         else:
             attributes[attr_name] = ed.get("value_text")
     
@@ -254,7 +254,7 @@ def apply_changes(client: Client, user_id: str, modified_changes: list[dict]) ->
                             try:
                                 numeric_value = float(new_value)
                                 update_data = {
-                                    "value_numeric": numeric_value,
+                                    "value_number": numeric_value,
                                     "value_text": None
                                 }
                             except (ValueError, TypeError):
@@ -262,7 +262,7 @@ def apply_changes(client: Client, user_id: str, modified_changes: list[dict]) ->
                                 continue
                         else:
                             update_data = {
-                                "value_numeric": None,
+                                "value_number": None,
                                 "value_text": str(new_value)
                             }
                         

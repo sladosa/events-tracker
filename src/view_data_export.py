@@ -2,7 +2,7 @@
 Events Tracker - View Data Export Module - ssl
 =========================================
 Created: 2025-11-15 17:00 UTC
-Last Modified: 2025-11-15 18:30 UTC
+Last Modified: 2025-11-16 09:30 UTC
 Python: 3.11
 
 Description:
@@ -87,7 +87,7 @@ def get_events_with_data(
     
     # Get all event_attributes for these events
     event_data_response = client.table("event_attributes").select(
-        "event_id, attribute_definition_id, value_numeric, value_text, attribute_definitions(name, data_type)"
+        "event_id, attribute_definition_id, value_number, value_text, attribute_definitions(name, data_type)"
     ).in_("event_id", event_ids).execute()
     
     event_data = event_data_response.data if event_data_response.data else []
@@ -185,7 +185,7 @@ def create_excel_export(events: list[dict], selected_attributes: list[str] = Non
             data_type = ed["attribute_definitions"]["data_type"]
             
             if data_type == "numeric":
-                attr_data[attr_name] = ed.get("value_numeric")
+                attr_data[attr_name] = ed.get("value_number")
             else:
                 attr_data[attr_name] = ed.get("value_text")
         
