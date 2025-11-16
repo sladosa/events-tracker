@@ -13,7 +13,7 @@ Handles hierarchical structure import and validation.
 
 import pandas as pd
 from typing import List, Dict, Optional, Tuple
-from rename_detector import TemplateObject
+from .rename_detector import TemplateObject
 
 
 class ExcelTemplateParser:
