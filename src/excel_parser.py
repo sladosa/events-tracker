@@ -1,5 +1,5 @@
 """
-Events Tracker - Excel Parser Module
+Events Tracker - Excel Parser Module - ssl
 =====================================
 Created: 2025-11-07 13:11 UTC
 Last Modified: 2025-11-15 18:30 UTC

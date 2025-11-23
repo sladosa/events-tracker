@@ -13,7 +13,7 @@ Features:
 **UPDATED:** Headers in row 2, Sort_Order moved to column C, new grouping, auto filter
 
 Dependencies: openpyxl, pandas, supabase
-Last Modified: 2025-11-23 10:40 UTC
+Last Modified: 2025-11-23 17:30 UTC
 """
 
 import pandas as pd
@@ -660,16 +660,15 @@ class EnhancedStructureExporter:
         for row_idx, (text, extra) in enumerate(help_content, start=2):
             cell = ws.cell(row_idx, 1, text)
             
-            # Format sections
-            if text and text.isupper() and text.endswith(':'):
-                cell.font = Font(bold=True, size=12)
-                cell.fill = PatternFill(start_color="E6F2FF", end_color="E6F2FF", fill_type="solid")
-            elif text.startswith('✅') or text.startswith('❌'):
-                cell.font = Font(bold=True)
-            elif text.startswith('  •'):
-                cell.alignment = Alignment(indent=1)
-        
-        # Set column width
+            # Format sections - ensure text is a string before calling string methods
+            if text and isinstance(text, str):
+                if text.isupper() and text.endswith(':'): 
+                    cell.font = Font(bold=True, size=12)
+                    cell.fill = PatternFill(start_color="E6F2FF", end_color="E6F2FF", fill_type="solid")
+                elif text.startswith('✅') or text.startswith('❌'):
+                    cell.font = Font(bold=True)
+                elif text.startswith('  •'):
+                    cell.alignment = Alignment(indent=1)
         ws.column_dimensions['A'].width = 100
         
         # Freeze first row
