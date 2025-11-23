@@ -1,7 +1,7 @@
 """
 Enhanced Structure Exporter - Excel with validation, formulas, and grouping
 
-Features:
+Features: 1
 - Color-coded columns (Pink=auto-calculated, Blue=user-editable)
 - Drop-down validation for Type, Data_Type, Is_Required
 - Auto-calculated formulas for Level, Area, Category_Path
