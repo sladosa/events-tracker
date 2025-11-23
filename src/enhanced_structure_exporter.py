@@ -283,10 +283,6 @@ class EnhancedStructureExporter:
             cell.alignment = self.CENTER_ALIGN
             cell.border = self.THIN_BORDER
             
-            # Color-code based on editability (will apply to data rows)
-            if not is_editable:
-                # Store for later reference
-                ws.cell(1, col_idx).comment = "AUTO"  # Mark as auto-calculated
     
     
     def _populate_data(self, ws, df: pd.DataFrame):
