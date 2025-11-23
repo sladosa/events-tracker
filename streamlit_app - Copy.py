@@ -2,7 +2,7 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-11-23 16:00 UTC
+Last Modified: 2025-11-15 18:30 UTC
 Python: 3.11
 
 Description:
@@ -18,7 +18,6 @@ Modules:
 - view_data_export: Export events to Excel for editing
 - view_data_import: Import edited Excel with change detection
 - reverse_engineer: Download structure to Excel
-- enhanced_structure_exporter: Enhanced Excel export with validation
 - excel_parser_new: Upload and parse Excel template
 """
 
@@ -35,7 +34,6 @@ from src import bulk_import
 from src import view_data_export
 from src import view_data_import
 from src.reverse_engineer import ReverseEngineer
-from src.enhanced_structure_exporter import EnhancedStructureExporter
 from src import excel_parser_new
 
 
@@ -93,7 +91,7 @@ def main():
             "📊 View Structure",
             "➕ Add Event",
             "📤 Bulk Import",
-            "📊 View Data - Export",
+            "🔍 View Data - Export",
             "📥 View Data - Import",
             "📥 Download Structure",
             "📤 Upload Template",
@@ -141,7 +139,7 @@ def main():
     elif page == "📤 Bulk Import":
         bulk_import.render_bulk_import(supabase.client, user_id)
     
-    elif page == "📊 View Data - Export":
+    elif page == "🔍 View Data - Export":
         view_data_export.render_view_data_export(supabase.client, user_id)
     
     elif page == "📥 View Data - Import":
@@ -158,84 +156,42 @@ def main():
 
 
 def render_download_page(supabase, user_id: str):
-    """Download structure to Excel with enhanced features."""
+    """Render the download structure page"""
     st.title("📥 Download Structure")
+    st.markdown("Export your current structure to Excel template")
     
-    st.info("""
-    **Enhanced Excel Export Features:**
-    - 🎨 **Color-coded columns**: PINK (auto-calculated) vs BLUE (editable)
-    - ✅ **Drop-down validation**: Type, Data_Type, Is_Required
-    - 🔢 **Auto-formulas**: Level, Area, Sort_Order calculated automatically
-    - 📊 **Row grouping**: Collapse/expand by Area and Category
-    - 📋 **Column grouping**: Hide/show attribute details
-    - 🔍 **Validation fields**: Min/Max values for number attributes
-    """)
+    st.info("💡 Download your areas, categories, and attributes as an Excel template that you can edit and re-upload.")
     
     st.markdown("---")
     
-    col1, col2 = st.columns([2, 1])
+    # Initialize ReverseEngineer
+    reverse_engineer = ReverseEngineer(supabase.client)
     
-    with col1:
-        st.markdown("### 📋 What you can edit:")
-        st.markdown("""
-        **BLUE columns** (editable):
-        - Category name
-        - Attribute Name, Data Type, Unit
-        - Is Required, Default Value
-        - Validation Min/Max
-        - Description
-        
-        **PINK columns** (auto-calculated):
-        - Type, Level, Area
-        - Category Path
-        - Sort Order
-        """)
+    col1, col2, col3 = st.columns([1, 1, 1])
     
     with col2:
-        st.markdown("### 🎯 Best for:")
-        st.markdown("""
-        - Reviewing structure
-        - Adding descriptions
-        - Setting validation rules
-        - Bulk editing attributes
-        - Documentation
-        """)
-    
-    st.markdown("---")
-    
-    if st.button("📥 Generate Enhanced Excel", type="primary"):
-        with st.spinner("Generating enhanced Excel file..."):
-            try:
-                # Use EnhancedStructureExporter
-                exporter = EnhancedStructureExporter(
-                    client=supabase.client,
-                    user_id=user_id
-                )
-                
-                file_path = exporter.export_hierarchical_view()
-                
-                # Read file for download
-                with open(file_path, 'rb') as f:
-                    excel_data = f.read()
-                
-                st.success("✅ Enhanced Excel file generated successfully!")
+        if st.button("📥 Download Structure", type="primary", use_container_width=True):
+            with st.spinner("Generating Excel file..."):
+                success, excel_bytes, message = reverse_engineer.export_to_bytes(user_id)
+            
+            if success:
+                st.success(message)
                 
                 # Download button
+                from datetime import datetime
+                filename = f"structure_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                
                 st.download_button(
-                    label="⬇️ Download Hierarchical View Excel",
-                    data=excel_data,
-                    file_name=os.path.basename(file_path),
+                    label="📥 Download Excel File",
+                    data=excel_bytes,
+                    file_name=filename,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    help="Enhanced Excel with validation, formulas, and grouping"
+                    use_container_width=True
                 )
                 
-                # Cleanup temp file
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-                    
-            except Exception as e:
-                st.error(f"❌ Error generating Excel: {str(e)}")
-                st.exception(e)
+                st.info("💡 **Next Steps:**\n1. Download the file\n2. Edit in Excel (add/remove/rename items)\n3. Go to 'Upload Template' to re-import")
+            else:
+                st.error(f"❌ {message}")
 
 
 def render_upload_page(supabase, user_id: str):
@@ -274,18 +230,52 @@ def render_upload_page(supabase, user_id: str):
     # Parse uploaded file
     with st.spinner("Parsing Excel template..."):
         try:
-            # TODO: Implement parser for enhanced format
-            st.warning("⚠️ Enhanced template parsing not yet implemented")
-            st.info("📝 This will be completed in next iteration with rename detector integration")
+            parser = excel_parser_new.ExcelParser()
+            success, result, message = parser.parse_template(uploaded_file)
             
-            # Placeholder for future implementation
-            st.markdown("""
-            **Coming soon:**
-            - Parse enhanced Excel format
-            - Detect renames using hierarchical paths
-            - Show detailed diff of changes
-            - Apply changes with full validation
-            """)
+            if not success:
+                st.error(f"❌ {message}")
+                return
+            
+            st.success("✅ Template parsed successfully!")
+            
+            # Show summary
+            st.markdown("### 📊 Template Summary")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("Areas", len(result.get("areas", [])))
+            with col2:
+                st.metric("Categories", len(result.get("categories", [])))
+            with col3:
+                st.metric("Attributes", len(result.get("attributes", [])))
+            
+            # Preview data
+            with st.expander("📄 Preview Template Data", expanded=False):
+                if result.get("areas"):
+                    st.markdown("**Areas:**")
+                    st.dataframe(result["areas"], use_container_width=True)
+                
+                if result.get("categories"):
+                    st.markdown("**Categories:**")
+                    st.dataframe(result["categories"], use_container_width=True)
+                
+                if result.get("attributes"):
+                    st.markdown("**Attributes:**")
+                    st.dataframe(result["attributes"], use_container_width=True)
+            
+            st.markdown("---")
+            
+            # Apply button
+            st.markdown("### ✅ Apply Changes")
+            st.warning("⚠️ This will update your database structure")
+            
+            col1, col2, col3 = st.columns([1, 1, 1])
+            
+            with col2:
+                if st.button("🚀 Confirm & Apply", type="primary", use_container_width=True):
+                    st.info("📝 Applying changes functionality - integration pending with rename detector and change applier")
+                    st.caption("This will be completed in next iteration")
         
         except Exception as e:
             st.error(f"❌ Error parsing template: {str(e)}")
@@ -344,7 +334,7 @@ def render_help_page():
     
     ---
     
-    ### 📊 View Data - Export
+    ### 🔍 View Data - Export
     Export your events to Excel for viewing and editing:
     1. Apply filters (category, date range, attributes)
     2. Export to Excel
@@ -373,14 +363,11 @@ def render_help_page():
     
     ---
     
-    ### 📥 Download Structure (Enhanced)
-    Export your structure to Excel template with advanced features:
-    - **Color-coded columns**: PINK (auto) vs BLUE (editable)
-    - **Drop-down validations** for data types, required fields
-    - **Auto-formulas** for Level, Area extraction
-    - **Row grouping**: Collapsible Areas and Categories
-    - **Column grouping**: Hide/show attribute details
-    - **Validation fields**: Min/Max for number attributes
+    ### 📥 Download Structure
+    Export your structure to Excel template:
+    - Download all areas, categories, and attributes
+    - Edit in Excel (add/remove/rename)
+    - Re-upload using 'Upload Template'
     
     ---
     
@@ -438,7 +425,7 @@ def render_help_page():
     
     # Version info
     st.markdown("---")
-    st.caption("Version: 2025-11-23 16:00 UTC | Python: 3.11 | Streamlit: 1.28.0")
+    st.caption("Version: 2025-11-15 18:30 UTC | Python: 3.11 | Streamlit: 1.28.0")
 
 
 if __name__ == "__main__":

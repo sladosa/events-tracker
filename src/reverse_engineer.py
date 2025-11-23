@@ -2,42 +2,56 @@
 Events Tracker - Reverse Engineering Module
 ============================================
 Created: 2025-11-07 13:11 UTC
-Last Modified: 2025-11-15 18:30 UTC
+Last Modified: 2025-11-23 16:00 UTC
 Python: 3.11
 
 Description:
 Converts Supabase database structure back to Excel template.
 Exports areas, categories, and attributes for editing and re-import.
+Includes integration with EnhancedStructureExporter.
 """
 
 import pandas as pd
 import io
 from supabase import Client
-from typing import Tuple
+from typing import Tuple, Optional
 from pathlib import Path
 from datetime import datetime
 
 class ReverseEngineer:
     """Export Supabase metadata structure to Excel template."""
 
-    def __init__(self, supabase_client: Client):
+    def __init__(self, supabase_client: Client, user_id: str = None):
+        """
+        Initialize reverse engineer.
+        
+        Args:
+            supabase_client: Supabase client instance
+            user_id: User UUID (optional, can be set later)
+        """
         self.client = supabase_client
+        self.user_id = user_id
 
-    def export_to_bytes(self, user_id: str) -> Tuple[bool, bytes, str]:
+    def export_to_bytes(self, user_id: str = None) -> Tuple[bool, bytes, str]:
         """
         Export user's metadata structure to Excel bytes (for download).
 
         Args:
-            user_id: UUID of the user whose structure to export
+            user_id: UUID of the user whose structure to export (uses self.user_id if not provided)
 
         Returns:
             Tuple of (success: bool, excel_bytes: bytes, message: str)
         """
+        # Use provided user_id or fall back to self.user_id
+        uid = user_id or self.user_id
+        if not uid:
+            return False, b'', "User ID not provided"
+        
         try:
             # Fetch all metadata for the user
-            areas_data = self._fetch_areas(user_id)
-            categories_data = self._fetch_categories(user_id)
-            attributes_data = self._fetch_attributes(user_id)
+            areas_data = self._fetch_areas(uid)
+            categories_data = self._fetch_categories(uid)
+            attributes_data = self._fetch_attributes(uid)
 
             # Convert to DataFrames
             df_areas = pd.DataFrame(areas_data) if areas_data else pd.DataFrame(
@@ -252,3 +266,21 @@ class ReverseEngineer:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         user_short = user_id[:8]  # First 8 chars of UUID
         return f"backup_{user_short}_{timestamp}.xlsx"
+    
+    def export_hierarchical_enhanced(self, output_path: Optional[str] = None) -> str:
+        """
+        Export structure using enhanced format with validation and grouping.
+        
+        Args:
+            output_path: Optional custom path for output file
+            
+        Returns:
+            Path to created Excel file
+        """
+        from src.enhanced_structure_exporter import EnhancedStructureExporter
+        
+        if not self.user_id:
+            raise ValueError("user_id must be set to use enhanced export")
+        
+        exporter = EnhancedStructureExporter(self.client, self.user_id)
+        return exporter.export_hierarchical_view(output_path)

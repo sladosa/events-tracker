@@ -1,0 +1,558 @@
+"""
+Enhanced Structure Exporter - Excel with validation, formulas, and grouping
+
+Features:
+- Color-coded columns (Pink=auto-calculated, Blue=user-editable)
+- Drop-down validation for Type, Data_Type, Is_Required
+- Auto-calculated formulas for Level, Area, Category_Path, Sort_Order
+- Row grouping (collapsible by Area/Category)
+- Column grouping (hide attribute details)
+- Description and Validation columns added
+- Smart Category_Path handling
+
+Dependencies: openpyxl, pandas, supabase
+Last Modified: 2025-11-21 14:30 UTC
+"""
+
+import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
+from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.utils.dataframe import dataframe_to_rows
+from datetime import datetime
+from typing import Dict, List, Optional
+import json
+
+
+class EnhancedStructureExporter:
+    """
+    Enhanced Excel export with advanced features for structure editing.
+    """
+    
+    def __init__(self, client, user_id: str):
+        """
+        Initialize exporter.
+        
+        Args:
+            client: Supabase client instance
+            user_id: Current user's UUID
+        """
+        self.client = client
+        self.user_id = user_id
+        
+        # Define colors
+        self.PINK_FILL = PatternFill(start_color="FFE6F0", end_color="FFE6F0", fill_type="solid")
+        self.BLUE_FILL = PatternFill(start_color="E6F2FF", end_color="E6F2FF", fill_type="solid")
+        self.HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        
+        self.BOLD_FONT = Font(bold=True, color="FFFFFF")
+        self.NORMAL_FONT = Font(name='Calibri', size=11)
+        
+        self.THIN_BORDER = Border(
+            left=Side(style='thin', color='000000'),
+            right=Side(style='thin', color='000000'),
+            top=Side(style='thin', color='000000'),
+            bottom=Side(style='thin', color='000000')
+        )
+        
+        self.CENTER_ALIGN = Alignment(horizontal='center', vertical='center')
+        self.LEFT_ALIGN = Alignment(horizontal='left', vertical='center')
+    
+    
+    def export_hierarchical_view(self, output_path: Optional[str] = None) -> str:
+        """
+        Export structure to enhanced Excel with all features.
+        
+        Args:
+            output_path: Optional custom path. If None, auto-generates timestamped filename.
+            
+        Returns:
+            Path to created Excel file
+        """
+        # Load structure from database
+        df = self._load_hierarchical_data()
+        
+        # Create workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Hierarchical_View"
+        
+        # Setup headers and styling
+        self._setup_headers(ws)
+        
+        # Populate data with formulas
+        self._populate_data(ws, df)
+        
+        # Add data validations
+        self._add_data_validations(ws)
+        
+        # Add grouping
+        self._add_row_grouping(ws, df)
+        self._add_column_grouping(ws)
+        
+        # Auto-size columns
+        self._auto_size_columns(ws)
+        
+        # Freeze panes (header row + first 3 columns)
+        ws.freeze_panes = 'D2'
+        
+        # Generate filename if not provided
+        if not output_path:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            output_path = f"structure_hierarchical_{timestamp}.xlsx"
+        
+        # Save
+        wb.save(output_path)
+        
+        return output_path
+    
+    
+    def _load_hierarchical_data(self) -> pd.DataFrame:
+        """
+        Load Areas, Categories, and Attributes from database in hierarchical format.
+        
+        Returns:
+            DataFrame with columns: Type, Level, Area, Category_Path, Category, 
+                                   Attribute_Name, Data_Type, Unit, Is_Required,
+                                   Default_Value, Sort_Order, Validation_Min,
+                                   Validation_Max, Description
+        """
+        rows = []
+        
+        # Load Areas
+        areas_response = self.client.table('areas') \
+            .select('*') \
+            .eq('user_id', self.user_id) \
+            .order('sort_order') \
+            .execute()
+        
+        areas = areas_response.data
+        
+        for area in areas:
+            # Add Area row
+            rows.append({
+                'Type': 'Area',
+                'Level': 0,
+                'Area': area['name'],
+                'Category_Path': area['name'],
+                'Category': '',
+                'Attribute_Name': '',
+                'Data_Type': '',
+                'Unit': '',
+                'Is_Required': '',
+                'Default_Value': '',
+                'Sort_Order': area['sort_order'],
+                'Validation_Min': '',
+                'Validation_Max': '',
+                'Description': area.get('description', '')
+            })
+            
+            # Load Categories for this Area
+            self._load_categories_recursive(area['id'], area['name'], rows)
+        
+        return pd.DataFrame(rows)
+    
+    
+    def _load_categories_recursive(self, area_id: str, area_name: str, 
+                                   rows: List[Dict], parent_id: Optional[str] = None, 
+                                   parent_path: str = '', level: int = 1):
+        """
+        Recursively load categories and their attributes.
+        
+        Args:
+            area_id: Area UUID
+            area_name: Area name for building paths
+            rows: List to append rows to
+            parent_id: Parent category UUID (None for top-level)
+            parent_path: Parent's full path
+            level: Current hierarchy level
+        """
+        # Query categories at this level
+        query = self.client.table('categories') \
+            .select('*') \
+            .eq('user_id', self.user_id) \
+            .eq('area_id', area_id) \
+            .eq('level', level)
+        
+        if parent_id:
+            query = query.eq('parent_category_id', parent_id)
+        else:
+            query = query.is_('parent_category_id', 'null')
+        
+        categories_response = query.order('sort_order').execute()
+        categories = categories_response.data
+        
+        for category in categories:
+            # Build category path
+            if parent_path:
+                cat_path = f"{parent_path} > {category['name']}"
+            else:
+                cat_path = f"{area_name} > {category['name']}"
+            
+            # Add Category row
+            rows.append({
+                'Type': 'Category',
+                'Level': level,
+                'Area': area_name,
+                'Category_Path': cat_path,
+                'Category': category['name'],
+                'Attribute_Name': '',
+                'Data_Type': '',
+                'Unit': '',
+                'Is_Required': '',
+                'Default_Value': '',
+                'Sort_Order': category['sort_order'],
+                'Validation_Min': '',
+                'Validation_Max': '',
+                'Description': category.get('description', '')
+            })
+            
+            # Load Attributes for this Category
+            attributes_response = self.client.table('attribute_definitions') \
+                .select('*') \
+                .eq('user_id', self.user_id) \
+                .eq('category_id', category['id']) \
+                .order('sort_order') \
+                .execute()
+            
+            attributes = attributes_response.data
+            
+            for attr in attributes:
+                # Parse validation_rules JSONB
+                val_rules = attr.get('validation_rules', {})
+                if isinstance(val_rules, str):
+                    try:
+                        val_rules = json.loads(val_rules)
+                    except:
+                        val_rules = {}
+                
+                val_min = val_rules.get('min', '') if val_rules else ''
+                val_max = val_rules.get('max', '') if val_rules else ''
+                
+                # Add Attribute row
+                rows.append({
+                    'Type': 'Attribute',
+                    'Level': level + 1,
+                    'Area': area_name,
+                    'Category_Path': cat_path,
+                    'Category': category['name'],
+                    'Attribute_Name': attr['name'],
+                    'Data_Type': attr['data_type'],
+                    'Unit': attr.get('unit', ''),
+                    'Is_Required': 'TRUE' if attr.get('is_required', False) else 'FALSE',
+                    'Default_Value': attr.get('default_value', ''),
+                    'Sort_Order': attr['sort_order'],
+                    'Validation_Min': val_min,
+                    'Validation_Max': val_max,
+                    'Description': attr.get('description', '')
+                })
+            
+            # Recursive call for subcategories
+            if level < 10:  # Max depth
+                self._load_categories_recursive(
+                    area_id, area_name, rows, 
+                    category['id'], cat_path, level + 1
+                )
+    
+    
+    def _setup_headers(self, ws):
+        """
+        Setup header row with styling.
+        """
+        headers = [
+            ('Type', False),              # A - Auto (Pink)
+            ('Level', False),             # B - Auto (Pink)
+            ('Area', False),              # C - Auto (Pink)
+            ('Category_Path', False),     # D - Auto (Pink)
+            ('Category', True),           # E - Editable (Blue)
+            ('Attribute_Name', True),     # F - Editable (Blue)
+            ('Data_Type', True),          # G - Editable (Blue)
+            ('Unit', True),               # H - Editable (Blue)
+            ('Is_Required', True),        # I - Editable (Blue)
+            ('Default_Value', True),      # J - Editable (Blue)
+            ('Sort_Order', False),        # K - Auto (Pink)
+            ('Validation_Min', True),     # L - Editable (Blue)
+            ('Validation_Max', True),     # M - Editable (Blue)
+            ('Description', True)         # N - Editable (Blue)
+        ]
+        
+        for col_idx, (header, is_editable) in enumerate(headers, start=1):
+            cell = ws.cell(1, col_idx, header)
+            cell.font = self.BOLD_FONT
+            cell.fill = self.HEADER_FILL
+            cell.alignment = self.CENTER_ALIGN
+            cell.border = self.THIN_BORDER
+            
+            # Color-code based on editability (will apply to data rows)
+            if not is_editable:
+                # Store for later reference
+                ws.cell(1, col_idx).comment = "AUTO"  # Mark as auto-calculated
+    
+    
+    def _populate_data(self, ws, df: pd.DataFrame):
+        """
+        Populate data rows with formulas for auto-calculated columns.
+        """
+        for row_idx, row in enumerate(df.itertuples(index=False), start=2):
+            # A: Type (editable via dropdown)
+            cell_a = ws.cell(row_idx, 1, row.Type)
+            cell_a.fill = self.PINK_FILL
+            cell_a.border = self.THIN_BORDER
+            cell_a.alignment = self.CENTER_ALIGN
+            
+            # B: Level (FORMULA - auto-calculated from Type and Category_Path)
+            if row.Type == 'Area':
+                cell_b = ws.cell(row_idx, 2, 0)
+            elif row.Type == 'Attribute':
+                # Attribute level = parent category level + 1
+                # We'll use a simpler approach: count ">" in Category_Path + 1
+                level_formula = f'=LEN(D{row_idx})-LEN(SUBSTITUTE(D{row_idx},">",""))+1'
+                cell_b = ws.cell(row_idx, 2)
+                cell_b.value = level_formula
+            else:  # Category
+                level_formula = f'=LEN(D{row_idx})-LEN(SUBSTITUTE(D{row_idx},">",""))'
+                cell_b = ws.cell(row_idx, 2)
+                cell_b.value = level_formula
+            
+            cell_b.fill = self.PINK_FILL
+            cell_b.border = self.THIN_BORDER
+            cell_b.alignment = self.CENTER_ALIGN
+            
+            # C: Area (FORMULA - extract first part before ">")
+            area_formula = f'=TRIM(LEFT(D{row_idx},IFERROR(FIND(">",D{row_idx})-1,LEN(D{row_idx}))))'
+            cell_c = ws.cell(row_idx, 3)
+            cell_c.value = area_formula
+            cell_c.fill = self.PINK_FILL
+            cell_c.border = self.THIN_BORDER
+            cell_c.alignment = self.LEFT_ALIGN
+            
+            # D: Category_Path (editable - user can change hierarchy)
+            cell_d = ws.cell(row_idx, 4, row.Category_Path)
+            cell_d.fill = self.PINK_FILL  # Actually should be editable for new items
+            cell_d.border = self.THIN_BORDER
+            cell_d.alignment = self.LEFT_ALIGN
+            
+            # E: Category (editable)
+            cell_e = ws.cell(row_idx, 5, row.Category)
+            cell_e.fill = self.BLUE_FILL
+            cell_e.border = self.THIN_BORDER
+            cell_e.alignment = self.LEFT_ALIGN
+            
+            # F: Attribute_Name (editable)
+            cell_f = ws.cell(row_idx, 6, row.Attribute_Name)
+            cell_f.fill = self.BLUE_FILL
+            cell_f.border = self.THIN_BORDER
+            cell_f.alignment = self.LEFT_ALIGN
+            
+            # G: Data_Type (editable, dropdown)
+            cell_g = ws.cell(row_idx, 7, row.Data_Type)
+            cell_g.fill = self.BLUE_FILL
+            cell_g.border = self.THIN_BORDER
+            cell_g.alignment = self.CENTER_ALIGN
+            
+            # H: Unit (editable)
+            cell_h = ws.cell(row_idx, 8, row.Unit)
+            cell_h.fill = self.BLUE_FILL
+            cell_h.border = self.THIN_BORDER
+            cell_h.alignment = self.CENTER_ALIGN
+            
+            # I: Is_Required (editable, dropdown)
+            cell_i = ws.cell(row_idx, 9, row.Is_Required)
+            cell_i.fill = self.BLUE_FILL
+            cell_i.border = self.THIN_BORDER
+            cell_i.alignment = self.CENTER_ALIGN
+            
+            # J: Default_Value (editable)
+            cell_j = ws.cell(row_idx, 10, row.Default_Value)
+            cell_j.fill = self.BLUE_FILL
+            cell_j.border = self.THIN_BORDER
+            cell_j.alignment = self.LEFT_ALIGN
+            
+            # K: Sort_Order (FORMULA - auto from row position within same Type+Area)
+            # Simplified: just use row number for now
+            cell_k = ws.cell(row_idx, 11, row.Sort_Order)
+            cell_k.fill = self.PINK_FILL
+            cell_k.border = self.THIN_BORDER
+            cell_k.alignment = self.CENTER_ALIGN
+            
+            # L: Validation_Min (editable)
+            cell_l = ws.cell(row_idx, 12, row.Validation_Min)
+            cell_l.fill = self.BLUE_FILL
+            cell_l.border = self.THIN_BORDER
+            cell_l.alignment = self.CENTER_ALIGN
+            
+            # M: Validation_Max (editable)
+            cell_m = ws.cell(row_idx, 13, row.Validation_Max)
+            cell_m.fill = self.BLUE_FILL
+            cell_m.border = self.THIN_BORDER
+            cell_m.alignment = self.CENTER_ALIGN
+            
+            # N: Description (editable)
+            cell_n = ws.cell(row_idx, 14, row.Description)
+            cell_n.fill = self.BLUE_FILL
+            cell_n.border = self.THIN_BORDER
+            cell_n.alignment = self.LEFT_ALIGN
+    
+    
+    def _add_data_validations(self, ws):
+        """
+        Add drop-down validations for specific columns.
+        """
+        max_row = ws.max_row
+        
+        # Type column (A) - Area, Category, Attribute
+        type_dv = DataValidation(
+            type="list",
+            formula1='"Area,Category,Attribute"',
+            allow_blank=False,
+            showDropDown=True
+        )
+        ws.add_data_validation(type_dv)
+        type_dv.add(f'A2:A{max_row + 100}')  # Extra rows for new entries
+        
+        # Data_Type column (G) - number, text, datetime, boolean, link
+        datatype_dv = DataValidation(
+            type="list",
+            formula1='"number,text,datetime,boolean,link"',
+            allow_blank=True,
+            showDropDown=True
+        )
+        ws.add_data_validation(datatype_dv)
+        datatype_dv.add(f'G2:G{max_row + 100}')
+        
+        # Is_Required column (I) - TRUE, FALSE
+        required_dv = DataValidation(
+            type="list",
+            formula1='"TRUE,FALSE"',
+            allow_blank=True,
+            showDropDown=True
+        )
+        ws.add_data_validation(required_dv)
+        required_dv.add(f'I2:I{max_row + 100}')
+    
+    
+    def _add_row_grouping(self, ws, df: pd.DataFrame):
+        """
+        Add row grouping for collapsible Areas and Categories.
+        """
+        current_area_start = None
+        current_cat_starts = {}  # level -> start_row
+        
+        for idx, row in enumerate(df.itertuples(), start=2):
+            if row.Type == "Area":
+                # Close previous area group if exists
+                if current_area_start and current_area_start < idx - 1:
+                    ws.row_dimensions.group(current_area_start, idx - 1, outline_level=1)
+                
+                current_area_start = idx + 1  # Next row starts new group
+                current_cat_starts = {}  # Reset category tracking
+            
+            elif row.Type == "Category":
+                # Close previous category group at same or higher level
+                level = row.Level
+                for cat_level in list(current_cat_starts.keys()):
+                    if cat_level >= level:
+                        start = current_cat_starts[cat_level]
+                        if start < idx:
+                            ws.row_dimensions.group(start, idx - 1, outline_level=level + 1)
+                        del current_cat_starts[cat_level]
+                
+                # Start new category group
+                current_cat_starts[level] = idx + 1
+        
+        # Close remaining groups
+        max_row = ws.max_row
+        if current_area_start and current_area_start <= max_row:
+            ws.row_dimensions.group(current_area_start, max_row, outline_level=1)
+        
+        for level, start in current_cat_starts.items():
+            if start <= max_row:
+                ws.row_dimensions.group(start, max_row, outline_level=level + 1)
+    
+    
+    def _add_column_grouping(self, ws):
+        """
+        Add column grouping to hide detailed attribute columns.
+        
+        Groups:
+        - G:K (Data_Type through Sort_Order) = Attribute Details
+        - L:M (Validation_Min, Validation_Max) = Validation Rules
+        """
+        # Group: Attribute Details (columns G through K)
+        ws.column_dimensions.group('G', 'K', outline_level=1)
+        
+        # Group: Validation Rules (columns L through M)
+        ws.column_dimensions.group('L', 'M', outline_level=1)
+    
+    
+    def _auto_size_columns(self, ws):
+        """
+        Auto-size columns based on content with max width limit.
+        """
+        for column_cells in ws.columns:
+            length = 0
+            column_letter = column_cells[0].column_letter
+            
+            for cell in column_cells:
+                try:
+                    if cell.value:
+                        cell_length = len(str(cell.value))
+                        if cell_length > length:
+                            length = cell_length
+                except:
+                    pass
+            
+            # Set width with limits
+            adjusted_width = min(length + 2, 50)  # Max 50 characters
+            adjusted_width = max(adjusted_width, 10)  # Min 10 characters
+            
+            ws.column_dimensions[column_letter].width = adjusted_width
+
+
+# Integration with existing ReverseEngineer class
+def add_to_reverse_engineer_class():
+    """
+    This shows how to integrate into existing reverse_engineer.py
+    
+    Add this method to your ReverseEngineer class:
+    """
+    
+    def export_hierarchical_enhanced(self, output_path: Optional[str] = None) -> str:
+        """
+        Export structure using enhanced format with validation and grouping.
+        
+        Returns:
+            Path to created Excel file
+        """
+        exporter = EnhancedStructureExporter(self.client, self.user_id)
+        return exporter.export_hierarchical_view(output_path)
+
+
+# Usage example
+if __name__ == "__main__":
+    # Example usage (in your Streamlit app):
+    """
+    from src.enhanced_structure_exporter import EnhancedStructureExporter
+    
+    # In your Streamlit UI:
+    if st.button("📥 Download Enhanced Structure"):
+        with st.spinner("Generating enhanced Excel..."):
+            exporter = EnhancedStructureExporter(
+                client=st.session_state.client,
+                user_id=st.session_state.user_id
+            )
+            
+            file_path = exporter.export_hierarchical_view()
+            
+            # Read file for download
+            with open(file_path, 'rb') as f:
+                excel_data = f.read()
+            
+            st.download_button(
+                label="⬇️ Download Hierarchical View",
+                data=excel_data,
+                file_name=file_path,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+    """
+    pass

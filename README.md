@@ -25,7 +25,7 @@
 
 ## 🎯 Overview
 
-**Events Tracker** is a production-ready web application that allows users to define their own hierarchical event structures and record events with dynamic, type-safe attributes. Built with Python and Streamlit, it uses Supabase (PostgreSQL) for secure, scalable data storage with Row Level Security (RLS).
+**Events Tracker** is a NOT YET production-ready web application that allows users to define their own hierarchical event structures and record events with dynamic, type-safe attributes. Built with Python and Streamlit, it uses Supabase (PostgreSQL) for secure, scalable data storage with Row Level Security (RLS).
 
 **Perfect for:**
 - Personal tracking (fitness, health, habits, finances)
