@@ -675,7 +675,7 @@ class EnhancedStructureExporter:
         # Freeze first row
         ws.freeze_panes = 'A2'
 
-# Usage example
+# Usage example 1
 if __name__ == "__main__":
     # Example usage (in your Streamlit app):
     """
