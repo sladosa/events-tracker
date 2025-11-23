@@ -4,14 +4,16 @@ Enhanced Structure Exporter - Excel with validation, formulas, and grouping
 Features:
 - Color-coded columns (Pink=auto-calculated, Blue=user-editable)
 - Drop-down validation for Type, Data_Type, Is_Required
-- Auto-calculated formulas for Level, Area, Category_Path, Sort_Order
+- Auto-calculated formulas for Level, Area, Category_Path
 - Row grouping (collapsible by Area/Category)
 - Column grouping (hide attribute details)
 - Description and Validation columns added
 - Smart Category_Path handling
 
+**UPDATED:** Headers in row 2, Sort_Order moved to column C, new grouping, auto filter
+
 Dependencies: openpyxl, pandas, supabase
-Last Modified: 2025-11-21 14:30 UTC
+Last Modified: 2025-11-23 10:40 UTC
 """
 
 import pandas as pd
@@ -77,10 +79,10 @@ class EnhancedStructureExporter:
         ws = wb.active
         ws.title = "Hierarchical_View"
         
-        # Setup headers and styling
+        # Setup headers and styling (row 2)
         self._setup_headers(ws)
         
-        # Populate data with formulas
+        # Populate data with formulas (starts row 3)
         self._populate_data(ws, df)
         
         # Add data validations
@@ -93,8 +95,11 @@ class EnhancedStructureExporter:
         # Auto-size columns
         self._auto_size_columns(ws)
         
-        # Freeze panes (header row + first 3 columns)
-        ws.freeze_panes = 'D2'
+        # Freeze panes (G3 - after Attribute_Name column, row 3)
+        ws.freeze_panes = 'G3'
+        
+        # Add auto filter (A2:N...)
+        ws.auto_filter.ref = f'A2:N{len(df) + 2}'  # +2 for header row
         
         # Generate filename if not provided
         if not output_path:
@@ -112,9 +117,9 @@ class EnhancedStructureExporter:
         Load Areas, Categories, and Attributes from database in hierarchical format.
         
         Returns:
-            DataFrame with columns: Type, Level, Area, Category_Path, Category, 
-                                   Attribute_Name, Data_Type, Unit, Is_Required,
-                                   Default_Value, Sort_Order, Validation_Min,
+            DataFrame with columns: Type, Level, Sort_Order, Area, Category_Path, 
+                                   Category, Attribute_Name, Data_Type, Unit, 
+                                   Is_Required, Default_Value, Validation_Min,
                                    Validation_Max, Description
         """
         rows = []
@@ -133,6 +138,7 @@ class EnhancedStructureExporter:
             rows.append({
                 'Type': 'Area',
                 'Level': 0,
+                'Sort_Order': area['sort_order'],
                 'Area': area['name'],
                 'Category_Path': area['name'],
                 'Category': '',
@@ -141,7 +147,6 @@ class EnhancedStructureExporter:
                 'Unit': '',
                 'Is_Required': '',
                 'Default_Value': '',
-                'Sort_Order': area['sort_order'],
                 'Validation_Min': '',
                 'Validation_Max': '',
                 'Description': area.get('description', '')
@@ -193,6 +198,7 @@ class EnhancedStructureExporter:
             rows.append({
                 'Type': 'Category',
                 'Level': level,
+                'Sort_Order': category['sort_order'],
                 'Area': area_name,
                 'Category_Path': cat_path,
                 'Category': category['name'],
@@ -201,7 +207,6 @@ class EnhancedStructureExporter:
                 'Unit': '',
                 'Is_Required': '',
                 'Default_Value': '',
-                'Sort_Order': category['sort_order'],
                 'Validation_Min': '',
                 'Validation_Max': '',
                 'Description': category.get('description', '')
@@ -233,6 +238,7 @@ class EnhancedStructureExporter:
                 rows.append({
                     'Type': 'Attribute',
                     'Level': level + 1,
+                    'Sort_Order': attr['sort_order'],
                     'Area': area_name,
                     'Category_Path': cat_path,
                     'Category': category['name'],
@@ -241,7 +247,6 @@ class EnhancedStructureExporter:
                     'Unit': attr.get('unit', ''),
                     'Is_Required': 'TRUE' if attr.get('is_required', False) else 'FALSE',
                     'Default_Value': attr.get('default_value', ''),
-                    'Sort_Order': attr['sort_order'],
                     'Validation_Min': val_min,
                     'Validation_Max': val_max,
                     'Description': attr.get('description', '')
@@ -258,55 +263,63 @@ class EnhancedStructureExporter:
     def _setup_headers(self, ws):
         """
         Setup header row with styling.
+        Headers start at row 2 (row 1 is blank).
         """
+        # New column order: Sort_Order moved after Level
         headers = [
             ('Type', False),              # A - Auto (Pink)
             ('Level', False),             # B - Auto (Pink)
-            ('Area', False),              # C - Auto (Pink)
-            ('Category_Path', False),     # D - Auto (Pink)
-            ('Category', True),           # E - Editable (Blue)
-            ('Attribute_Name', True),     # F - Editable (Blue)
-            ('Data_Type', True),          # G - Editable (Blue)
-            ('Unit', True),               # H - Editable (Blue)
-            ('Is_Required', True),        # I - Editable (Blue)
-            ('Default_Value', True),      # J - Editable (Blue)
-            ('Sort_Order', False),        # K - Auto (Pink)
+            ('Sort_Order', False),        # C - Auto (Pink) - MOVED HERE
+            ('Area', False),              # D - Auto (Pink)
+            ('Category_Path', False),     # E - Auto (Pink)
+            ('Category', True),           # F - Editable (Blue)
+            ('Attribute_Name', True),     # G - Editable (Blue)
+            ('Data_Type', True),          # H - Editable (Blue)
+            ('Unit', True),               # I - Editable (Blue)
+            ('Is_Required', True),        # J - Editable (Blue)
+            ('Default_Value', True),      # K - Editable (Blue)
             ('Validation_Min', True),     # L - Editable (Blue)
             ('Validation_Max', True),     # M - Editable (Blue)
             ('Description', True)         # N - Editable (Blue)
         ]
         
+        # Headers in row 2 (row 1 is blank)
         for col_idx, (header, is_editable) in enumerate(headers, start=1):
-            cell = ws.cell(1, col_idx, header)
+            cell = ws.cell(2, col_idx, header)  # Row 2, not 1
             cell.font = self.BOLD_FONT
             cell.fill = self.HEADER_FILL
             cell.alignment = self.CENTER_ALIGN
             cell.border = self.THIN_BORDER
-            
     
     
     def _populate_data(self, ws, df: pd.DataFrame):
         """
         Populate data rows with formulas for auto-calculated columns.
+        Data starts at row 3 (row 1 blank, row 2 headers).
+        
+        Column mapping:
+        A=Type, B=Level, C=Sort_Order, D=Area, E=Category_Path, F=Category,
+        G=Attribute_Name, H=Data_Type, I=Unit, J=Is_Required, K=Default_Value,
+        L=Validation_Min, M=Validation_Max, N=Description
         """
-        for row_idx, row in enumerate(df.itertuples(index=False), start=2):
-            # A: Type (editable via dropdown)
+        for row_idx, row in enumerate(df.itertuples(index=False), start=3):  # Start at row 3
+            # A: Type (from data)
             cell_a = ws.cell(row_idx, 1, row.Type)
             cell_a.fill = self.PINK_FILL
             cell_a.border = self.THIN_BORDER
             cell_a.alignment = self.CENTER_ALIGN
             
-            # B: Level (FORMULA - auto-calculated from Type and Category_Path)
+            # B: Level (FORMULA - calculated from Category_Path)
             if row.Type == 'Area':
                 cell_b = ws.cell(row_idx, 2, 0)
             elif row.Type == 'Attribute':
                 # Attribute level = parent category level + 1
-                # We'll use a simpler approach: count ">" in Category_Path + 1
-                level_formula = f'=LEN(D{row_idx})-LEN(SUBSTITUTE(D{row_idx},">",""))+1'
+                # Count ">" in Category_Path + 1
+                level_formula = f'=LEN(E{row_idx})-LEN(SUBSTITUTE(E{row_idx},">",""))+1'
                 cell_b = ws.cell(row_idx, 2)
                 cell_b.value = level_formula
             else:  # Category
-                level_formula = f'=LEN(D{row_idx})-LEN(SUBSTITUTE(D{row_idx},">",""))'
+                level_formula = f'=LEN(E{row_idx})-LEN(SUBSTITUTE(E{row_idx},">",""))'
                 cell_b = ws.cell(row_idx, 2)
                 cell_b.value = level_formula
             
@@ -314,62 +327,61 @@ class EnhancedStructureExporter:
             cell_b.border = self.THIN_BORDER
             cell_b.alignment = self.CENTER_ALIGN
             
-            # C: Area (FORMULA - extract first part before ">")
-            area_formula = f'=TRIM(LEFT(D{row_idx},IFERROR(FIND(">",D{row_idx})-1,LEN(D{row_idx}))))'
-            cell_c = ws.cell(row_idx, 3)
-            cell_c.value = area_formula
+            # C: Sort_Order (from data)
+            cell_c = ws.cell(row_idx, 3, row.Sort_Order)
             cell_c.fill = self.PINK_FILL
             cell_c.border = self.THIN_BORDER
-            cell_c.alignment = self.LEFT_ALIGN
+            cell_c.alignment = self.CENTER_ALIGN
             
-            # D: Category_Path (editable - user can change hierarchy)
-            cell_d = ws.cell(row_idx, 4, row.Category_Path)
-            cell_d.fill = self.PINK_FILL  # Actually should be editable for new items
+            # D: Area (FORMULA - extract first part before ">")
+            area_formula = f'=TRIM(LEFT(E{row_idx},IFERROR(FIND(">",E{row_idx})-1,LEN(E{row_idx}))))'
+            cell_d = ws.cell(row_idx, 4)
+            cell_d.value = area_formula
+            cell_d.fill = self.PINK_FILL
             cell_d.border = self.THIN_BORDER
             cell_d.alignment = self.LEFT_ALIGN
             
-            # E: Category (editable)
-            cell_e = ws.cell(row_idx, 5, row.Category)
-            cell_e.fill = self.BLUE_FILL
+            # E: Category_Path (from data)
+            cell_e = ws.cell(row_idx, 5, row.Category_Path)
+            cell_e.fill = self.PINK_FILL
             cell_e.border = self.THIN_BORDER
             cell_e.alignment = self.LEFT_ALIGN
             
-            # F: Attribute_Name (editable)
-            cell_f = ws.cell(row_idx, 6, row.Attribute_Name)
+            # F: Category (editable)
+            cell_f = ws.cell(row_idx, 6, row.Category)
             cell_f.fill = self.BLUE_FILL
             cell_f.border = self.THIN_BORDER
             cell_f.alignment = self.LEFT_ALIGN
             
-            # G: Data_Type (editable, dropdown)
-            cell_g = ws.cell(row_idx, 7, row.Data_Type)
+            # G: Attribute_Name (editable)
+            cell_g = ws.cell(row_idx, 7, row.Attribute_Name)
             cell_g.fill = self.BLUE_FILL
             cell_g.border = self.THIN_BORDER
-            cell_g.alignment = self.CENTER_ALIGN
+            cell_g.alignment = self.LEFT_ALIGN
             
-            # H: Unit (editable)
-            cell_h = ws.cell(row_idx, 8, row.Unit)
+            # H: Data_Type (editable, dropdown)
+            cell_h = ws.cell(row_idx, 8, row.Data_Type)
             cell_h.fill = self.BLUE_FILL
             cell_h.border = self.THIN_BORDER
             cell_h.alignment = self.CENTER_ALIGN
             
-            # I: Is_Required (editable, dropdown)
-            cell_i = ws.cell(row_idx, 9, row.Is_Required)
+            # I: Unit (editable)
+            cell_i = ws.cell(row_idx, 9, row.Unit)
             cell_i.fill = self.BLUE_FILL
             cell_i.border = self.THIN_BORDER
             cell_i.alignment = self.CENTER_ALIGN
             
-            # J: Default_Value (editable)
-            cell_j = ws.cell(row_idx, 10, row.Default_Value)
+            # J: Is_Required (editable, dropdown)
+            cell_j = ws.cell(row_idx, 10, row.Is_Required)
             cell_j.fill = self.BLUE_FILL
             cell_j.border = self.THIN_BORDER
-            cell_j.alignment = self.LEFT_ALIGN
+            cell_j.alignment = self.CENTER_ALIGN
             
-            # K: Sort_Order (FORMULA - auto from row position within same Type+Area)
-            # Simplified: just use row number for now
-            cell_k = ws.cell(row_idx, 11, row.Sort_Order)
-            cell_k.fill = self.PINK_FILL
+            # K: Default_Value (editable)
+            cell_k = ws.cell(row_idx, 11, row.Default_Value)
+            cell_k.fill = self.BLUE_FILL
             cell_k.border = self.THIN_BORDER
-            cell_k.alignment = self.CENTER_ALIGN
+            cell_k.alignment = self.LEFT_ALIGN
             
             # L: Validation_Min (editable)
             cell_l = ws.cell(row_idx, 12, row.Validation_Min)
@@ -404,9 +416,9 @@ class EnhancedStructureExporter:
             showDropDown=True
         )
         ws.add_data_validation(type_dv)
-        type_dv.add(f'A2:A{max_row + 100}')  # Extra rows for new entries
+        type_dv.add(f'A3:A{max_row + 100}')  # Start at row 3, extra rows for new entries
         
-        # Data_Type column (G) - number, text, datetime, boolean, link
+        # Data_Type column (H) - number, text, datetime, boolean, link
         datatype_dv = DataValidation(
             type="list",
             formula1='"number,text,datetime,boolean,link"',
@@ -414,9 +426,9 @@ class EnhancedStructureExporter:
             showDropDown=True
         )
         ws.add_data_validation(datatype_dv)
-        datatype_dv.add(f'G2:G{max_row + 100}')
+        datatype_dv.add(f'H3:H{max_row + 100}')  # Column H (was G)
         
-        # Is_Required column (I) - TRUE, FALSE
+        # Is_Required column (J) - TRUE, FALSE
         required_dv = DataValidation(
             type="list",
             formula1='"TRUE,FALSE"',
@@ -424,7 +436,7 @@ class EnhancedStructureExporter:
             showDropDown=True
         )
         ws.add_data_validation(required_dv)
-        required_dv.add(f'I2:I{max_row + 100}')
+        required_dv.add(f'J3:J{max_row + 100}')  # Column J (was I)
     
     
     def _add_row_grouping(self, ws, df: pd.DataFrame):
@@ -434,7 +446,7 @@ class EnhancedStructureExporter:
         current_area_start = None
         current_cat_starts = {}  # level -> start_row
         
-        for idx, row in enumerate(df.itertuples(), start=2):
+        for idx, row in enumerate(df.itertuples(), start=3):  # Start at row 3
             if row.Type == "Area":
                 # Close previous area group if exists
                 if current_area_start and current_area_start < idx - 1:
@@ -468,17 +480,26 @@ class EnhancedStructureExporter:
     
     def _add_column_grouping(self, ws):
         """
-        Add column grouping to hide detailed attribute columns.
+        Add column grouping to hide/show column groups.
         
-        Groups:
-        - G:K (Data_Type through Sort_Order) = Attribute Details
-        - L:M (Validation_Min, Validation_Max) = Validation Rules
+        New groups (all at outline_level=1):
+        - B:C (Level, Sort_Order) = CLOSED (hidden=True)
+        - F (Category) = CLOSED (hidden=True)
+        - H:M (Data_Type through Validation_Max) = OPEN (hidden=False)
         """
-        # Group: Attribute Details (columns G through K)
-        ws.column_dimensions.group('G', 'K', outline_level=1)
+        # Group 1: B-C (Level, Sort_Order) - CLOSED
+        for col in ['B', 'C']:
+            ws.column_dimensions[col].outline_level = 1
+            ws.column_dimensions[col].hidden = True  # Closed/collapsed
         
-        # Group: Validation Rules (columns L through M)
-        ws.column_dimensions.group('L', 'M', outline_level=1)
+        # Group 2: F (Category) - CLOSED
+        ws.column_dimensions['F'].outline_level = 1
+        ws.column_dimensions['F'].hidden = True  # Closed/collapsed
+        
+        # Group 3: H-M (Data_Type through Validation_Max) - OPEN
+        for col in ['H', 'I', 'J', 'K', 'L', 'M']:
+            ws.column_dimensions[col].outline_level = 1
+            ws.column_dimensions[col].hidden = False  # Open/visible
     
     
     def _auto_size_columns(self, ws):
@@ -503,25 +524,6 @@ class EnhancedStructureExporter:
             adjusted_width = max(adjusted_width, 10)  # Min 10 characters
             
             ws.column_dimensions[column_letter].width = adjusted_width
-
-
-# Integration with existing ReverseEngineer class
-def add_to_reverse_engineer_class():
-    """
-    This shows how to integrate into existing reverse_engineer.py
-    
-    Add this method to your ReverseEngineer class:
-    """
-    
-    def export_hierarchical_enhanced(self, output_path: Optional[str] = None) -> str:
-        """
-        Export structure using enhanced format with validation and grouping.
-        
-        Returns:
-            Path to created Excel file
-        """
-        exporter = EnhancedStructureExporter(self.client, self.user_id)
-        return exporter.export_hierarchical_view(output_path)
 
 
 # Usage example
