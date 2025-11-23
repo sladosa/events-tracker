@@ -1,7 +1,7 @@
 """
 Enhanced Structure Exporter - Excel with validation, formulas, and grouping
 
-Features: 1
+Features:
 - Color-coded columns (Pink=auto-calculated, Blue=user-editable)
 - Drop-down validation for Type, Data_Type, Is_Required
 - Auto-calculated formulas for Level, Area, Category_Path
@@ -100,6 +100,9 @@ class EnhancedStructureExporter:
         
         # Add auto filter (A2:N...)
         ws.auto_filter.ref = f'A2:N{len(df) + 2}'  # +2 for header row
+        
+        # Add Help sheet
+        self._add_help_sheet(wb)
         
         # Generate filename if not provided
         if not output_path:
@@ -442,6 +445,7 @@ class EnhancedStructureExporter:
     def _add_row_grouping(self, ws, df: pd.DataFrame):
         """
         Add row grouping for collapsible Areas and Categories.
+        All groups are collapsed by default.
         """
         current_area_start = None
         current_cat_starts = {}  # level -> start_row
@@ -450,7 +454,7 @@ class EnhancedStructureExporter:
             if row.Type == "Area":
                 # Close previous area group if exists
                 if current_area_start and current_area_start < idx - 1:
-                    ws.row_dimensions.group(current_area_start, idx - 1, outline_level=1)
+                    ws.row_dimensions.group(current_area_start, idx - 1, outline_level=1, hidden=True)
                 
                 current_area_start = idx + 1  # Next row starts new group
                 current_cat_starts = {}  # Reset category tracking
@@ -462,20 +466,20 @@ class EnhancedStructureExporter:
                     if cat_level >= level:
                         start = current_cat_starts[cat_level]
                         if start < idx:
-                            ws.row_dimensions.group(start, idx - 1, outline_level=level + 1)
+                            ws.row_dimensions.group(start, idx - 1, outline_level=level + 1, hidden=True)
                         del current_cat_starts[cat_level]
                 
                 # Start new category group
                 current_cat_starts[level] = idx + 1
         
-        # Close remaining groups
+        # Close remaining groups (collapsed)
         max_row = ws.max_row
         if current_area_start and current_area_start <= max_row:
-            ws.row_dimensions.group(current_area_start, max_row, outline_level=1)
+            ws.row_dimensions.group(current_area_start, max_row, outline_level=1, hidden=True)
         
         for level, start in current_cat_starts.items():
             if start <= max_row:
-                ws.row_dimensions.group(start, max_row, outline_level=level + 1)
+                ws.row_dimensions.group(start, max_row, outline_level=level + 1, hidden=True)
     
     
     def _add_column_grouping(self, ws):
@@ -505,6 +509,7 @@ class EnhancedStructureExporter:
     def _auto_size_columns(self, ws):
         """
         Auto-size columns based on content with max width limit.
+        Column D (Area) uses minimal width to fit content only.
         """
         for column_cells in ws.columns:
             length = 0
@@ -519,12 +524,156 @@ class EnhancedStructureExporter:
                 except:
                     pass
             
-            # Set width with limits
-            adjusted_width = min(length + 2, 50)  # Max 50 characters
-            adjusted_width = max(adjusted_width, 10)  # Min 10 characters
+            # Column D (Area) - minimal width (no padding)
+            if column_letter == 'D':
+                adjusted_width = max(length, 8)  # Min 8 for header, no extra padding
+            else:
+                # Other columns - normal width with limits
+                adjusted_width = min(length + 2, 50)  # Max 50 characters
+                adjusted_width = max(adjusted_width, 10)  # Min 10 characters
             
             ws.column_dimensions[column_letter].width = adjusted_width
 
+
+
+    def _add_help_sheet(self, wb):
+        """
+        Add Help sheet with instructions for editing.
+        """
+        ws = wb.create_sheet("Help")
+        
+        # Title
+        ws.cell(1, 1, "EVENTS TRACKER - Enhanced Structure Export").font = Font(bold=True, size=14)
+        ws.cell(1, 1).fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        ws.cell(1, 1).font = Font(bold=True, size=14, color="FFFFFF")
+        
+        # Content
+        help_content = [
+            ("", ""),
+            ("WHAT IS THIS FILE?", ""),
+            ("This Excel file contains your event tracking structure exported from the Events Tracker app.", ""),
+            ("You can VIEW and EDIT this structure, then re-import it back into the app.", ""),
+            ("", ""),
+            ("COLOR CODING:", ""),
+            ("PINK columns = AUTO-CALCULATED (Read-Only)", ""),
+            ("  • Type: Area, Category, or Attribute", ""),
+            ("  • Level: Calculated from Category_Path depth", ""),
+            ("  • Sort_Order: Order within parent", ""),
+            ("  • Area: Extracted from Category_Path", ""),
+            ("  • Category_Path: Full hierarchical path", ""),
+            ("", ""),
+            ("BLUE columns = EDITABLE", ""),
+            ("  • Category: Category name", ""),
+            ("  • Attribute_Name: Attribute name", ""),
+            ("  • Data_Type: number, text, datetime, boolean, link", ""),
+            ("  • Unit: Unit of measurement (e.g., 'kg', 'hours')", ""),
+            ("  • Is_Required: TRUE or FALSE", ""),
+            ("  • Default_Value: Default value for new events", ""),
+            ("  • Validation_Min: Minimum value (for number types)", ""),
+            ("  • Validation_Max: Maximum value (for number types)", ""),
+            ("  • Description: Documentation and notes", ""),
+            ("", ""),
+            ("WHAT CAN YOU EDIT?", ""),
+            ("✅ YES - Edit these:", ""),
+            ("  • Category names (column F)", ""),
+            ("  • Attribute names (column G)", ""),
+            ("  • Data types (column H) - use dropdown", ""),
+            ("  • Units (column I)", ""),
+            ("  • Required status (column J) - use dropdown", ""),
+            ("  • Default values (column K)", ""),
+            ("  • Validation Min/Max (columns L-M)", ""),
+            ("  • Descriptions (column N)", ""),
+            ("", ""),
+            ("❌ NO - Do NOT edit:", ""),
+            ("  • PINK columns (Type, Level, Sort_Order, Area, Category_Path)", ""),
+            ("  • Row 1 (keep blank)", ""),
+            ("  • Row 2 (headers)", ""),
+            ("  • Delete rows (use app to delete instead)", ""),
+            ("  • Add rows (use app to add instead)", ""),
+            ("", ""),
+            ("HOW TO USE GROUPS:", ""),
+            ("Column Groups (buttons at top):", ""),
+            ("  • Click [+] button to expand collapsed groups", ""),
+            ("  • Click [-] button to collapse expanded groups", ""),
+            ("  • Group 1 (B-C): Level, Sort_Order", ""),
+            ("  • Group 2 (F): Category", ""),
+            ("  • Group 3 (H-M): Attribute details", ""),
+            ("", ""),
+            ("Row Groups (buttons at left):", ""),
+            ("  • Click [+] to expand Area or Category", ""),
+            ("  • Click [-] to collapse Area or Category", ""),
+            ("  • All groups start collapsed for cleaner view", ""),
+            ("", ""),
+            ("HOW TO FILTER:", ""),
+            ("Auto Filter is enabled on all columns:", ""),
+            ("  1. Click filter icon in header (row 2)", ""),
+            ("  2. Select filter criteria", ""),
+            ("  3. Click OK to apply", ""),
+            ("  4. Click 'Clear Filter' to remove", ""),
+            ("", ""),
+            ("TIPS:", ""),
+            ("  • Use Freeze Panes: Columns A-F and row 2 stay visible when scrolling", ""),
+            ("  • Use Auto Filter: Quickly find specific Areas, Categories, or Attributes", ""),
+            ("  • Use Groups: Hide unnecessary details for cleaner view", ""),
+            ("  • Category_Path shows full hierarchy: 'Area > Category > Subcategory'", ""),
+            ("  • Level 0 = Area, Level 1 = Top Category, Level 2+ = Subcategories", ""),
+            ("", ""),
+            ("VALIDATION RULES:", ""),
+            ("Drop-down lists are provided for:", ""),
+            ("  • Type (A): Area, Category, Attribute", ""),
+            ("  • Data_Type (H): number, text, datetime, boolean, link", ""),
+            ("  • Is_Required (J): TRUE, FALSE", ""),
+            ("", ""),
+            ("FORMULAS:", ""),
+            ("These columns use formulas (don't edit):", ""),
+            ("  • Level (B): =LEN(E3)-LEN(SUBSTITUTE(E3,">",""))", ""),
+            ("  • Area (D): =TRIM(LEFT(E3,IFERROR(FIND(">",E3)-1,LEN(E3))))", ""),
+            ("", ""),
+            ("RE-IMPORTING:", ""),
+            ("After editing, you can re-import this file:", ""),
+            ("  1. Save your changes in Excel", ""),
+            ("  2. Go to Events Tracker app", ""),
+            ("  3. Navigate to 'Upload Template'", ""),
+            ("  4. Upload this edited file", ""),
+            ("  5. Review detected changes", ""),
+            ("  6. Confirm to apply changes", ""),
+            ("", ""),
+            ("IMPORTANT NOTES:", ""),
+            ("  • Always keep the structure intact (don't delete columns)", ""),
+            ("  • Don't change PINK column values", ""),
+            ("  • Use app features to add/delete Areas, Categories, Attributes", ""),
+            ("  • This file is for viewing and light editing only", ""),
+            ("  • For major changes, use the app interface", ""),
+            ("", ""),
+            ("SUPPORT:", ""),
+            ("If you have questions or issues:", ""),
+            ("  • Check the app Help section", ""),
+            ("  • Review this Help sheet", ""),
+            ("  • Contact support if needed", ""),
+            ("", ""),
+            ("VERSION:", ""),
+            ("Enhanced Structure Export v2.1", ""),
+            ("Generated: " + datetime.now().strftime('%Y-%m-%d %H:%M:%S'), ""),
+        ]
+        
+        # Write content
+        for row_idx, (text, extra) in enumerate(help_content, start=2):
+            cell = ws.cell(row_idx, 1, text)
+            
+            # Format sections
+            if text and text.isupper() and text.endswith(':'):
+                cell.font = Font(bold=True, size=12)
+                cell.fill = PatternFill(start_color="E6F2FF", end_color="E6F2FF", fill_type="solid")
+            elif text.startswith('✅') or text.startswith('❌'):
+                cell.font = Font(bold=True)
+            elif text.startswith('  •'):
+                cell.alignment = Alignment(indent=1)
+        
+        # Set column width
+        ws.column_dimensions['A'].width = 100
+        
+        # Freeze first row
+        ws.freeze_panes = 'A2'
 
 # Usage example
 if __name__ == "__main__":
