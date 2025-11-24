@@ -1,3 +1,6 @@
+# 1 Events Tracker - Complete Context Document
+
+
 > **⚠️ INSTRUCTIONS FOR AI TOOLS - Preserving Automatic Chapter Numbering**
 > 
 > This document uses **automatic chapter numbering**. All chapters (except the main title and TOC) have numbers (1, 1.1, 1.1.1...).
@@ -19,7 +22,6 @@
 > Read the complete instructions section in the document for details.
 
 
-# Events Tracker - Complete Context Document
 
 > Comprehensive technical documentation for Events Tracker project. Use this document when starting development sessions with Claude, GPT, or other AI coding assistants.
 
@@ -29,19 +31,170 @@
 
 ---
 
-undefined
-style: bullet
-max_depth: 2
+## 1.1 📑 Table of Contents
+
+- [1. 📋 Project Overview](#1-project-overview)
+  - [1.1. What It Does](#11-what-it-does)
+  - [1.2. Perfect For](#12-perfect-for)
+- [2. 🏗️ Architecture and Technologies](#2-architecture-and-technologies)
+  - [2.1. Tech Stack](#21-tech-stack)
+  - [2.2. Project Structure](#22-project-structure)
+  - [2.3. Database Pattern](#23-database-pattern)
+- [3. 🗄️ Database Schema](#3-database-schema)
+  - [3.1. Core Tables](#31-core-tables)
+    - [3.1.1. areas](#311-areas)
+    - [3.1.2. categories](#312-categories)
+    - [3.1.3. attribute_definitions](#313-attribute-definitions)
+  - [3.2. Data Tables](#32-data-tables)
+    - [3.2.1. events](#321-events)
+    - [3.2.2. event_attributes](#322-event-attributes)
+  - [3.3. Security: Row Level Security (RLS)](#33-security-row-level-security-rls)
+- [4. 🔧 Python Modules and Functionality](#4-python-modules-and-functionality)
+  - [4.1. Authentication Module](#41-authentication-module)
+  - [4.2. Database Connection](#42-database-connection)
+  - [4.3. Structure Viewer](#43-structure-viewer)
+  - [4.4. Single Event Entry](#44-single-event-entry)
+  - [4.5. Bulk Import](#45-bulk-import)
+  - [4.6. View Data - Export](#46-view-data---export)
+  - [4.7. View Data - Import](#47-view-data---import)
+  - [4.8. Enhanced Structure Exporter](#48-enhanced-structure-exporter)
+  - [4.9. Structure Export (Legacy)](#49-structure-export-legacy)
+  - [4.10. Template Parsing](#410-template-parsing)
+  - [4.11. Smart Rename Detection](#411-smart-rename-detection)
+  - [4.12. SQL Generator](#412-sql-generator)
+  - [4.13. Excel Validators](#413-excel-validators)
+  - [4.14. Template Generator](#414-template-generator)
+- [5. 🎨 User Interface](#5-user-interface)
+  - [5.1. Main Pages](#51-main-pages)
+    - [5.1.1. 1. **Login/Signup** (auth.py)](#511-1-loginsignup-authpy)
+    - [5.1.2. 2. **View Structure** (structure_viewer.py)](#512-2-view-structure-structure-viewerpy)
+    - [5.1.3. 3. **Add Event** (event_entry.py)](#513-3-add-event-event-entrypy)
+    - [5.1.4. 4. **Bulk Import** (bulk_import.py)](#514-4-bulk-import-bulk-importpy)
+    - [5.1.5. 5. **View Data - Export** (view_data_export.py)](#515-5-view-data---export-view-data-exportpy)
+    - [5.1.6. 6. **View Data - Import** (view_data_import.py)](#516-6-view-data---import-view-data-importpy)
+    - [5.1.7. 7. **Download Structure** (enhanced_structure_exporter.py)](#517-7-download-structure-enhanced-structure-exporterpy)
+    - [5.1.8. 8. **Upload Template** (excel_parser_new.py)](#518-8-upload-template-excel-parser-newpy)
+    - [5.1.9. 9. **Help**](#519-9-help)
+- [6. 🔄 Key Workflows](#6-key-workflows)
+  - [6.1. User Registration and Login](#61-user-registration-and-login)
+  - [6.2. Creating Event Structure](#62-creating-event-structure)
+  - [6.3. Recording Events](#63-recording-events)
+  - [6.4. Viewing and Editing Events](#64-viewing-and-editing-events)
+  - [6.5. Managing Structure](#65-managing-structure)
+- [7. 📊 Data Flow](#7-data-flow)
+  - [7.1. Event Creation Flow](#71-event-creation-flow)
+  - [7.2. Bulk Import Flow](#72-bulk-import-flow)
+  - [7.3. Structure Export Flow](#73-structure-export-flow)
+  - [7.4. View Data Export/Import Flow](#74-view-data-exportimport-flow)
+- [8. 📄 Excel Integration](#8-excel-integration)
+  - [8.1. Enhanced Structure Export Format (v2.1)](#81-enhanced-structure-export-format-v21)
+  - [8.2. Event Import Template](#82-event-import-template)
+  - [8.3. Event Export Format (for editing)](#83-event-export-format-for-editing)
+- [9. 🔐 Security](#9-security)
+  - [9.1. Row Level Security (RLS)](#91-row-level-security-rls)
+  - [9.2. Credentials Management](#92-credentials-management)
+  - [9.3. Input Validation](#93-input-validation)
+  - [9.4. RLS Requirements in Code](#94-rls-requirements-in-code)
+- [. ✅ CORRECT - Always include user_id](#-correct---always-include-user-id)
+- [. ❌ WRONG - Missing user_id (RLS violation!)](#-wrong---missing-user-id-rls-violation)
+- [1. ⚡ Performance Considerations](#1-performance-considerations)
+  - [1.1. Database Queries](#11-database-queries)
+- [. Good: Specific columns with join](#-good-specific-columns-with-join)
+- [. Bad: Select all with N+1 queries](#-bad-select-all-with-n1-queries)
+  - [0.1. Memory Usage](#01-memory-usage)
+  - [0.2. Streamlit Performance](#02-streamlit-performance)
+- [1. ✅ Testing Instructions](#1-testing-instructions)
+  - [1.1. Manual Testing Checklist](#11-manual-testing-checklist)
+  - [1.2. Test Data](#12-test-data)
+- [2. 🚀 Deployment Notes](#2-deployment-notes)
+  - [2.1. Streamlit Cloud Setup](#21-streamlit-cloud-setup)
+  - [2.2. Environment Variables](#22-environment-variables)
+  - [2.3. Database Setup](#23-database-setup)
+  - [2.4. Deployment Checklist](#24-deployment-checklist)
+  - [2.5. Git Workflow](#25-git-workflow)
+- [. Commit message format](#-commit-message-format)
+- [. Push to GitHub](#-push-to-github)
+- [. Streamlit Cloud auto-deploys from GitHub](#-streamlit-cloud-auto-deploys-from-github)
+- [. Configure secrets in Streamlit Cloud dashboard](#-configure-secrets-in-streamlit-cloud-dashboard)
+- [1. 🐛 Common Issues and Solutions](#1-common-issues-and-solutions)
+  - [1.1. Database Connection Issues](#11-database-connection-issues)
+  - [1.2. Excel Processing Issues](#12-excel-processing-issues)
+  - [1.3. Data Import Issues](#13-data-import-issues)
+  - [1.4. Performance Issues](#14-performance-issues)
+  - [1.5. Authentication Issues](#15-authentication-issues)
+- [2. 💻 Useful Code Snippets](#2-useful-code-snippets)
+  - [2.1. Database Operations](#21-database-operations)
+- [. ✅ CORRECT - Always include user_id](#-correct---always-include-user-id)
+- [. ❌ WRONG - Missing user_id (RLS violation!)](#-wrong---missing-user-id-rls-violation)
+- [. SELECT with JOIN - get events with attributes and definitions](#-select-with-join---get-events-with-attributes-and-definitions)
+- [. INSERT event](#-insert-event)
+- [. INSERT attributes (EAV)](#-insert-attributes-eav)
+- [. UPDATE event](#-update-event)
+- [. DELETE event (CASCADE deletes event_attributes automatically)](#-delete-event-cascade-deletes-event-attributes-automatically)
+  - [0.1. Streamlit UI Patterns](#01-streamlit-ui-patterns)
+- [. Success message](#-success-message)
+- [. Error message](#-error-message)
+- [. Warning message](#-warning-message)
+- [. Info message](#-info-message)
+- [. Show spinner during long operations](#-show-spinner-during-long-operations)
+- [. Streamlit form](#-streamlit-form)
+- [. Initialize session state](#-initialize-session-state)
+- [. Use session state](#-use-session-state)
+- [. Use expanders for optional details](#-use-expanders-for-optional-details)
+  - [0.1. Error Handling](#01-error-handling)
+- [. Usage](#-usage)
+- [1. 📐 Development Guidelines](#1-development-guidelines)
+  - [1.1. Code Style](#11-code-style)
+  - [1.2. Naming Conventions](#12-naming-conventions)
+- [. Good](#-good)
+- [. Bad](#-bad)
+  - [0.1. Module Structure](#01-module-structure)
+- [. ... other imports](#-other-imports)
+- [. Constants](#-constants)
+- [. Helper functions below](#-helper-functions-below)
+  - [0.1. Documentation](#01-documentation)
+  - [0.2. Error Handling](#02-error-handling)
+  - [0.3. RLS Requirements](#03-rls-requirements)
+- [. ✅ CORRECT](#-correct)
+- [. ❌ WRONG - Will fail or return no data due to RLS](#-wrong---will-fail-or-return-no-data-due-to-rls)
+  - [0.1. Testing Approach](#01-testing-approach)
+  - [0.2. Git Workflow](#02-git-workflow)
+- [1. 🚀 Quick Start for New Sessions](#1-quick-start-for-new-sessions)
+  - [1.1. Example Session Starters](#11-example-session-starters)
+- [2. 🎯 Future Enhancements](#2-future-enhancements)
+  - [2.1. Short-term (Next 1-3 months)](#21-short-term-next-1-3-months)
+  - [2.2. Medium-term (3-6 months)](#22-medium-term-3-6-months)
+  - [2.3. Long-term (6-12 months)](#23-long-term-6-12-months)
+- [3. 📦 Dependencies](#3-dependencies)
+  - [3.1. Core Dependencies](#31-core-dependencies)
+  - [3.2. Data Processing](#32-data-processing)
+  - [3.3. Validation](#33-validation)
+  - [3.4. Development](#34-development)
+- [. No dev dependencies currently](#-no-dev-dependencies-currently)
+- [. Future: pytest, black, flake8, mypy](#-future-pytest-black-flake8-mypy)
+- [1. 📊 Performance Benchmarks](#1-performance-benchmarks)
+  - [1.1. Current Performance (as of v2.1)](#11-current-performance-as-of-v21)
+  - [1.2. Optimization Targets](#12-optimization-targets)
+- [2. 🔄 Recent Updates](#2-recent-updates)
+  - [2.1. Version 2.2 (November 23, 2025)](#21-version-22-november-23-2025)
+  - [2.2. Version 2.1 (November 23, 2025)](#22-version-21-november-23-2025)
+  - [2.3. Version 2.0 (November 20, 2025)](#23-version-20-november-20-2025)
+- [3. 📞 Support and Resources](#3-support-and-resources)
+  - [3.1. Documentation](#31-documentation)
+  - [3.2. Internal Documentation](#32-internal-documentation)
+  - [3.3. Project Information](#33-project-information)
+  - [3.4. Troubleshooting](#34-troubleshooting)
+- [4. 🎉 Conclusion](#4-conclusion)
 
 ---
 
-## 📋 Project Overview
+## 1.2 📋 Project Overview
 
 **Application Name:** Events Tracker  
 **Description:** A comprehensive, hierarchical event tracking system using Entity-Attribute-Value (EAV) pattern  
 **Purpose:** Allow users to define custom event structures and record events with dynamic attributes
 
-### What It Does
+### 1.2.1 What It Does
 
 **Events Tracker** enables users to:
 - Define hierarchical structure (Areas → Categories → Attributes)
@@ -50,7 +203,7 @@ max_depth: 2
 - Manage structure through Excel templates
 - View and analyze tracked events
 
-### Perfect For
+### 1.2.2 Perfect For
 
 - Personal tracking (fitness, health, habits, finances)
 - Project management and time tracking
@@ -60,9 +213,9 @@ max_depth: 2
 
 ---
 
-## 🏗️ Architecture and Technologies
+## 1.3 🏗️ Architecture and Technologies
 
-### Tech Stack
+### 1.3.1 Tech Stack
 
 **Frontend:**
 - Streamlit 1.28.0 (web interface)
@@ -88,7 +241,7 @@ max_depth: 2
 - pandas (data manipulation)
 - openpyxl (Excel generation and parsing)
 
-### Project Structure
+### 1.3.2 Project Structure
 
 ```
 events-tracker/
@@ -115,7 +268,7 @@ events-tracker/
     └── excel_validators.py       # Excel validation utilities
 ```
 
-### Database Pattern
+### 1.3.3 Database Pattern
 
 - **EAV (Entity-Attribute-Value)** pattern for flexible data structure
 - **Row Level Security (RLS)** for multi-tenant security
@@ -124,11 +277,11 @@ events-tracker/
 
 ---
 
-## 🗄️ Database Schema
+## 1.4 🗄️ Database Schema
 
-### Core Tables
+### 1.4.1 Core Tables
 
-#### areas
+#### 1.4.1.1 areas
 Top-level organization
 - `id` (uuid, PK)
 - `user_id` (uuid, FK → auth.users)
@@ -139,7 +292,7 @@ Top-level organization
 - `description` (text)
 - `created_at`, `updated_at` (timestamp)
 
-#### categories
+#### 1.4.1.2 categories
 Hierarchical event types (max 10 levels)
 - `id` (uuid, PK)
 - `user_id` (uuid, FK → auth.users)
@@ -151,7 +304,7 @@ Hierarchical event types (max 10 levels)
 - `sort_order` (integer)
 - `created_at`, `updated_at` (timestamp)
 
-#### attribute_definitions
+#### 1.4.1.3 attribute_definitions
 Define what data can be captured
 - `id` (uuid, PK)
 - `user_id` (uuid, FK → auth.users)
@@ -165,9 +318,9 @@ Define what data can be captured
 - `sort_order` (integer)
 - `created_at`, `updated_at` (timestamp)
 
-### Data Tables
+### 1.4.2 Data Tables
 
-#### events
+#### 1.4.2.1 events
 Main event records
 - `id` (uuid, PK)
 - `user_id` (uuid, FK → auth.users)
@@ -176,7 +329,7 @@ Main event records
 - `comment` (text, nullable)
 - `created_at`, `edited_at` (timestamp)
 
-#### event_attributes
+#### 1.4.2.2 event_attributes
 EAV storage for event data
 - `id` (uuid, PK)
 - `user_id` (uuid, FK → auth.users)
@@ -190,7 +343,7 @@ EAV storage for event data
 - `created_at` (timestamp)
 - **CONSTRAINT:** Only ONE value column can be populated per row
 
-### Security: Row Level Security (RLS)
+### 1.4.3 Security: Row Level Security (RLS)
 
 All tables have RLS policies ensuring:
 - Users can only access their own data
@@ -207,9 +360,9 @@ USING (user_id = auth.uid());
 
 ---
 
-## 🔧 Python Modules and Functionality
+## 1.5 🔧 Python Modules and Functionality
 
-### Authentication Module
+### 1.5.1 Authentication Module
 
 **File:** `src/auth.py`  
 **Status:** Fully Functional ✅  
@@ -221,13 +374,13 @@ USING (user_id = auth.uid());
 - get_user_id(), get_user_email() - User info
 - show_login_page(), show_user_info_sidebar() - Streamlit UI
 
-### Database Connection
+### 1.5.2 Database Connection
 
 **File:** `src/supabase_client.py`  
 **Status:** Active ✅  
 **Purpose:** Manages Supabase client initialization and connection
 
-### Structure Viewer
+### 1.5.3 Structure Viewer
 
 **File:** `src/structure_viewer.py`  
 **Status:** Fully Functional ✅  
@@ -241,7 +394,7 @@ USING (user_id = auth.uid());
 - Uses indentation instead of nested expanders
 - Statistics dashboard (counts, max depth)
 
-### Single Event Entry
+### 1.5.4 Single Event Entry
 
 **File:** `src/event_entry.py`  
 **Status:** Fully Functional ✅  
@@ -256,7 +409,7 @@ USING (user_id = auth.uid());
 - Comment field (optional)
 - Mobile-optimized layout
 
-### Bulk Import
+### 1.5.5 Bulk Import
 
 **File:** `src/bulk_import.py`  
 **Status:** Fully Functional ✅  
@@ -271,7 +424,7 @@ USING (user_id = auth.uid());
 - Skip or overwrite duplicates
 - Detailed error reporting with line numbers
 
-### View Data - Export
+### 1.5.6 View Data - Export
 
 **File:** `src/view_data_export.py`  
 **Status:** Fully Functional ⭐  
@@ -292,7 +445,7 @@ USING (user_id = auth.uid());
   - Frozen panes (header + first 3 columns)
 - Instructions sheet included in workbook
 
-### View Data - Import
+### 1.5.7 View Data - Import
 
 **File:** `src/view_data_import.py`  
 **Status:** Fully Functional ⭐  
@@ -312,7 +465,7 @@ USING (user_id = auth.uid());
 - Updates only changed values with RLS checks
 - Full error reporting
 
-### Enhanced Structure Exporter
+### 1.5.8 Enhanced Structure Exporter
 
 **File:** `src/enhanced_structure_exporter.py`  
 **Status:** Fully Functional ⭐ (v2.1)  
@@ -341,7 +494,7 @@ USING (user_id = auth.uid());
 - **Help sheet** with comprehensive instructions
 - Optimal column widths and professional appearance
 
-### Structure Export (Legacy)
+### 1.5.9 Structure Export (Legacy)
 
 **File:** `src/reverse_engineer.py`  
 **Status:** Functional ✅  
@@ -353,7 +506,7 @@ USING (user_id = auth.uid());
 - Converts Supabase structure back to template format
 - Creates timestamped backup filenames
 
-### Template Parsing
+### 1.5.10 Template Parsing
 
 **File:** `src/excel_parser_new.py`  
 **Status:** Fully Functional ✅  
@@ -376,7 +529,7 @@ USING (user_id = auth.uid());
 - UUID-based template parsing
 - Backward compatibility
 
-### Smart Rename Detection
+### 1.5.11 Smart Rename Detection
 
 **File:** `src/rename_detector.py`  
 **Status:** Functional ✅  
@@ -388,7 +541,7 @@ USING (user_id = auth.uid());
 - Prevents data loss during structure updates
 - Maintains referential integrity
 
-### SQL Generator
+### 1.5.12 SQL Generator
 
 **File:** `src/sql_generator.py`  
 **Status:** Fully Functional ✅  
@@ -401,7 +554,7 @@ USING (user_id = auth.uid());
 - Supports CASCADE deletion
 - Generates INSERT statements from Excel data
 
-### Excel Validators
+### 1.5.13 Excel Validators
 
 **File:** `src/excel_validators.py`  
 **Status:** Functional ✅  
@@ -412,7 +565,7 @@ USING (user_id = auth.uid());
 - Required field checks
 - Format validation
 
-### Template Generator
+### 1.5.14 Template Generator
 
 **File:** `src/generate_template.py`  
 **Status:** Functional ✅  
@@ -423,24 +576,24 @@ USING (user_id = auth.uid());
 
 ---
 
-## 🎨 User Interface
+## 1.6 🎨 User Interface
 
-### Main Pages
+### 1.6.1 Main Pages
 
-#### 1. **Login/Signup** (auth.py)
+#### 1.6.1.1 **Login/Signup** (auth.py)
 - Email + password authentication
 - User registration with email confirmation
 - Session management
 - Remember me functionality
 
-#### 2. **View Structure** (structure_viewer.py)
+#### 1.6.1.2 **View Structure** (structure_viewer.py)
 - Interactive tree view of Areas → Categories → Attributes
 - Expandable/collapsible hierarchy
 - Shows attribute properties (data type, unit, required, default, validation rules)
 - Search and filter functionality
 - Statistics dashboard
 
-#### 3. **Add Event** (event_entry.py)
+#### 1.6.1.3 **Add Event** (event_entry.py)
 - Single event creation form
 - Hierarchical category selection
 - Dynamic attribute inputs based on category
@@ -448,14 +601,14 @@ USING (user_id = auth.uid());
 - Validation of required fields
 - Comment field
 
-#### 4. **Bulk Import** (bulk_import.py)
+#### 1.6.1.4 **Bulk Import** (bulk_import.py)
 - Import multiple events from Excel/CSV
 - Download template with current structure
 - Validation and preview before import
 - Error reporting with line numbers
 - Duplicate handling options
 
-#### 5. **View Data - Export** (view_data_export.py)
+#### 1.6.1.5 **View Data - Export** (view_data_export.py)
 - Export events to Excel for viewing/editing
 - Filters: category, date range, specific attributes
 - Color-coded columns:
@@ -463,14 +616,14 @@ USING (user_id = auth.uid());
   - **BLUE:** Editable (attribute values, comment)
 - Includes Instructions sheet
 
-#### 6. **View Data - Import** (view_data_import.py)
+#### 1.6.1.6 **View Data - Import** (view_data_import.py)
 - Import edited Excel file with change detection
 - Shows detailed diff (old vs new values)
 - Validation before applying changes
 - Updates only changed values
 - Full error reporting
 
-#### 7. **Download Structure** (enhanced_structure_exporter.py)
+#### 1.6.1.7 **Download Structure** (enhanced_structure_exporter.py)
 - Export complete structure to Excel
 - **Enhanced version (v2.1)** features:
   - Headers in row 2 (row 1 blank for title)
@@ -484,22 +637,22 @@ USING (user_id = auth.uid());
   - Help sheet with detailed instructions
   - Optimal column widths
 
-#### 8. **Upload Template** (excel_parser_new.py)
+#### 1.6.1.8 **Upload Template** (excel_parser_new.py)
 - Parse Excel template with name-based references
 - Smart rename detection
 - Show detected changes before applying
 - Validation and error reporting
 
-#### 9. **Help**
+#### 1.6.1.9 **Help**
 - Comprehensive usage guide
 - Feature descriptions
 - Best practices
 
 ---
 
-## 🔄 Key Workflows
+## 1.7 🔄 Key Workflows
 
-### User Registration and Login
+### 1.7.1 User Registration and Login
 
 1. User navigates to app
 2. If not authenticated, show login/signup form
@@ -507,7 +660,7 @@ USING (user_id = auth.uid());
 4. On login: Validate credentials → Store session
 5. Set user_id in session state for all operations
 
-### Creating Event Structure
+### 1.7.2 Creating Event Structure
 
 **Option 1: Excel Upload**
 1. User creates Excel template following format
@@ -523,7 +676,7 @@ USING (user_id = auth.uid());
 1. Use UI forms to define Areas/Categories/Attributes
 2. Save incrementally to database
 
-### Recording Events
+### 1.7.3 Recording Events
 
 **Single Event:**
 1. Navigate to "Add Event" page
@@ -543,7 +696,7 @@ USING (user_id = auth.uid());
 6. Confirm import
 7. Events saved with duplicate detection
 
-### Viewing and Editing Events
+### 1.7.4 Viewing and Editing Events
 
 **Export:**
 1. Navigate to "View Data - Export"
@@ -560,7 +713,7 @@ USING (user_id = auth.uid());
 5. Confirm updates
 6. Database updated only for changed values
 
-### Managing Structure
+### 1.7.5 Managing Structure
 
 **Download Structure:**
 1. Navigate to "Download Structure"
@@ -581,9 +734,9 @@ USING (user_id = auth.uid());
 
 ---
 
-## 📊 Data Flow
+## 1.8 📊 Data Flow
 
-### Event Creation Flow
+### 1.8.1 Event Creation Flow
 ```
 User → Add Event Form → Validation → Database
                             ↓
@@ -594,7 +747,7 @@ User → Add Event Form → Validation → Database
                       Success message
 ```
 
-### Bulk Import Flow
+### 1.8.2 Bulk Import Flow
 ```
 User uploads Excel/CSV
         ↓
@@ -611,7 +764,7 @@ Batch insert to database
 Report success/errors
 ```
 
-### Structure Export Flow
+### 1.8.3 Structure Export Flow
 ```
 User requests download
         ↓
@@ -634,7 +787,7 @@ Add Help sheet
 Return Excel file for download
 ```
 
-### View Data Export/Import Flow
+### 1.8.4 View Data Export/Import Flow
 ```
 EXPORT:
 User applies filters → Query database → Build DataFrame → 
@@ -647,9 +800,9 @@ Show diff (old vs new) → User confirms → Apply updates → Report results
 
 ---
 
-## 📄 Excel Integration
+## 1.9 📄 Excel Integration
 
-### Enhanced Structure Export Format (v2.1)
+### 1.9.1 Enhanced Structure Export Format (v2.1)
 
 **Layout:**
 - **Row 1:** Blank (for title/info)
@@ -691,7 +844,7 @@ Attribute| 2     | ... | Health › Sleep       | Duration       | number    | .
 Attribute| 2     | ... | Health › Sleep       | Quality        | number    | ...
 ```
 
-### Event Import Template
+### 1.9.2 Event Import Template
 
 **Columns:**
 - **Category Path:** "Area › Category" (e.g., "Health › Sleep")
@@ -707,7 +860,7 @@ Health › Sleep | 2025-11-19 | 6.2      | 6       | Woke up early
 Training › Run | 2025-11-20 | 45       | 9       | Morning run
 ```
 
-### Event Export Format (for editing)
+### 1.9.3 Event Export Format (for editing)
 
 **Color-coded columns:**
 - **PINK (Read-only):** Event_ID, Category_Path, Date, Created_At
@@ -723,9 +876,9 @@ User can edit BLUE columns and re-upload for bulk updates.
 
 ---
 
-## 🔐 Security
+## 1.10 🔐 Security
 
-### Row Level Security (RLS)
+### 1.10.1 Row Level Security (RLS)
 
 All tables have RLS policies ensuring:
 - Users can only access their own data
@@ -741,14 +894,14 @@ FOR ALL
 USING (user_id = auth.uid());
 ```
 
-### Credentials Management
+### 1.10.2 Credentials Management
 
 - **Never commit** secrets to Git
 - Use `.env` for local development
 - Use Streamlit secrets for cloud deployment
 - Rotate API keys if exposed (e.g., GitGuardian incidents)
 
-### Input Validation
+### 1.10.3 Input Validation
 
 - Validate all user inputs
 - Sanitize file uploads
@@ -756,19 +909,19 @@ USING (user_id = auth.uid());
 - Use Pydantic models for structured validation
 - Validate Excel files before processing
 
-### RLS Requirements in Code
+### 1.10.4 RLS Requirements in Code
 
 Every database query MUST include user_id:
 
 ```python
-# ✅ CORRECT - Always include user_id
+# . ✅ CORRECT - Always include user_id
 user_id = st.session_state.auth.get_user_id()
 response = client.table('events') \
     .select('*') \
     .eq('user_id', user_id) \
     .execute()
 
-# ❌ WRONG - Missing user_id (RLS violation!)
+# . ❌ WRONG - Missing user_id (RLS violation!)
 response = client.table('events') \
     .select('*') \
     .execute()
@@ -776,9 +929,9 @@ response = client.table('events') \
 
 ---
 
-## ⚡ Performance Considerations
+## 1.11 ⚡ Performance Considerations
 
-### Database Queries
+### 1.11.1 Database Queries
 
 **Optimization strategies:**
 - Use `.select()` with specific columns when possible
@@ -789,20 +942,20 @@ response = client.table('events') \
 
 **Example optimized query:**
 ```python
-# Good: Specific columns with join
+# . Good: Specific columns with join
 events = client.table('events') \
     .select('id, event_date, category_id, categories(name)') \
     .eq('user_id', user_id) \
     .limit(100) \
     .execute()
 
-# Bad: Select all with N+1 queries
+# . Bad: Select all with N+1 queries
 events = client.table('events').select('*').eq('user_id', user_id).execute()
 for event in events.data:
     category = client.table('categories').select('*').eq('id', event['category_id']).execute()
 ```
 
-### Memory Usage
+### 1.11.2 Memory Usage
 
 **Typical loads:**
 - DataFrame operations kept in memory
@@ -811,7 +964,7 @@ for event in events.data:
 - Excel files: typically < 5 MB
 - Large exports (10,000+ events): Use pagination or streaming
 
-### Streamlit Performance
+### 1.11.3 Streamlit Performance
 
 **Best practices:**
 - Cache database clients with `@st.cache_resource`
@@ -835,9 +988,9 @@ def load_structure(_client, user_id):
 
 ---
 
-## ✅ Testing Instructions
+## 1.12 ✅ Testing Instructions
 
-### Manual Testing Checklist
+### 1.12.1 Manual Testing Checklist
 
 **Authentication:**
 - [ ] Sign up with new email
@@ -900,7 +1053,7 @@ def load_structure(_client, user_id):
 - [ ] Test with many attributes (20+)
 - [ ] Verify Excel export/import performance
 
-### Test Data
+### 1.12.2 Test Data
 
 Use `src/generate_template.py` to create sample structure:
 - 2 Areas (Health, Training)
@@ -909,9 +1062,9 @@ Use `src/generate_template.py` to create sample structure:
 
 ---
 
-## 🚀 Deployment Notes
+## 1.13 🚀 Deployment Notes
 
-### Streamlit Cloud Setup
+### 1.13.1 Streamlit Cloud Setup
 
 **Step-by-step:**
 1. Push code to GitHub repository
@@ -926,7 +1079,7 @@ Use `src/generate_template.py` to create sample structure:
 5. Test login/authentication
 6. Verify database connectivity
 
-### Environment Variables
+### 1.13.2 Environment Variables
 
 **Required secrets:**
 - `SUPABASE_URL`: Supabase project URL
@@ -935,7 +1088,7 @@ Use `src/generate_template.py` to create sample structure:
 **Optional:**
 - `DEBUG_MODE`: Enable additional logging
 
-### Database Setup
+### 1.13.3 Database Setup
 
 1. Create Supabase project
 2. Run schema.sql to create tables
@@ -944,7 +1097,7 @@ Use `src/generate_template.py` to create sample structure:
 5. Test with dummy user account
 6. Check CASCADE deletion rules
 
-### Deployment Checklist
+### 1.13.4 Deployment Checklist
 
 **Pre-Deployment:**
 - [ ] Test all features locally
@@ -970,10 +1123,10 @@ Use `src/generate_template.py` to create sample structure:
 - [ ] Monitor error logs
 - [ ] Check performance metrics
 
-### Git Workflow
+### 1.13.5 Git Workflow
 
 ```bash
-# Commit message format
+# . Commit message format
 git commit -m "feat: Add event editing functionality
 
 - Created src/event_edit.py
@@ -982,20 +1135,20 @@ git commit -m "feat: Add event editing functionality
 
 Last Modified: 2025-11-23 12:00 UTC"
 
-# Push to GitHub
+# . Push to GitHub
 git add .
 git commit -m "feature: description"
 git push origin main
 
-# Streamlit Cloud auto-deploys from GitHub
-# Configure secrets in Streamlit Cloud dashboard
+# . Streamlit Cloud auto-deploys from GitHub
+# . Configure secrets in Streamlit Cloud dashboard
 ```
 
 ---
 
-## 🐛 Common Issues and Solutions
+## 1.14 🐛 Common Issues and Solutions
 
-### Database Connection Issues
+### 1.14.1 Database Connection Issues
 
 **Issue:** "No module named 'src.module'"  
 **Solution:** Ensure `__init__.py` exists in src/ directory
@@ -1012,7 +1165,7 @@ git push origin main
 - Verify RLS policies are correct
 - Check user is authenticated
 
-### Excel Processing Issues
+### 1.14.2 Excel Processing Issues
 
 **Issue:** Excel cannot open file  
 **Solution:** 
@@ -1037,7 +1190,7 @@ git push origin main
 - Verify validation range is correct
 - Test in Excel (not Google Sheets)
 
-### Data Import Issues
+### 1.14.3 Data Import Issues
 
 **Issue:** Duplicate detection not working  
 **Solution:**
@@ -1057,7 +1210,7 @@ git push origin main
 - Check value normalization (whitespace, None)
 - Compare actual database values
 
-### Performance Issues
+### 1.14.4 Performance Issues
 
 **Issue:** Slow page load  
 **Solution:**
@@ -1071,7 +1224,7 @@ git push origin main
 - Use streaming for very large files
 - Increase server memory allocation
 
-### Authentication Issues
+### 1.14.5 Authentication Issues
 
 **Issue:** User session not persisting  
 **Solution:**
@@ -1087,20 +1240,20 @@ git push origin main
 
 ---
 
-## 💻 Useful Code Snippets
+## 1.15 💻 Useful Code Snippets
 
-### Database Operations
+### 1.15.1 Database Operations
 
 **Query with RLS:**
 ```python
-# ✅ CORRECT - Always include user_id
+# . ✅ CORRECT - Always include user_id
 user_id = st.session_state.auth.get_user_id()
 response = client.table('events') \
     .select('*') \
     .eq('user_id', user_id) \
     .execute()
 
-# ❌ WRONG - Missing user_id (RLS violation!)
+# . ❌ WRONG - Missing user_id (RLS violation!)
 response = client.table('events') \
     .select('*') \
     .execute()
@@ -1108,7 +1261,7 @@ response = client.table('events') \
 
 **Join with EAV Pattern:**
 ```python
-# SELECT with JOIN - get events with attributes and definitions
+# . SELECT with JOIN - get events with attributes and definitions
 events = client.table('events') \
     .select('*, event_attributes(*, attribute_definitions(*))') \
     .eq('user_id', user_id) \
@@ -1118,7 +1271,7 @@ events = client.table('events') \
 
 **Insert Event with Attributes:**
 ```python
-# INSERT event
+# . INSERT event
 new_event = {
     'user_id': user_id,
     'category_id': category_id,
@@ -1128,7 +1281,7 @@ new_event = {
 result = client.table('events').insert(new_event).execute()
 event_id = result.data[0]['id']
 
-# INSERT attributes (EAV)
+# . INSERT attributes (EAV)
 for attr_def in attribute_definitions:
     attribute_data = {
         'event_id': event_id,
@@ -1141,7 +1294,7 @@ for attr_def in attribute_definitions:
 
 **Update with RLS:**
 ```python
-# UPDATE event
+# . UPDATE event
 client.table('events') \
     .update({'comment': 'Updated comment'}) \
     .eq('id', event_id) \
@@ -1151,7 +1304,7 @@ client.table('events') \
 
 **Delete with CASCADE:**
 ```python
-# DELETE event (CASCADE deletes event_attributes automatically)
+# . DELETE event (CASCADE deletes event_attributes automatically)
 client.table('events') \
     .delete() \
     .eq('id', event_id) \
@@ -1159,33 +1312,33 @@ client.table('events') \
     .execute()
 ```
 
-### Streamlit UI Patterns
+### 1.15.2 Streamlit UI Patterns
 
 **Messages:**
 ```python
-# Success message
+# . Success message
 st.success("✅ Event saved successfully!")
 
-# Error message
+# . Error message
 st.error("❌ Failed to save event")
 
-# Warning message
+# . Warning message
 st.warning("⚠️ This action cannot be undone")
 
-# Info message
+# . Info message
 st.info("ℹ️ Fill in all required fields")
 ```
 
 **Spinner:**
 ```python
-# Show spinner during long operations
+# . Show spinner during long operations
 with st.spinner("Loading events..."):
     events = fetch_events(client, user_id)
 ```
 
 **Form with Validation:**
 ```python
-# Streamlit form
+# . Streamlit form
 with st.form("event_form"):
     date = st.date_input("Date", value=datetime.now())
     category = st.selectbox("Category", options)
@@ -1201,22 +1354,22 @@ with st.form("event_form"):
 
 **Session State:**
 ```python
-# Initialize session state
+# . Initialize session state
 if 'last_category' not in st.session_state:
     st.session_state.last_category = None
 
-# Use session state
+# . Use session state
 st.session_state.last_category = selected_category
 ```
 
 **Expanders:**
 ```python
-# Use expanders for optional details
+# . Use expanders for optional details
 with st.expander("Advanced Options", expanded=False):
     show_advanced_options()
 ```
 
-### Error Handling
+### 1.15.3 Error Handling
 
 **Try-Catch Pattern:**
 ```python
@@ -1248,7 +1401,7 @@ def validate_event_data(data):
     
     return errors
 
-# Usage
+# . Usage
 errors = validate_event_data(form_data)
 if errors:
     for error in errors:
@@ -1259,9 +1412,9 @@ else:
 
 ---
 
-## 📐 Development Guidelines
+## 1.16 📐 Development Guidelines
 
-### Code Style
+### 1.16.1 Code Style
 
 - Follow **PEP 8** for Python code
 - Use **type hints** where applicable for function parameters and returns
@@ -1271,7 +1424,7 @@ else:
 - Keep functions focused (single responsibility principle)
 - Use meaningful variable names (avoid abbreviations)
 
-### Naming Conventions
+### 1.16.2 Naming Conventions
 
 - **snake_case** for functions and variables
 - **PascalCase** for classes
@@ -1280,7 +1433,7 @@ else:
 
 **Examples:**
 ```python
-# Good
+# . Good
 def calculate_event_duration(start_time, end_time):
     pass
 
@@ -1289,7 +1442,7 @@ class EventManager:
 
 MAX_UPLOAD_SIZE = 10_000_000
 
-# Bad
+# . Bad
 def calc(s, e):
     pass
 
@@ -1299,7 +1452,7 @@ class evtMgr:
 maxSize = 10000000
 ```
 
-### Module Structure
+### 1.16.3 Module Structure
 
 Every module should follow this structure:
 
@@ -1319,9 +1472,9 @@ Last Modified: YYYY-MM-DD HH:MM UTC
 
 import streamlit as st
 from typing import Optional, Dict, List
-# ... other imports
+# . ... other imports
 
-# Constants
+# . Constants
 DEFAULT_PAGE_SIZE = 100
 MAX_RETRIES = 3
 
@@ -1346,13 +1499,13 @@ def main_function(client, user_id: str) -> Optional[Dict]:
         st.error(f"Error: {str(e)}")
         return None
 
-# Helper functions below
+# . Helper functions below
 def _helper_function(data: List) -> Dict:
     """Private helper function."""
     pass
 ```
 
-### Documentation
+### 1.16.4 Documentation
 
 - Keep documentation (.md files) in numbering style of this document
 - Update "Last Modified" timestamp in docstrings when changing code
@@ -1360,7 +1513,7 @@ def _helper_function(data: List) -> Dict:
 - Document complex algorithms or business logic
 - Add inline comments for non-obvious code
 
-### Error Handling
+### 1.16.5 Error Handling
 
 Always wrap database operations:
 
@@ -1375,22 +1528,22 @@ except Exception as e:
         print(f"Stack trace: {traceback.format_exc()}")
 ```
 
-### RLS Requirements
+### 1.16.6 RLS Requirements
 
 **CRITICAL:** Every database query MUST include user_id:
 
 ```python
-# ✅ CORRECT
+# . ✅ CORRECT
 response = client.table('events') \
     .select('*') \
     .eq('user_id', user_id) \
     .execute()
 
-# ❌ WRONG - Will fail or return no data due to RLS
+# . ❌ WRONG - Will fail or return no data due to RLS
 response = client.table('events').select('*').execute()
 ```
 
-### Testing Approach
+### 1.16.7 Testing Approach
 
 - **Test happy path** (valid data)
 - **Test edge cases** (empty, null, invalid data)
@@ -1399,7 +1552,7 @@ response = client.table('events').select('*').execute()
 - **Verify error messages** are user-friendly
 - **Test UI** (all buttons, forms, navigation)
 
-### Git Workflow
+### 1.16.8 Git Workflow
 
 **Commit message format:**
 ```bash
@@ -1429,7 +1582,7 @@ Last Modified: 2025-11-23 12:00 UTC"
 
 ---
 
-## 🚀 Quick Start for New Sessions
+## 1.17 🚀 Quick Start for New Sessions
 
 When starting a new development session with an AI assistant:
 
@@ -1466,7 +1619,7 @@ Hi Claude! Continuing Events Tracker development.
 [Any specific questions or clarifications needed]
 ```
 
-### Example Session Starters
+### 1.17.1 Example Session Starters
 
 **Adding a new feature:**
 ```markdown
@@ -1495,9 +1648,9 @@ Task: Optimize event loading for large datasets
 
 ---
 
-## 🎯 Future Enhancements
+## 1.18 🎯 Future Enhancements
 
-### Short-term (Next 1-3 months)
+### 1.18.1 Short-term (Next 1-3 months)
 
 - [ ] **Event Editing:** Edit existing events inline or in a form
 - [ ] **Event Deletion:** Delete events with confirmation
@@ -1506,7 +1659,7 @@ Task: Optimize event loading for large datasets
 - [ ] **Advanced Search:** Filter events by multiple criteria
 - [ ] **Data Validation:** Enhanced validation rules (regex, ranges, dependencies)
 
-### Medium-term (3-6 months)
+### 1.18.2 Medium-term (3-6 months)
 
 - [ ] **Event Filtering and Search:**
   - Full-text search across events
@@ -1528,7 +1681,7 @@ Task: Optimize event loading for large datasets
   - Touch-friendly interfaces
   - Mobile app (PWA)
 
-### Long-term (6-12 months)
+### 1.18.3 Long-term (6-12 months)
 
 - [ ] **Multi-user Collaboration:**
   - Shared templates
@@ -1558,9 +1711,9 @@ Task: Optimize event loading for large datasets
 
 ---
 
-## 📦 Dependencies
+## 1.19 📦 Dependencies
 
-### Core Dependencies
+### 1.19.1 Core Dependencies
 
 ```txt
 streamlit==1.28.0
@@ -1570,30 +1723,30 @@ openpyxl==3.1.0
 python-dotenv==1.0.0
 ```
 
-### Data Processing
+### 1.19.2 Data Processing
 
 ```txt
 numpy==1.24.0
 ```
 
-### Validation
+### 1.19.3 Validation
 
 ```txt
 pydantic==1.10.13
 ```
 
-### Development
+### 1.19.4 Development
 
 ```txt
-# No dev dependencies currently
-# Future: pytest, black, flake8, mypy
+# . No dev dependencies currently
+# . Future: pytest, black, flake8, mypy
 ```
 
 ---
 
-## 📊 Performance Benchmarks
+## 1.20 📊 Performance Benchmarks
 
-### Current Performance (as of v2.1)
+### 1.20.1 Current Performance (as of v2.1)
 
 **Event Operations:**
 - Single event insert: < 500ms
@@ -1610,7 +1763,7 @@ pydantic==1.10.13
 - Structure viewer (100 items): < 2 seconds
 - Event entry form: < 1 second
 
-### Optimization Targets
+### 1.20.2 Optimization Targets
 
 - Page load: < 2 seconds (all pages)
 - Event creation: < 500ms
@@ -1619,9 +1772,9 @@ pydantic==1.10.13
 
 ---
 
-## 🔄 Recent Updates
+## 1.21 🔄 Recent Updates
 
-### Version 2.2 (November 23, 2025)
+### 1.21.1 Version 2.2 (November 23, 2025)
 - **Merged context documents** from v2.0 and v2.1
 - Consolidated best practices from both versions
 - Enhanced documentation structure
@@ -1629,7 +1782,7 @@ pydantic==1.10.13
 - Expanded performance considerations
 - Improved code examples
 
-### Version 2.1 (November 23, 2025)
+### 1.21.2 Version 2.1 (November 23, 2025)
 - **Enhanced Structure Exporter:**
   - Headers moved to row 2 (row 1 blank for title)
   - Sort_Order repositioned to column C
@@ -1640,7 +1793,7 @@ pydantic==1.10.13
   - All row groups collapsed by default
   - Help sheet added
 
-### Version 2.0 (November 20, 2025)
+### 1.21.3 Version 2.0 (November 20, 2025)
 - Refactored for better maintainability
 - Removed hardcoded numbers from headings
 - Improved anchor link structure
@@ -1648,27 +1801,27 @@ pydantic==1.10.13
 
 ---
 
-## 📞 Support and Resources
+## 1.22 📞 Support and Resources
 
-### Documentation
+### 1.22.1 Documentation
 - **Streamlit:** https://docs.streamlit.io/
 - **Supabase:** https://supabase.com/docs
 - **pandas:** https://pandas.pydata.org/docs/
 - **openpyxl:** https://openpyxl.readthedocs.io/
 
-### Internal Documentation
+### 1.22.2 Internal Documentation
 - `INTEGRATION_SUMMARY.md` - Technical integration details
 - `CHANGES_v2.1.md` - Recent changes documentation
 - `QUICK_REFERENCE_v2.1.md` - Quick reference guide
 - `BUGFIX_enhanced_exporter.md` - Bugfix documentation
 
-### Project Information
+### 1.22.3 Project Information
 - **Developer:** Events Tracker Team
 - **Repository:** events-tracker
 - **Deployment:** Streamlit Cloud
 - **Database:** Supabase
 
-### Troubleshooting
+### 1.22.4 Troubleshooting
 
 **For Issues:**
 1. Check this context document (Common Issues section)
@@ -1679,7 +1832,7 @@ pydantic==1.10.13
 
 ---
 
-## 🎉 Conclusion
+## 1.23 🎉 Conclusion
 
 **Events Tracker** is a fully-functional, production-ready application for hierarchical event tracking with comprehensive Excel integration. The v2.1 Enhanced Structure Exporter provides professional-grade Excel files with smart grouping, validations, and help documentation.
 
