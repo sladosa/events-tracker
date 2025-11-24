@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """
-Generate Garmin Fitness Tracking Excel Template
-This creates a template with UUIDs for the EAV metadata system
+Events Tracker - Template Generator Module
+===========================================
+Created: 2025-11-07 13:11 UTC
+Last Modified: 2025-11-15 18:30 UTC
+Python: 3.11
+
+Description:
+Generates Excel templates with UUIDs for the EAV metadata system.
+Creates sample Garmin Fitness tracking template structure.
 """
 import pandas as pd
 import uuid

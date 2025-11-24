@@ -1,13 +1,19 @@
 """
-Excel Parser for Name-Based Templates
-======================================
+Events Tracker - Excel Parser Module
+=====================================
+Created: 2025-11-07 13:11 UTC
+Last Modified: 2025-11-15 18:30 UTC
+Python: 3.11
+
+Description:
 Parses Excel templates that use names as identifiers.
 Creates TemplateObject structures for rename detection.
+Handles hierarchical structure import and validation.
 """
 
 import pandas as pd
 from typing import List, Dict, Optional, Tuple
-from rename_detector import TemplateObject
+from .rename_detector import TemplateObject
 
 
 class ExcelTemplateParser:

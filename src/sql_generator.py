@@ -1,6 +1,13 @@
 """
-SQL Generator Module
-Generates PostgreSQL/Supabase SQL with RLS and CASCADE deletion
+Events Tracker - SQL Generator Module
+======================================
+Created: 2025-11-07 13:11 UTC
+Last Modified: 2025-11-15 18:30 UTC
+Python: 3.11
+
+Description:
+Generates PostgreSQL/Supabase SQL with RLS and CASCADE deletion.
+Creates complete database schema from Excel template structure.
 """
 from typing import List, Dict
 from datetime import datetime, date

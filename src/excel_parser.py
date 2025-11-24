@@ -1,6 +1,13 @@
 """
-Excel Parser Module
-Reads and validates Excel templates for the EAV metadata system
+Events Tracker - Excel Parser Module - ssl
+=====================================
+Created: 2025-11-07 13:11 UTC
+Last Modified: 2025-11-15 18:30 UTC
+Python: 3.11
+
+Description:
+Reads and validates Excel templates for the EAV metadata system.
+Handles template parsing with Pydantic models and UUID validation.
 """
 import pandas as pd
 import json

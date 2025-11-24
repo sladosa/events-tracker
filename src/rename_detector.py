@@ -1,8 +1,14 @@
 """
-Rename Detection Module (NumPy-free version)
-============================================
+Events Tracker - Rename Detection Module
+=========================================
+Created: 2025-11-07 13:11 UTC
+Last Modified: 2025-11-15 18:30 UTC
+Python: 3.11
+
+Description:
 Multi-signal algorithm for detecting renamed objects vs new objects.
 Uses native Python instead of NumPy for broader compatibility.
+Smart matching based on name similarity, hierarchy, and metadata.
 """
 
 from typing import List, Dict, Optional, Tuple, Set

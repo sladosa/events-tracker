@@ -1,30 +1,47 @@
 """
-Events Tracker - Main Streamlit Application 20251107-1400
-Flexible event tracking with NAME-BASED templates and automatic rename detection
+Events Tracker - Main Application
+==================================
+Created: 2025-11-13 10:20 UTC
+Last Modified: 2025-11-23 18:00 UTC
+Python: 3.11
+
+Description:
+Main Streamlit application with authentication and multiple pages.
+Integrates all modules: structure viewer, event entry, bulk import,
+view data export/import, download/upload structure.
+
+Modules:
+- auth: User authentication
+- structure_viewer: Browse hierarchical structure
+- event_entry: Add single events
+- bulk_import: Import multiple events from Excel/CSV
+- view_data_export: Export events to Excel for editing
+- view_data_import: Import edited Excel with change detection
+- reverse_engineer: Download structure to Excel
+- enhanced_structure_exporter: Enhanced Excel export with validation
+- hierarchical_parser: Parse and update structure from Hierarchical_View Excel
 """
+
 import streamlit as st
-import sys
-from pathlib import Path
-import json
 import os
-from datetime import datetime
-import io
-
-# Add src to path
-sys.path.append(str(Path(__file__).parent / 'src'))
-
-# FIXED: Use explicit src. prefix to avoid conflicts with system packages
+import tempfile
 from dotenv import load_dotenv
-load_dotenv()
 
-from src.excel_validators import validate_template
-from src.excel_parser_new import ExcelTemplateParser, load_from_database
-from src.rename_detector import RenameDetector
-from src.supabase_client import SupabaseManager
+# Import local modules
 from src.auth import AuthManager
-from src.structure_viewer import render_structure_viewer
+from src import supabase_client
+from src import structure_viewer
+from src import event_entry
+from src import bulk_import
+from src import view_data_export
+from src import view_data_import
+from src.reverse_engineer import ReverseEngineer
+from src.enhanced_structure_exporter import EnhancedStructureExporter
+from src.hierarchical_parser import HierarchicalParser
+from src import excel_parser_new
 
-# Page config
+
+# Page configuration
 st.set_page_config(
     page_title="Events Tracker",
     page_icon="📊",
@@ -32,754 +49,646 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Initialize session state
-if 'backup_data' not in st.session_state:
-    st.session_state.backup_data = None
-if 'validation_result' not in st.session_state:
-    st.session_state.validation_result = None
-if 'operations' not in st.session_state:
-    st.session_state.operations = None
+# Load environment variables
+load_dotenv()
 
 
+@st.cache_resource
 def init_supabase():
-    """Initialize Supabase client from secrets or env."""
-    try:
-        url = st.secrets.get("SUPABASE_URL")
-        key = st.secrets.get("SUPABASE_KEY")
-    except:
-        url = os.getenv("SUPABASE_URL")
-        key = os.getenv("SUPABASE_KEY")
+    """Initialize Supabase client"""
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_KEY")
     
     if not url or not key:
-        st.error("""
-        ⚠️ Supabase credentials not found!
-        
-        Please configure either:
-        1. Streamlit secrets (.streamlit/secrets.toml)
-        2. Environment variables (.env file)
-        
-        Required variables:
-        - SUPABASE_URL
-        - SUPABASE_KEY
-        """)
+        st.error("⚠️ Missing Supabase credentials. Please check your secrets.")
         st.stop()
     
-    return SupabaseManager(url, key)
+    return supabase_client.SupabaseManager(url, key)
 
 
 def main():
-    """Main application logic with authentication."""
+    """Main application logic"""
     
     # Initialize Supabase
-    try:
-        supabase = init_supabase()
-    except Exception as e:
-        st.error(f"Failed to initialize Supabase: {e}")
-        st.stop()
+    supabase = init_supabase()
     
-    # Initialize Auth Manager
-    auth = AuthManager(supabase.client)
+    # Initialize AuthManager
+    auth_manager = AuthManager(supabase.client)
     
     # Check authentication
-    if not auth.is_authenticated():
-        auth.show_login_page()
+    if not auth_manager.is_authenticated():
+        auth_manager.show_login_page()
         return
     
-    # User is authenticated - show main app
-    st.title("📊 Events Tracker")
-    st.markdown("*Name-based templates with automatic rename detection*")
+    # Get user info
+    user_id = auth_manager.get_user_id()
+    user_email = auth_manager.get_user_email()
     
     # Sidebar navigation
-    st.sidebar.title("Navigation")
+    st.sidebar.title("🗂️ Events Tracker")
+    st.sidebar.markdown("---")
+    
+    # Navigation menu
     page = st.sidebar.radio(
-        "Select Action",
-        ["📊 View Structure", "📤 Upload Template", "📥 Download Structure", "ℹ️ Help"]
+        "Navigation",
+        [
+            "📊 View Structure",
+            "➕ Add Event",
+            "📤 Bulk Import",
+            "📊 View Data - Export",
+            "📥 View Data - Import",
+            "📥 Download Structure",
+            "📤 Upload Template",
+            "ℹ️ Help"
+        ],
+        label_visibility="collapsed"
     )
     
-    # Show user info and logout button
-    auth.show_user_info_sidebar()
+    st.sidebar.markdown("---")
     
-    # Test connection
-    with st.sidebar:
-        st.divider()
-        with st.expander("🔌 Connection Status"):
-            success, message = supabase.test_connection()
-            if success:
-                st.success(message)
-            else:
-                st.error(message)
+    # User info and logout
+    st.sidebar.markdown("### 👤 User")
+    st.sidebar.text(f"📧 {user_email}")
     
-    # Page routing
-    user_id = auth.get_user_id()
+    if st.sidebar.button("🚪 Logout", use_container_width=True):
+        auth_manager.logout()
     
-    if page == "📊 View Structure":
-        render_structure_viewer(supabase.client, user_id)
-    elif page == "📤 Upload Template":
-        upload_template_page(supabase, user_id)
-    elif page == "📥 Download Structure":
-        download_structure_page(supabase, user_id)
-    elif page == "ℹ️ Help":
-        help_page()
-
-
-def upload_template_page(supabase: SupabaseManager, user_id: str):
-    """Page for uploading name-based templates with rename detection."""
-    
-    st.header("📤 Upload Template")
-    st.markdown("""
-    Upload an Excel template using **names as identifiers** (no UUID management needed!). 
-    The system will:
-    1. ✅ Validate the template for errors
-    2. 🔍 Detect renamed objects automatically
-    3. 📊 Show you what will change
-    4. 🚀 Apply changes atomically
-    """)
-    
-    st.info("💡 **New**: Just use names! System handles UUID mapping automatically.")
-    
-    uploaded_file = st.file_uploader(
-        "Choose Excel template",
-        type=['xlsx'],
-        help="Upload template with Areas, Categories, and Attributes sheets"
-    )
-    
-    if uploaded_file:
-        # Save temporarily
-        temp_path = Path("temp_upload.xlsx")
-        with open(temp_path, 'wb') as f:
-            f.write(uploaded_file.getvalue())
-        
-        # ==========================================
-        # STEP 1: VALIDATION
-        # ==========================================
-        st.subheader("📋 Step 1: Validation")
-        
-        with st.spinner("Validating template..."):
-            is_valid, report, error_file = validate_template(str(temp_path))
-        
-        if not is_valid:
-            st.error("❌ Validation failed!")
-            st.text(report)
-            
-            if error_file:
-                with open(error_file, 'rb') as f:
-                    st.download_button(
-                        label="⬇️ Download Template with Errors Highlighted",
-                        data=f.read(),
-                        file_name="template_with_errors.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-            
-            if temp_path.exists():
-                temp_path.unlink()
-            return
-        
-        st.success("✅ Validation passed!")
-        
-        # ==========================================
-        # STEP 2: PARSE EXCEL
-        # ==========================================
-        st.subheader("📖 Step 2: Parsing Template")
-        
-        with st.spinner("Reading Excel file..."):
-            parser = ExcelTemplateParser(str(temp_path))
-            new_areas, new_categories, new_attributes = parser.parse()
-            summary = parser.get_summary()
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Areas", summary['areas_count'])
-        with col2:
-            st.metric("Categories", summary['categories_count'])
-        with col3:
-            st.metric("Attributes", summary['attributes_count'])
-        
-        # ==========================================
-        # STEP 3: LOAD FROM DATABASE
-        # ==========================================
-        st.subheader("📥 Step 3: Loading Existing Data")
-        
-        with st.spinner("Loading from database..."):
-            old_areas, old_categories, old_attributes = load_from_database(
-                supabase.client, user_id
-            )
-        
-        st.info(f"Found {len(old_areas)} areas, {len(old_categories)} categories, "
-                f"{len(old_attributes)} attributes in database")
-        
-        # ==========================================
-        # STEP 4: RENAME DETECTION
-        # ==========================================
-        st.subheader("🔍 Step 4: Detecting Changes")
-        
-        with st.spinner("Analyzing changes..."):
-            # Process Areas
-            area_detector = RenameDetector(confidence_threshold=0.65)
-            area_matches = area_detector.match_objects(old_areas, new_areas)
-            area_operations = area_detector.generate_operations()
-            
-            # Process Categories
-            cat_detector = RenameDetector(confidence_threshold=0.65)
-            cat_matches = cat_detector.match_objects(old_categories, new_categories)
-            cat_operations = cat_detector.generate_operations()
-            
-            # Process Attributes
-            attr_detector = RenameDetector(confidence_threshold=0.65)
-            attr_matches = attr_detector.match_objects(old_attributes, new_attributes)
-            attr_operations = attr_detector.generate_operations()
-            
-            # Combine all operations
-            all_operations = area_operations + cat_operations + attr_operations
-            st.session_state.operations = all_operations
-        
-        # ==========================================
-        # STEP 5: DISPLAY CHANGES
-        # ==========================================
-        st.subheader("📊 Step 5: Changes Preview")
-        
-        # Categorize operations
-        renames = [op for op in all_operations 
-                   if op['operation'] == 'UPDATE' and 'new_name' in op]
-        inserts = [op for op in all_operations if op['operation'] == 'INSERT']
-        deletes = [op for op in all_operations if op['operation'] == 'DELETE']
-        updates = [op for op in all_operations 
-                   if op['operation'] == 'UPDATE' and 'changes' in op]
-        
-        # Summary metrics
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("🔄 Renames", len(renames))
-        with col2:
-            st.metric("➕ New Objects", len(inserts))
-        with col3:
-            st.metric("🗑️ Deletions", len(deletes))
-        with col4:
-            st.metric("✏️ Updates", len(updates))
-        
-        # Detailed view in tabs
-        tab1, tab2, tab3, tab4 = st.tabs(["🔄 Renames", "➕ New", "🗑️ Deletions", "✏️ Updates"])
-        
-        with tab1:
-            if renames:
-                st.markdown("**Detected Renames:**")
-                for op in renames:
-                    confidence = op.get('confidence', 1.0)
-                    
-                    # Color based on confidence
-                    if confidence > 0.85:
-                        emoji = "🟢"
-                        conf_color = "green"
-                    elif confidence > 0.70:
-                        emoji = "🟡"
-                        conf_color = "orange"
-                    else:
-                        emoji = "🟠"
-                        conf_color = "red"
-                    
-                    table = op['table_name'].replace('_', ' ').title()
-                    old_name = op.get('old_name', 'Unknown')
-                    new_name = op['new_name']
-                    
-                    st.markdown(
-                        f"{emoji} **[{table}]** `{old_name}` → `{new_name}` "
-                        f"<span style='color:{conf_color}'>(confidence: {confidence:.0%})</span>",
-                        unsafe_allow_html=True
-                    )
-                    
-                    # Show warning for low confidence
-                    if confidence < 0.70:
-                        st.warning(
-                            f"⚠️ Low confidence! Please verify this is actually a rename "
-                            f"of '{old_name}' and not a new object."
-                        )
-                        with st.expander("View matching signals"):
-                            st.json(op.get('signals', {}))
-            else:
-                st.info("No renames detected")
-        
-        with tab2:
-            if inserts:
-                st.markdown(f"**{len(inserts)} new objects will be created:**")
-                for op in inserts:
-                    table = op['table_name'].replace('_', ' ').title()
-                    name = op['name']
-                    
-                    if op['table_name'] == 'categories':
-                        area = op.get('area_name', '')
-                        parent = op.get('parent_name', '')
-                        context = f" in {area}" + (f" > {parent}" if parent else "")
-                    elif op['table_name'] == 'attribute_definitions':
-                        category = op.get('category_name', '')
-                        context = f" for {category}"
-                    else:
-                        context = ""
-                    
-                    st.markdown(f"• **[{table}]** {name}{context}")
-            else:
-                st.info("No new objects to create")
-        
-        with tab3:
-            if deletes:
-                st.warning(f"⚠️ **{len(deletes)} objects will be deleted:**")
-                for op in deletes:
-                    table = op['table_name'].replace('_', ' ').title()
-                    name = op['name']
-                    st.markdown(f"• **[{table}]** {name}")
-                
-                if any(op['table_name'] == 'categories' for op in deletes):
-                    st.error(
-                        "⚠️ **WARNING**: Deleting categories may fail if they have events. "
-                        "Events must be reassigned or deleted first."
-                    )
-            else:
-                st.info("No objects will be deleted")
-        
-        with tab4:
-            if updates:
-                st.markdown(f"**{len(updates)} objects will have attribute changes:**")
-                for op in updates:
-                    table = op['table_name'].replace('_', ' ').title()
-                    changes = op.get('changes', {})
-                    st.markdown(f"**[{table}]**")
-                    for key, (old_val, new_val) in changes.items():
-                        st.markdown(f"  • {key}: `{old_val}` → `{new_val}`")
-            else:
-                st.info("No attribute updates")
-        
-        # ==========================================
-        # STEP 6: CONFIRMATION & APPLY
-        # ==========================================
-        st.divider()
-        
-        if len(all_operations) == 0:
-            st.success("✅ No changes detected - your template matches the database!")
+    # Connection status
+    with st.sidebar.expander("🔌 Connection Status", expanded=False):
+        success, message = supabase.test_connection()
+        if success:
+            st.success("✅ Connected to Supabase")
         else:
-            st.warning("⚠️ **Review changes carefully before applying!**")
-            
-            if st.checkbox("I have reviewed the changes and want to proceed"):
-                if st.button("🚀 Apply Changes", type="primary"):
-                    
-                    # Create backup info
-                    backup_info = {
-                        'timestamp': datetime.now().isoformat(),
-                        'user_id': user_id,
-                        'operation_count': len(all_operations)
-                    }
-                    st.session_state.backup_data = backup_info
-                    
-                    # Apply changes via stored procedure
-                    with st.spinner("Applying changes to database..."):
-                        try:
-                            result = supabase.client.rpc(
-                                'update_template_from_excel',
-                                {
-                                    'p_user_id': user_id,
-                                    'p_template_data': all_operations
-                                }
-                            ).execute()
-                            
-                            if result.data.get('success'):
-                                st.success("✅ Changes applied successfully!")
-                                
-                                # Show summary
-                                col1, col2, col3, col4 = st.columns(4)
-                                with col1:
-                                    st.metric("Inserted", result.data.get('inserted', 0))
-                                with col2:
-                                    st.metric("Updated", result.data.get('updated', 0))
-                                with col3:
-                                    st.metric("Renamed", result.data.get('renamed', 0))
-                                with col4:
-                                    st.metric("Deleted", result.data.get('deleted', 0))
-                                
-                                st.balloons()
-                                
-                                # Clear session state
-                                st.session_state.operations = None
-                                
-                            else:
-                                st.error(f"❌ Error: {result.data.get('error')}")
-                                st.error(f"Details: {result.data.get('error_detail')}")
-                        
-                        except Exception as e:
-                            st.error(f"❌ Failed to apply changes: {str(e)}")
-                            st.error("Check Supabase logs for more details")
-        
-        # Clean up
-        if temp_path.exists():
-            temp_path.unlink()
-
-
-def download_structure_page(supabase: SupabaseManager, user_id: str):
-    """Page for downloading current structure as name-based template."""
+            st.error(f"❌ {message}")
     
-    st.header("📥 Download Current Structure")
-    st.markdown("""
-    Download your current structure as an **Excel template** that you can:
-    - ✏️ Edit names (renames detected automatically on re-upload)
-    - ➕ Add new areas, categories, or attributes
-    - 🗑️ Delete items (remove rows)
-    - 📤 Upload back to apply changes
+    # Main content area styling
+    st.markdown(
+        """
+        <style>
+        .main > div {
+            padding-top: 2rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    # Route to appropriate page
+    if page == "📊 View Structure":
+        structure_viewer.render_structure_viewer(supabase.client, user_id)
+    
+    elif page == "➕ Add Event":
+        event_entry.render_event_entry(supabase.client, user_id)
+    
+    elif page == "📤 Bulk Import":
+        bulk_import.render_bulk_import(supabase.client, user_id)
+    
+    elif page == "📊 View Data - Export":
+        view_data_export.render_view_data_export(supabase.client, user_id)
+    
+    elif page == "📥 View Data - Import":
+        view_data_import.render_view_data_import(supabase.client, user_id)
+    
+    elif page == "📥 Download Structure":
+        render_download_page(supabase, user_id)
+    
+    elif page == "📤 Upload Template":
+        render_upload_page(supabase, user_id)
+    
+    elif page == "ℹ️ Help":
+        render_help_page()
+
+
+def render_download_page(supabase, user_id: str):
+    """Download structure to Excel with enhanced features."""
+    st.title("📥 Download Structure")
+    
+    st.info("""
+    **Enhanced Excel Export Features:**
+    - 🎨 **Color-coded columns**: PINK (auto-calculated) vs BLUE (editable)
+    - ✅ **Drop-down validation**: Type, Data_Type, Is_Required
+    - 🔢 **Auto-formulas**: Level, Area, Sort_Order calculated automatically
+    - 📊 **Row grouping**: Collapse/expand by Area and Category
+    - 📋 **Column grouping**: Hide/show attribute details
+    - 🔍 **Validation fields**: Min/Max values for number attributes
     """)
     
-    st.info("💡 **No UUID management needed** - just work with names!")
+    st.markdown("---")
     
-    if st.button("📥 Generate Template", type="primary"):
-        with st.spinner("Generating Excel template..."):
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown("### 📋 What you can edit:")
+        st.markdown("""
+        **BLUE columns** (editable):
+        - Category name
+        - Attribute Name, Data Type, Unit
+        - Is Required, Default Value
+        - Validation Min/Max
+        - Description
+        
+        **PINK columns** (auto-calculated):
+        - Type, Level, Area
+        - Category Path
+        - Sort Order
+        """)
+    
+    with col2:
+        st.markdown("### 🎯 Best for:")
+        st.markdown("""
+        - Reviewing structure
+        - Adding descriptions
+        - Setting validation rules
+        - Bulk editing attributes
+        - Documentation
+        """)
+    
+    st.markdown("---")
+    
+    if st.button("📥 Generate Enhanced Excel", type="primary"):
+        with st.spinner("Generating enhanced Excel file..."):
             try:
-                # Load from database
-                areas, categories, attributes = load_from_database(
-                    supabase.client, user_id
+                # Use EnhancedStructureExporter
+                exporter = EnhancedStructureExporter(
+                    client=supabase.client,
+                    user_id=user_id
                 )
                 
-                if not areas and not categories and not attributes:
-                    st.warning("⚠️ No data found. Upload a template first!")
-                    return
+                file_path = exporter.export_hierarchical_view()
                 
-                # Convert to DataFrames
-                import pandas as pd
+                # Read file for download
+                with open(file_path, 'rb') as f:
+                    excel_data = f.read()
                 
-                df_areas = pd.DataFrame([
-                    {
-                        'area_id': obj.uuid,
-                        'area_name': obj.name,
-                        'icon': obj.attributes.get('icon', ''),
-                        'color': obj.attributes.get('color', ''),
-                        'sort_order': obj.attributes.get('sort_order', 0),
-                        'description': obj.attributes.get('description', '')
-                    }
-                    for obj in areas
-                ])
-                
-                df_categories = pd.DataFrame([
-                    {
-                        'category_id': obj.uuid,
-                        'area_name': obj.area_name,
-                        'parent_category': obj.parent_name or '',
-                        'category_name': obj.name,
-                        'level': obj.level,
-                        'sort_order': obj.attributes.get('sort_order', 0),
-                        'description': obj.attributes.get('description', '')
-                    }
-                    for obj in categories
-                ])
-                
-                df_attributes = pd.DataFrame([
-                    {
-                        'attribute_id': obj.uuid,
-                        'category_name': obj.category_name,
-                        'attribute_name': obj.name,
-                        'data_type': obj.attributes.get('data_type'),
-                        'unit': obj.attributes.get('unit', ''),
-                        'is_required': obj.attributes.get('is_required', False),
-                        'default_value': obj.attributes.get('default_value', ''),
-                        'validation_rules': obj.attributes.get('validation_rules', '{}'),
-                        'sort_order': obj.attributes.get('sort_order', 0)
-                    }
-                    for obj in attributes
-                ])
-                
-                # Write to Excel in memory
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df_areas.to_excel(writer, sheet_name='Areas', index=False)
-                    df_categories.to_excel(writer, sheet_name='Categories', index=False)
-                    df_attributes.to_excel(writer, sheet_name='Attributes', index=False)
-                    
-                    # ============================================
-                    # NEW: Hierarchical View Sheet
-                    # ============================================
-                    hierarchical_rows = []
-                    
-                    # Build hierarchical structure
-                    for area in areas:
-                        # Area row
-                        hierarchical_rows.append({
-                            'Type': 'Area',
-                            'Level': 0,
-                            'Area': area.name,
-                            'Category_Path': area.name,
-                            'Category': '',
-                            'Attributes': '',
-                            'Sort_Order': area.attributes.get('sort_order', 0),
-                            'ID': area.uuid,
-                            'Description': area.attributes.get('description', '')
-                        })
-                        
-                        # Get categories for this area
-                        area_categories = [c for c in categories if c.area_name == area.name]
-                        
-                        # Build category tree recursively
-                        def add_category_recursive(cat, indent_level):
-                            # Get attributes for this category
-                            cat_attrs = [a for a in attributes if a.category_name == cat.name]
-                            attr_names = ', '.join([a.name for a in sorted(cat_attrs, key=lambda x: x.attributes.get('sort_order', 0))])
-                            
-                            # Category path with indentation
-                            indent = '  ' * indent_level
-                            path_parts = [area.name]
-                            
-                            # Build full path
-                            current = cat
-                            path_to_root = [current.name]
-                            while current.parent_name:
-                                parent = next((c for c in categories if c.name == current.parent_name and c.area_name == area.name), None)
-                                if parent:
-                                    path_to_root.insert(0, parent.name)
-                                    current = parent
-                                else:
-                                    break
-                            
-                            category_path = area.name + ' > ' + ' > '.join(path_to_root)
-                            
-                            hierarchical_rows.append({
-                                'Type': 'Category',
-                                'Level': cat.level,
-                                'Area': area.name,
-                                'Category_Path': category_path,
-                                'Category': indent + cat.name,
-                                'Attributes': attr_names,
-                                'Sort_Order': cat.attributes.get('sort_order', 0),
-                                'ID': cat.uuid,
-                                'Description': cat.attributes.get('description', '')
-                            })
-                            
-                            # Add children
-                            children = [c for c in area_categories if c.parent_name == cat.name]
-                            for child in sorted(children, key=lambda x: x.attributes.get('sort_order', 0)):
-                                add_category_recursive(child, indent_level + 1)
-                        
-                        # Add root categories
-                        root_cats = [c for c in area_categories if not c.parent_name]
-                        for root_cat in sorted(root_cats, key=lambda x: x.attributes.get('sort_order', 0)):
-                            add_category_recursive(root_cat, 1)
-                    
-                    df_hierarchical = pd.DataFrame(hierarchical_rows)
-                    
-                    # Write hierarchical view
-                    df_hierarchical.to_excel(writer, sheet_name='Hierarchical_View', index=False)
-                    
-                    # Format the Hierarchical View sheet
-                    workbook = writer.book
-                    worksheet = writer.sheets['Hierarchical_View']
-                    
-                    # Set column widths
-                    worksheet.column_dimensions['A'].width = 12  # Type
-                    worksheet.column_dimensions['B'].width = 8   # Level
-                    worksheet.column_dimensions['C'].width = 15  # Area
-                    worksheet.column_dimensions['D'].width = 40  # Category_Path
-                    worksheet.column_dimensions['E'].width = 30  # Category (with indent)
-                    worksheet.column_dimensions['F'].width = 40  # Attributes
-                    worksheet.column_dimensions['G'].width = 12  # Sort_Order
-                    worksheet.column_dimensions['H'].width = 36  # ID
-                    worksheet.column_dimensions['I'].width = 30  # Description
-                    
-                    # Add autofilter
-                    worksheet.auto_filter.ref = worksheet.dimensions
-                    
-                    # Freeze top row
-                    worksheet.freeze_panes = 'A2'
-                
-                excel_bytes = output.getvalue()
-                
-                # Show summary
-                st.success("✅ Template generated!")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Areas", len(df_areas))
-                with col2:
-                    st.metric("Categories", len(df_categories))
-                with col3:
-                    st.metric("Attributes", len(df_attributes))
+                st.success("✅ Enhanced Excel file generated successfully!")
                 
                 # Download button
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"template_{timestamp}.xlsx"
-                
                 st.download_button(
-                    label="⬇️ Download Excel Template",
-                    data=excel_bytes,
-                    file_name=filename,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    label="⬇️ Download Hierarchical View Excel",
+                    data=excel_data,
+                    file_name=os.path.basename(file_path),
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    help="Enhanced Excel with validation, formulas, and grouping"
                 )
                 
-                st.info("""
-                **How to use this template:**
-                
-                1. Open in Excel
-                2. Edit names, add/remove rows
-                3. Save and upload via "Upload Template"
-                4. System will detect renames automatically!
-                
-                **Note:** Keep the `*_id` columns - they help detect renames. 
-                Leave them empty for new items.
-                """)
-                
+                # Cleanup temp file
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    
             except Exception as e:
-                st.error(f"❌ Failed to generate template: {str(e)}")
+                st.error(f"❌ Error generating Excel: {str(e)}")
+                st.exception(e)
 
 
-def help_page():
-    """Help and documentation page."""
+def render_upload_page(supabase, user_id: str):
+    """
+    Render the upload template page with full parsing and update functionality.
+    """
+    st.title("📤 Upload Template")
+    st.markdown("Update your structure by uploading an edited Hierarchical_View Excel")
     
-    st.header("ℹ️ Help & Documentation")
+    st.info("""
+    **What you can do:**
+    - ✅ **Add new rows** for Areas, Categories, Attributes
+    - ✅ **Edit BLUE columns** in existing rows (editable fields)
+    - ✅ **Create hierarchies** using Category_Path (e.g., "Health > Sleep > Quality")
+    - ✅ **Update properties** like descriptions, data types, validation rules
+    """)
     
-    with st.expander("🆕 What's New", expanded=True):
+    st.markdown("---")
+    
+    # File uploader
+    uploaded_file = st.file_uploader(
+        "Upload Hierarchical_View Excel",
+        type=["xlsx"],
+        help="Upload the Excel file you downloaded from 'Download Structure'"
+    )
+    
+    if not uploaded_file:
+        st.markdown("### 📋 How to Use")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("""
+            **Step 1: Download**
+            - Go to "📥 Download Structure"
+            - Generate and download Excel
+            
+            **Step 2: Edit in Excel**
+            - **Add rows** at bottom for new items
+            - **Edit BLUE columns** (editable)
+            - **Don't edit PINK columns** (auto-calculated)
+            
+            **Step 3: Upload**
+            - Come back here
+            - Upload edited file
+            - Review changes
+            - Confirm to apply
+            """)
+        
+        with col2:
+            st.markdown("""
+            **Adding New Items:**
+            
+            **New Area:**
+            - Type: `Area`
+            - Category_Path: `<AreaName>`
+            - Example: `Fitness`
+            
+            **New Category:**
+            - Type: `Category`
+            - Category_Path: `<Area> > <Category>`
+            - Category: `<CategoryName>`
+            - Example: `Fitness > Cardio`
+            
+            **New Subcategory:**
+            - Type: `Category`
+            - Category_Path: `<Area> > <Cat> > <SubCat>`
+            - Category: `<SubCategoryName>`
+            - Example: `Fitness > Cardio > Running`
+            
+            **New Attribute:**
+            - Type: `Attribute`
+            - Category_Path: `<full path to category>`
+            - Attribute_Name: `<AttributeName>`
+            - Data_Type: `number`, `text`, etc.
+            - Example: `Fitness > Cardio > Running` + `Distance`
+            """)
+        
+        st.markdown("---")
+        
         st.markdown("""
-        ### 📊 Structure Viewer (NEW!)
+        ### ✏️ Editable Fields (BLUE columns)
         
-        **Browse your hierarchical structure interactively:**
-        - 🌳 Expandable tree view of Areas → Categories → Attributes
-        - 🔍 Filter by Area, Level, or search by name
-        - 📈 Statistics and breakdowns
-        - 💡 Visual hierarchy with indentation
+        - **Category** - Category name
+        - **Attribute_Name** - Attribute name  
+        - **Data_Type** - number, text, datetime, boolean, link, image
+        - **Unit** - Unit of measurement (e.g., 'km', 'hours')
+        - **Is_Required** - TRUE or FALSE
+        - **Default_Value** - Default value for new events
+        - **Validation_Min** - Minimum value (for numbers)
+        - **Validation_Max** - Maximum value (for numbers)
+        - **Description** - Notes and documentation
         
-        **Perfect for:**
-        - Understanding your current structure
-        - Finding specific categories or attributes
-        - Seeing relationships between objects
-        - Planning changes before editing templates
+        ### 🚫 Read-Only Fields (PINK columns)
         
-        ### 📥 Hierarchical View Sheet in Downloads (NEW!)
+        - **Type** - Auto-detected from row content
+        - **Level** - Auto-calculated from Category_Path
+        - **Sort_Order** - Auto-assigned
+        - **Area** - Extracted from Category_Path
+        - **Category_Path** - Full hierarchical path
         
-        When you download your structure, you now get **4 sheets**:
-        1. **Areas** - Raw area data
-        2. **Categories** - Raw category data  
-        3. **Attributes** - Raw attribute data
-        4. **Hierarchical_View** - NEW! Visual tree with:
-           - Indented category names showing hierarchy
-           - Full category paths (Area > Parent > Category)
-           - Attributes listed for each category
-           - **Editable Sort_Order column**
-           - Autofilters for easy browsing
-        
-        **How to use Hierarchical_View for sorting:**
-        1. Download template
-        2. Open "Hierarchical_View" sheet
-        3. See your structure visually
-        4. Edit Sort_Order numbers as needed
-        5. Save and upload - sort will be updated!
-        
-        *Note: Other columns in Hierarchical_View are read-only references*
+        ⚠️ **Important:** Don't change PINK columns - they're auto-calculated!
         """)
+        
+        return
     
-    with st.expander("🚀 Name-Based Templates"):
-        st.markdown("""
-        ### No More UUID Management! 🎉
-        
-        **Old Way (UUID-based):**
-        - ❌ Manually generate UUIDs for each item
-        - ❌ Complex to rename (had to keep UUID, change name)
-        - ❌ Easy to break relationships
-        
-        **New Way (Name-based):**
-        - ✅ Just use names - system handles UUIDs automatically
-        - ✅ Rename by simply changing the name
-        - ✅ Automatic rename detection
-        - ✅ Relationships preserved
-        
-        ### How Rename Detection Works
-        
-        System uses multiple signals:
-        - Position in file (20%)
-        - Name similarity (40%)
-        - Parent matching (20%)
-        - Sibling context (10%)
-        - Other attributes (10%)
-        
-        = **Confidence Score** (0-100%)
-        
-        - 🟢 High (>85%): Auto-accepted
-        - 🟡 Medium (70-85%): Shows for review
-        - 🟠 Low (<70%): Treated as new object
-        """)
+    # Save uploaded file to temporary location
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
+        tmp_file.write(uploaded_file.getvalue())
+        tmp_path = tmp_file.name
     
-    with st.expander("📋 Excel Template Format"):
-        st.markdown("""
-        ### Areas Sheet
+    try:
+        # Parse and validate
+        with st.spinner("📖 Parsing Excel file..."):
+            parser = HierarchicalParser(
+                client=supabase.client,
+                user_id=user_id,
+                excel_path=tmp_path
+            )
+            
+            changes = parser.parse_and_validate()
         
-        | Column | Required | Description |
-        |--------|----------|-------------|
-        | area_id | Optional | Leave empty for new, keep for renames |
-        | area_name | ✅ Yes | **Unique name** |
-        | icon | No | Emoji or icon |
-        | color | No | Hex color code |
-        | sort_order | Yes | Display order |
-        | description | No | Text description |
+        # Show validation errors if any
+        if changes.validation_errors:
+            st.error("❌ Validation Errors Found")
+            
+            with st.expander("🔍 View Validation Errors", expanded=True):
+                for error in changes.validation_errors:
+                    if error.row > 0:
+                        st.error(f"**Row {error.row}, Column '{error.column}':** {error.message}")
+                    else:
+                        st.error(f"**{error.column}:** {error.message}")
+            
+            st.warning("⚠️ Please fix the errors above and re-upload the file.")
+            return
         
-        ### Categories Sheet
+        # Show validation warnings if any
+        if changes.validation_warnings:
+            st.warning("⚠️ Validation Warnings")
+            
+            with st.expander("🔍 View Warnings", expanded=False):
+                for warning in changes.validation_warnings:
+                    st.warning(f"**Row {warning.row}, Column '{warning.column}':** {warning.message}")
         
-        | Column | Required | Description |
-        |--------|----------|-------------|
-        | category_id | Optional | Leave empty for new |
-        | area_name | ✅ Yes | Reference to parent area |
-        | parent_category | No | Parent category name (empty for root) |
-        | category_name | ✅ Yes | **Unique within parent** |
-        | level | ✅ Yes | 1-10 (depth in hierarchy) |
-        | sort_order | Yes | Display order |
-        | description | No | Text description |
+        # If no changes detected
+        if not changes.has_changes():
+            st.info("ℹ️ No changes detected in the uploaded file.")
+            st.markdown("The file matches your current structure exactly.")
+            return
         
-        ### Attributes Sheet
+        # Show detected changes
+        st.success("✅ File parsed successfully!")
+        st.markdown("### 📊 Detected Changes")
         
-        | Column | Required | Description |
-        |--------|----------|-------------|
-        | attribute_id | Optional | Leave empty for new |
-        | category_name | ✅ Yes | Which category this belongs to |
-        | attribute_name | ✅ Yes | **Unique within category** |
-        | data_type | ✅ Yes | number, text, datetime, boolean, link, image |
-        | unit | No | e.g., "km", "kg", "hours" |
-        | is_required | No | TRUE/FALSE |
-        | default_value | No | Default value |
-        | validation_rules | No | JSON rules |
-        | sort_order | Yes | Display order |
+        # Summary metrics
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         
-        ### Uniqueness Rules
+        with col1:
+            st.metric("New Areas", len(changes.new_areas))
+        with col2:
+            st.metric("New Categories", len(changes.new_categories))
+        with col3:
+            st.metric("New Attributes", len(changes.new_attributes))
+        with col4:
+            st.metric("Updated Areas", len(changes.updated_areas))
+        with col5:
+            st.metric("Updated Categories", len(changes.updated_categories))
+        with col6:
+            st.metric("Updated Attributes", len(changes.updated_attributes))
         
-        - ✅ Area names must be unique
-        - ✅ Category names must be unique within their parent
-        - ✅ Attribute names must be unique within their category
-        - ❌ Different parents CAN have categories with same name
-        """)
+        st.markdown("---")
+        
+        # Detailed changes
+        tabs = st.tabs([
+            f"➕ New ({len(changes.new_areas) + len(changes.new_categories) + len(changes.new_attributes)})",
+            f"✏️ Updated ({len(changes.updated_areas) + len(changes.updated_categories) + len(changes.updated_attributes)})"
+        ])
+        
+        # Tab 1: New items
+        with tabs[0]:
+            if changes.new_areas:
+                st.markdown("#### 🆕 New Areas")
+                for area in changes.new_areas:
+                    with st.expander(f"📁 {area['name']} (Row {area['excel_row']})"):
+                        st.json({
+                            'name': area['name'],
+                            'icon': area['icon'],
+                            'color': area['color'],
+                            'sort_order': area['sort_order'],
+                            'description': area['description']
+                        })
+            
+            if changes.new_categories:
+                st.markdown("#### 🆕 New Categories")
+                for cat in changes.new_categories:
+                    with st.expander(f"📂 {cat['path']} (Row {cat['excel_row']})"):
+                        st.json({
+                            'name': cat['name'],
+                            'path': cat['path'],
+                            'level': cat['level'],
+                            'sort_order': cat['sort_order'],
+                            'description': cat['description']
+                        })
+            
+            if changes.new_attributes:
+                st.markdown("#### 🆕 New Attributes")
+                for attr in changes.new_attributes:
+                    with st.expander(f"🏷️ {attr['category_path']} → {attr['name']} (Row {attr['excel_row']})"):
+                        st.json({
+                            'name': attr['name'],
+                            'category_path': attr['category_path'],
+                            'data_type': attr['data_type'],
+                            'unit': attr['unit'],
+                            'is_required': attr['is_required'],
+                            'default_value': attr['default_value'],
+                            'validation_rules': attr['validation_rules'],
+                            'description': attr['description']
+                        })
+            
+            if not changes.new_areas and not changes.new_categories and not changes.new_attributes:
+                st.info("No new items to add")
+        
+        # Tab 2: Updated items
+        with tabs[1]:
+            if changes.updated_areas:
+                st.markdown("#### ✏️ Updated Areas")
+                for area in changes.updated_areas:
+                    with st.expander(f"📁 {area['name']} (Row {area['excel_row']})"):
+                        st.markdown("**Changes:**")
+                        for key, value in area['updates'].items():
+                            st.markdown(f"- **{key}:** `{value}`")
+            
+            if changes.updated_categories:
+                st.markdown("#### ✏️ Updated Categories")
+                for cat in changes.updated_categories:
+                    with st.expander(f"📂 {cat['path']} (Row {cat['excel_row']})"):
+                        st.markdown("**Changes:**")
+                        for key, value in cat['updates'].items():
+                            st.markdown(f"- **{key}:** `{value}`")
+            
+            if changes.updated_attributes:
+                st.markdown("#### ✏️ Updated Attributes")
+                for attr in changes.updated_attributes:
+                    with st.expander(f"🏷️ {attr['category_path']} → {attr['name']} (Row {attr['excel_row']})"):
+                        st.markdown("**Changes:**")
+                        for key, value in attr['updates'].items():
+                            st.markdown(f"- **{key}:** `{value}`")
+            
+            if not changes.updated_areas and not changes.updated_categories and not changes.updated_attributes:
+                st.info("No updates to existing items")
+        
+        st.markdown("---")
+        
+        # Confirmation
+        st.markdown("### ✅ Confirm Changes")
+        st.warning("⚠️ **Important:** Once you confirm, these changes will be applied to your database immediately.")
+        
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            confirm_text = st.text_input(
+                "Type 'CONFIRM' to apply changes:",
+                placeholder="CONFIRM",
+                help="Type CONFIRM in all caps to enable the Apply button"
+            )
+        
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)  # Spacing
+            apply_button = st.button(
+                "🚀 Apply Changes",
+                type="primary",
+                disabled=(confirm_text != "CONFIRM"),
+                use_container_width=True
+            )
+        
+        if apply_button and confirm_text == "CONFIRM":
+            with st.spinner("💾 Applying changes to database..."):
+                success, message = parser.apply_changes()
+                
+                if success:
+                    st.success(f"✅ {message}")
+                    st.balloons()
+                    
+                    st.info("🔄 Changes applied successfully! Refresh the page to see updates.")
+                    
+                    # Add a button to view structure
+                    if st.button("📊 View Updated Structure"):
+                        st.switch_page("pages/1_📊_View_Structure.py")
+                else:
+                    st.error(f"❌ {message}")
+                    st.warning("Please check the errors and try again.")
     
-    with st.expander("🔧 Troubleshooting"):
-        st.markdown("""
-        ### Common Issues
-        
-        **Q: Validation failed with "duplicate name"**
-        - Check that names are unique within their scope
-        - Download the error-highlighted template to see exact issues
-        
-        **Q: Low confidence rename detected**
-        - Review the signals in the expander
-        - If it's not a rename, leave `*_id` column empty
-        - If it IS a rename, keep the UUID from previous download
-        
-        **Q: Can't delete category - has events**
-        - Categories with events cannot be deleted
-        - Reassign events to another category first
-        - Or delete events via Supabase dashboard
-        
-        **Q: Template shows more changes than expected**
-        - Download current structure first
-        - Make small incremental changes
-        - Test with renames first, then additions/deletions
-        """)
+    except Exception as e:
+        st.error(f"❌ Error processing file: {str(e)}")
+        with st.expander("🔍 View Error Details"):
+            st.exception(e)
     
-    with st.expander("🔒 Security & Privacy"):
-        st.markdown("""
-        ### Row Level Security (RLS)
-        
-        - ✅ All your data is private
-        - ✅ Only you can see/modify your data
-        - ✅ Other users cannot access your structure
-        - ✅ Enforced at PostgreSQL level
-        
-        ### Audit Trail
-        
-        - All name changes are logged
-        - Check `name_change_history` table in Supabase
-        - See who changed what and when
-        """)
+    finally:
+        # Cleanup temporary file
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def render_help_page():
+    """Render the help page"""
+    st.title("ℹ️ Help & Documentation")
+    
+    st.markdown("""
+    ## 📚 Events Tracker Guide
+    
+    ### 🎯 Overview
+    Events Tracker helps you organize and track events using a hierarchical structure:
+    - **Areas** (e.g., Health, Work, Finance)
+    - **Categories** (e.g., Sleep, Exercise, Meetings)
+    - **Attributes** (e.g., Duration, Amount, Quality)
+    
+    ---
+    
+    ### 📊 View Structure
+    Browse your hierarchical structure in an interactive tree view:
+    - Expand/collapse areas and categories
+    - View all attributes with their properties
+    - Search and filter
+    - Navigate the structure
+    
+    ---
+    
+    ### 📝 Add Event
+    Add single events with a user-friendly form:
+    - Select category (hierarchical dropdown)
+    - Pick date
+    - Fill attribute values
+    - Add optional comment
+    - **Sticky mode**: Keep category selected for multiple entries
+    
+    ---
+    
+    ### 📤 Bulk Import
+    Import multiple events from Excel/CSV:
+    1. Download template
+    2. Fill with your data
+    3. Upload file
+    4. Preview and validate
+    5. Confirm import
+    
+    **Supported formats:**
+    - Excel (.xlsx)
+    - CSV (.csv)
+    
+    **Required columns:**
+    - `event_date` (YYYY-MM-DD)
+    - `category_path` (e.g., "Health > Sleep")
+    - Attribute columns (e.g., `Duration`, `Quality`)
+    
+    ---
+    
+    ### 📊 View Data - Export
+    Export your events to Excel for viewing and editing:
+    1. Apply filters (category, date range, attributes)
+    2. Export to Excel
+    3. Download file
+    4. View/edit in Excel
+    
+    **Color coding:**
+    - 🟪 **PINK columns** = READ-ONLY (Event_ID, Category_Path, Date)
+    - 🔵 **BLUE columns** = EDITABLE (attribute values, comment)
+    
+    ---
+    
+    ### 📥 View Data - Import
+    Import edited Excel file with change detection:
+    1. Upload edited Excel file (from Export)
+    2. System detects changes automatically
+    3. Review detailed diff (old vs new values)
+    4. Confirm to apply changes
+    5. Changes applied to database
+    
+    **Safety features:**
+    - Only changed values are updated
+    - Unchanged data remains untouched
+    - Full validation before applying
+    - Error reporting
+    
+    ---
+    
+    ### 📥 Download Structure (Enhanced)
+    Export your structure to Excel template with advanced features:
+    - **Color-coded columns**: PINK (auto) vs BLUE (editable)
+    - **Drop-down validations** for data types, required fields
+    - **Auto-formulas** for Level, Area extraction
+    - **Row grouping**: Collapsible Areas and Categories
+    - **Column grouping**: Hide/show attribute details
+    - **Validation fields**: Min/Max for number attributes
+    
+    ---
+    
+    ### 📤 Upload Template
+    Update your structure by uploading Excel template:
+    - Download current structure first
+    - Edit in Excel (add/rename/delete areas, categories, attributes)
+    - Upload modified template
+    - Review changes
+    - Confirm updates
+    
+    **Features:**
+    - Rename detection (smart matching)
+    - Hierarchical structure support
+    - Validation before applying changes
+    
+    ---
+    
+    ### 💡 Tips & Best Practices
+    
+    **Structure Organization:**
+    - Use Areas for high-level grouping (Health, Work, etc.)
+    - Categories for specific event types (Sleep, Meetings, etc.)
+    - Attributes for data points you want to track
+    
+    **Bulk Operations:**
+    - Use Bulk Import for initial data load
+    - Use View Data Export/Import for editing existing data
+    - Download structure template before making structural changes
+    
+    **Data Entry:**
+    - Enable Sticky Mode in Add Event for repeated entries in same category
+    - Use Bulk Import for multiple events at once
+    - Use View Data Export/Import to edit large datasets
+    
+    **Data Safety:**
+    - Always review changes before confirming
+    - Download backups before major structural changes
+    - Check validation messages carefully
+    
+    ---
+    
+    ### ❓ Need More Help?
+    
+    If you encounter issues:
+    1. Check validation messages carefully
+    2. Review error details in expander sections
+    3. Ensure Excel files follow required format
+    4. Verify date formats (YYYY-MM-DD)
+    
+    ---
+    
+    ### 🎉 Happy Tracking!
+    """)
+    
+    # Version info
+    st.markdown("---")
+    st.caption("Version: 2025-11-23 16:00 UTC | Python: 3.11 | Streamlit: 1.28.0")
 
 
 if __name__ == "__main__":

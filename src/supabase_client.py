@@ -1,6 +1,13 @@
 """
-Supabase Client Module
-Handles all Supabase database operations with backup functionality
+Events Tracker - Supabase Client Module
+========================================
+Created: 2025-11-11 13:05 UTC
+Last Modified: 2025-11-15 18:30 UTC
+Python: 3.11
+
+Description:
+Manages all Supabase database operations with backup functionality.
+Handles connection testing, backups, and rollback capabilities.
 """
 from supabase import create_client, Client
 from typing import Dict, List, Optional, Tuple
