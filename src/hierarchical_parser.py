@@ -12,7 +12,7 @@ Features:
 - Apply changes atomically to database
 
 Dependencies: pandas, openpyxl, supabase
-Last Modified: 2025-11-23 18:00 UTC
+Last Modified: 2025-11-22 12:00 UTC
 """
 
 import pandas as pd
@@ -68,6 +68,9 @@ class HierarchicalParser:
     VALID_DATA_TYPES = {'number', 'text', 'datetime', 'boolean', 'link', 'image'}
     VALID_REQUIRED = {'TRUE', 'FALSE', 'True', 'False', True, False, 'true', 'false'}
     
+    # Maximum number of errors to collect (to avoid overwhelming user and long processing times)
+    MAX_ERRORS = 20
+    
     def __init__(self, client, user_id: str, excel_path: str):
         """
         Initialize parser.
@@ -104,34 +107,29 @@ class HierarchicalParser:
         # Step 2: Load existing structure from database
         self.existing_structure = self._load_existing_structure()
         
-        # Step 3: Validate data format
+        # Step 3: Validate data format (collects up to MAX_ERRORS)
         self._validate_data_format()
         
-        # If format errors, don't continue
-        if self.changes.has_errors():
-            return self.changes
+        # Step 4: Detect changes (only if no critical errors and under error limit)
+        if not self.changes.has_errors() or len(self.changes.validation_errors) < self.MAX_ERRORS:
+            self._detect_changes()
         
-        # Step 4: Detect changes
-        self._detect_changes()
-        
-        # Step 5: Validate business logic
-        self._validate_business_logic()
+        # Step 5: Validate business logic (only if under error limit)
+        if len(self.changes.validation_errors) < self.MAX_ERRORS:
+            self._validate_business_logic()
         
         return self.changes
     
     def _read_excel(self) -> Optional[pd.DataFrame]:
         """Read Hierarchical_View sheet from Excel."""
         try:
-            df = pd.read_excel(self.excel_path, sheet_name='Hierarchical_View')
+            # Excel structure:
+            # Row 1: Blank (None values)
+            # Row 2: Headers (Type, Level, Sort_Order, etc.)
+            # Row 3+: Data
             
-            # Skip row 1 (blank) if present - data starts from row 2
-            # Headers should be in row 2 (index 0 after pandas reads)
-            # Check if first row might be blank
-            if df.iloc[0].isna().all():
-                df = df.iloc[1:].reset_index(drop=True)
-                # Reset column names from next row
-                df.columns = df.iloc[0]
-                df = df.iloc[1:].reset_index(drop=True)
+            # Read with header in row 2 (index 1, since 0-indexed)
+            df = pd.read_excel(self.excel_path, sheet_name='Hierarchical_View', header=1)
             
             # Standardize column names (remove extra spaces)
             df.columns = df.columns.str.strip()
@@ -256,10 +254,20 @@ class HierarchicalParser:
             self.changes.validation_errors.append(
                 ValidationError(0, "Columns", f"Missing required columns: {', '.join(missing_cols)}", "error")
             )
+            # Don't continue if columns are missing - can't validate rows
             return
         
-        # Validate each row
+        # Validate each row (up to MAX_ERRORS)
         for idx, row in self.df.iterrows():
+            # Stop if we've reached MAX_ERRORS
+            if len(self.changes.validation_errors) >= self.MAX_ERRORS:
+                self.changes.validation_warnings.append(
+                    ValidationError(0, "Validation", 
+                                  f"Validation stopped at {self.MAX_ERRORS} errors. There may be more errors in the file.", 
+                                  "warning")
+                )
+                break
+            
             excel_row = idx + 3  # Excel row (1=blank, 2=header, 3=first data)
             
             # Skip completely empty rows

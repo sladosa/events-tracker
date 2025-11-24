@@ -13,7 +13,7 @@ Features:
 **UPDATED:** Headers in row 2, Sort_Order moved to column C, new grouping, auto filter
 
 Dependencies: openpyxl, pandas, supabase
-Last Modified: 2025-11-23 17:30 UTC
+Last Modified: 2025-11-24 12:00 UTC
 """
 
 import pandas as pd
@@ -509,7 +509,7 @@ class EnhancedStructureExporter:
     def _auto_size_columns(self, ws):
         """
         Auto-size columns based on content with max width limit.
-        Column D (Area) uses minimal width to fit content only.
+        Columns A-D (Type, Level, Sort_Order, Area) use fixed width of 10.
         """
         for column_cells in ws.columns:
             length = 0
@@ -524,9 +524,9 @@ class EnhancedStructureExporter:
                 except:
                     pass
             
-            # Column D (Area) - minimal width (no padding)
-            if column_letter == 'D':
-                adjusted_width = max(length, 8)  # Min 8 for header, no extra padding
+            # Columns A-D (Type, Level, Sort_Order, Area) - fixed width 10
+            if column_letter in ['A', 'B', 'C', 'D']:
+                adjusted_width = 10
             else:
                 # Other columns - normal width with limits
                 adjusted_width = min(length + 2, 50)  # Max 50 characters

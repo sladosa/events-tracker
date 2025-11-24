@@ -2,7 +2,7 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-11-23 18:00 UTC
+Last Modified: 2025-11-24 12:00 UTC
 Python: 3.11
 
 Description:
@@ -39,6 +39,7 @@ from src.reverse_engineer import ReverseEngineer
 from src.enhanced_structure_exporter import EnhancedStructureExporter
 from src.hierarchical_parser import HierarchicalParser
 from src import excel_parser_new
+from src.error_reporter import generate_error_excel
 
 
 # Page configuration
@@ -372,6 +373,47 @@ def render_upload_page(supabase, user_id: str):
                         st.error(f"**{error.column}:** {error.message}")
             
             st.warning("⚠️ Please fix the errors above and re-upload the file.")
+            
+            # Generate error Excel with highlighted cells
+            st.markdown("---")
+            st.markdown("### 📥 Download Error Report")
+            st.info("""
+            **Download an Excel file with errors highlighted:**
+            - 🟡 **Yellow cells** = Cells with validation errors
+            - 💬 **Comments** = Hover over yellow cells to see error details
+            - ✏️ **Fix errors** in Excel and re-upload
+            """)
+            
+            if st.button("📥 Generate Error Report Excel", type="primary"):
+                with st.spinner("Generating error report..."):
+                    try:
+                        # Generate error Excel
+                        error_excel_path = generate_error_excel(tmp_path, changes.validation_errors)
+                        
+                        # Read the file for download
+                        with open(error_excel_path, 'rb') as f:
+                            error_excel_data = f.read()
+                        
+                        st.success("✅ Error report generated successfully!")
+                        
+                        # Download button
+                        st.download_button(
+                            label="⬇️ Download Error Report Excel",
+                            data=error_excel_data,
+                            file_name=os.path.basename(error_excel_path),
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            help="Excel file with highlighted errors and comments"
+                        )
+                        
+                        # Cleanup
+                        if os.path.exists(error_excel_path):
+                            os.remove(error_excel_path)
+                    
+                    except Exception as e:
+                        st.error(f"❌ Error generating error report: {str(e)}")
+                        with st.expander("🔍 View Error Details"):
+                            st.exception(e)
+            
             return
         
         # Show validation warnings if any
