@@ -2,17 +2,19 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-11-25 13:00 UTC
+Last Modified: 2025-11-25 14:30 UTC
 Python: 3.11
+Version: 1.3 - Three Separate Editors (Tab Interface)
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
 Uses st.data_editor with live database connection, validation, and batch save.
 
 Features:
-- Excel-like table matching Hierarchical_View export format
-- Color-coded columns (Pink=auto-calc, Blue=editable) with clear legend
-- Read-Only and Edit modes with toggle
+- **THREE SEPARATE EDITORS**: Areas, Categories, and Attributes in tabs
+- Each editor shows only relevant columns for that entity type
+- Read-Only mode: Shows ALL rows (Areas, Categories, Attributes)
+- Edit Mode: Choose which entity type to edit via tabs
 - Dropdown validations for Data_Type and Is_Required
 - Search and filtering (Area, Category_Path)
 - Live validation before save
@@ -20,6 +22,7 @@ Features:
 - Rollback/discard changes option
 - OPTIMIZED: Batch data loading with caching (60s TTL)
 - IMPROVED: Unsaved changes warnings on filter/refresh
+- CLEAN: No more confusion with mixed row types
 
 Dependencies: streamlit, pandas, supabase
 
@@ -29,6 +32,7 @@ Technical Details:
 - Reduces editing time from 5 minutes to ~30 seconds
 - Validates changes before committing to database
 - Uses @st.cache_data for 10x faster loading
+- Tab-based interface for clarity and simplicity
 """
 
 import streamlit as st
@@ -200,14 +204,14 @@ def load_structure_as_dataframe(client, user_id: str) -> pd.DataFrame:
                 'Sort_Order': area['sort_order'],
                 'Area': area_name,
                 'Category_Path': area_name,
-                'Category': '—',  # Not applicable for Area
-                'Attribute_Name': '—',
-                'Data_Type': '—',
-                'Unit': '—',
-                'Is_Required': '—',
-                'Default_Value': '—',
-                'Validation_Min': '—',
-                'Validation_Max': '—',
+                'Category': '',
+                'Attribute_Name': '',
+                'Data_Type': '',
+                'Unit': '',
+                'Is_Required': '',
+                'Default_Value': '',
+                'Validation_Min': '',
+                'Validation_Max': '',
                 'Description': area.get('description', ''),
                 '_area_id': area_id,
                 '_category_id': None,
@@ -277,13 +281,13 @@ def _add_category_tree(
         'Area': area_name,
         'Category_Path': cat_path,
         'Category': cat_name,
-        'Attribute_Name': '—',  # Not applicable for Category
-        'Data_Type': '—',
-        'Unit': '—',
-        'Is_Required': '—',
-        'Default_Value': '—',
-        'Validation_Min': '—',
-        'Validation_Max': '—',
+        'Attribute_Name': '',  
+        'Data_Type': '',
+        'Unit': '',
+        'Is_Required': '',
+        'Default_Value': '',
+        'Validation_Min': '',
+        'Validation_Max': '',
         'Description': category.get('description', ''),
         '_area_id': category['area_id'],
         '_category_id': cat_id,
@@ -347,6 +351,68 @@ def _add_category_tree(
 
 
 # ============================================
+# HELPER FUNCTIONS FOR TABBED EDITING
+# ============================================
+
+def _save_category_changes(
+    client,
+    user_id: str,
+    original_cat_df: pd.DataFrame,
+    edited_cat_df: pd.DataFrame,
+    full_df: pd.DataFrame
+) -> Tuple[bool, int]:
+    """
+    Save category changes to database.
+    
+    Args:
+        client: Supabase client
+        user_id: User UUID
+        original_cat_df: Original category dataframe
+        edited_cat_df: Edited category dataframe
+        full_df: Full filtered dataframe with metadata
+    
+    Returns:
+        Tuple of (success: bool, num_updated: int)
+    """
+    stats = 0
+    
+    try:
+        for idx in edited_cat_df.index:
+            orig_row = original_cat_df.loc[idx]
+            edit_row = edited_cat_df.loc[idx]
+            
+            # Check if changed
+            if orig_row['Category'] == edit_row['Category'] and orig_row['Description'] == edit_row['Description']:
+                continue
+            
+            # Get category_id from full_df
+            cat_id = full_df.loc[idx, '_category_id']
+            
+            if pd.isna(cat_id):
+                continue
+            
+            # Update category
+            update_data = {
+                'name': edit_row['Category'],
+                'description': edit_row['Description'] if edit_row['Description'] else None
+            }
+            
+            client.table('categories') \
+                .update(update_data) \
+                .eq('id', cat_id) \
+                .eq('user_id', user_id) \
+                .execute()
+            
+            stats += 1
+        
+        return True, stats
+    
+    except Exception as e:
+        st.error(f"Error saving categories: {str(e)}")
+        return False, stats
+
+
+# ============================================
 # FILTERING
 # ============================================
 
@@ -388,6 +454,7 @@ def apply_filters(
 def validate_changes(df: pd.DataFrame) -> Tuple[bool, List[str]]:
     """
     Validate changes before saving to database.
+    Skips validation for "—" (not applicable) values.
     
     Args:
         df: DataFrame with potentially edited data
@@ -400,47 +467,49 @@ def validate_changes(df: pd.DataFrame) -> Tuple[bool, List[str]]:
     for idx, row in df.iterrows():
         row_num = idx + 1  # For error messages (1-indexed)
         
-        # Validate Category rows
-        if row['Type'] == 'Category':
-            if not row['Category'] or pd.isna(row['Category']):
-                errors.append(f"Row {row_num}: Category name is required")
+        # Skip Area and Category rows (they shouldn't be in edited df anyway)
+        if row['Type'] in ['Area', 'Category']:
+            continue
         
         # Validate Attribute rows
-        elif row['Type'] == 'Attribute':
-            if not row['Attribute_Name'] or pd.isna(row['Attribute_Name']):
+        if row['Type'] == 'Attribute':
+            # Check required fields (skip if "—")
+            if not row['Attribute_Name'] or pd.isna(row['Attribute_Name']) or row['Attribute_Name'] == '—':
                 errors.append(f"Row {row_num}: Attribute name is required")
             
-            if not row['Data_Type'] or pd.isna(row['Data_Type']):
+            if not row['Data_Type'] or pd.isna(row['Data_Type']) or row['Data_Type'] == '—':
                 errors.append(f"Row {row_num}: Data type is required")
             elif row['Data_Type'] not in DATA_TYPES:
                 errors.append(f"Row {row_num}: Invalid data type '{row['Data_Type']}'")
             
-            # Validate Is_Required
-            if row['Is_Required'] and row['Is_Required'] not in ['Yes', 'No', '']:
-                errors.append(f"Row {row_num}: Is_Required must be 'Yes', 'No', or empty")
+            # Validate Is_Required (skip if "—")
+            if row['Is_Required'] and row['Is_Required'] != '—':
+                if row['Is_Required'] not in ['Yes', 'No', '']:
+                    errors.append(f"Row {row_num}: Is_Required must be 'Yes', 'No', or empty")
             
-            # Validate min/max for number type
+            # Validate min/max for number type (skip if "—")
             if row['Data_Type'] == 'number':
-                if row['Validation_Min']:
+                if row['Validation_Min'] and row['Validation_Min'] != '—':
                     try:
                         float(row['Validation_Min'])
-                    except ValueError:
+                    except (ValueError, TypeError):
                         errors.append(f"Row {row_num}: Validation_Min must be a number")
                 
-                if row['Validation_Max']:
+                if row['Validation_Max'] and row['Validation_Max'] != '—':
                     try:
                         float(row['Validation_Max'])
-                    except ValueError:
+                    except (ValueError, TypeError):
                         errors.append(f"Row {row_num}: Validation_Max must be a number")
                 
-                # Check min <= max
-                if row['Validation_Min'] and row['Validation_Max']:
+                # Check min <= max (skip if either is "—")
+                if (row['Validation_Min'] and row['Validation_Min'] != '—' and 
+                    row['Validation_Max'] and row['Validation_Max'] != '—'):
                     try:
                         min_val = float(row['Validation_Min'])
                         max_val = float(row['Validation_Max'])
                         if min_val > max_val:
                             errors.append(f"Row {row_num}: Validation_Min must be <= Validation_Max")
-                    except ValueError:
+                    except (ValueError, TypeError):
                         pass  # Already reported above
     
     return (len(errors) == 0, errors)
@@ -459,6 +528,7 @@ def save_changes_to_database(
     """
     Save edited changes back to database.
     Only updates rows that were actually changed.
+    Skips rows with "—" or empty non-applicable values.
     
     Args:
         client: Supabase client
@@ -469,7 +539,8 @@ def save_changes_to_database(
     Returns:
         Tuple of (success: bool, message: str, stats: Dict[str, int])
     """
-    stats = {'categories': 0, 'attributes': 0}
+    stats = {'categories': 0, 'attributes': 0, 'errors': 0}
+    errors = []
     
     try:
         # Compare dataframes to find changes
@@ -480,6 +551,10 @@ def save_changes_to_database(
             orig_row = original_df.loc[idx]
             edit_row = edited_df.loc[idx]
             
+            # Skip if no IDs (should not happen but safety check)
+            if pd.isna(edit_row.get('_category_id')) and pd.isna(edit_row.get('_attribute_id')):
+                continue
+            
             # Check if row was modified
             editable_cols = ['Category', 'Attribute_Name', 'Data_Type', 'Unit', 
                            'Is_Required', 'Default_Value', 'Validation_Min', 
@@ -487,68 +562,71 @@ def save_changes_to_database(
             
             is_modified = False
             for col in editable_cols:
-                if str(orig_row[col]) != str(edit_row[col]):
+                # Handle NaN comparisons
+                orig_val = orig_row[col]
+                edit_val = edit_row[col]
+                
+                # Convert NaN to empty string for comparison
+                orig_val = '' if pd.isna(orig_val) else str(orig_val)
+                edit_val = '' if pd.isna(edit_val) else str(edit_val)
+                
+                if orig_val != edit_val:
                     is_modified = True
                     break
             
             if not is_modified:
                 continue
             
-            # Update Category
-            if edit_row['Type'] == 'Category' and edit_row['_category_id']:
-                update_data = {
-                    'name': edit_row['Category'],
-                    'description': edit_row['Description'] if edit_row['Description'] else None
-                }
-                
-                client.table('categories') \
-                    .update(update_data) \
-                    .eq('id', edit_row['_category_id']) \
-                    .eq('user_id', user_id) \
-                    .execute()
-                
-                stats['categories'] += 1
+            try:
+                # Update Attribute (Edit Mode only shows Attributes)
+                if edit_row['Type'] == 'Attribute' and edit_row['_attribute_id']:
+                    # Build validation_rules JSONB
+                    val_rules = {}
+                    if edit_row['Validation_Min'] and str(edit_row['Validation_Min']).strip():
+                        try:
+                            val_rules['min'] = float(edit_row['Validation_Min'])
+                        except (ValueError, TypeError):
+                            pass  # Skip invalid values
+                    
+                    if edit_row['Validation_Max'] and str(edit_row['Validation_Max']).strip():
+                        try:
+                            val_rules['max'] = float(edit_row['Validation_Max'])
+                        except (ValueError, TypeError):
+                            pass  # Skip invalid values
+                    
+                    # Convert Is_Required to boolean
+                    is_required = edit_row['Is_Required'] == 'Yes' if edit_row['Is_Required'] else False
+                    
+                    # Prepare update data
+                    update_data = {
+                        'name': edit_row['Attribute_Name'],
+                        'data_type': edit_row['Data_Type'] if edit_row['Data_Type'] else 'text',
+                        'unit': edit_row['Unit'] if edit_row['Unit'] else None,
+                        'is_required': is_required,
+                        'default_value': edit_row['Default_Value'] if edit_row['Default_Value'] else None,
+                        'validation_rules': val_rules if val_rules else {},
+                        'description': edit_row['Description'] if edit_row['Description'] else None
+                    }
+                    
+                    client.table('attribute_definitions') \
+                        .update(update_data) \
+                        .eq('id', edit_row['_attribute_id']) \
+                        .eq('user_id', user_id) \
+                        .execute()
+                    
+                    stats['attributes'] += 1
             
-            # Update Attribute
-            elif edit_row['Type'] == 'Attribute' and edit_row['_attribute_id']:
-                # Build validation_rules JSONB
-                val_rules = {}
-                if edit_row['Validation_Min']:
-                    try:
-                        val_rules['min'] = float(edit_row['Validation_Min'])
-                    except ValueError:
-                        val_rules['min'] = edit_row['Validation_Min']
-                
-                if edit_row['Validation_Max']:
-                    try:
-                        val_rules['max'] = float(edit_row['Validation_Max'])
-                    except ValueError:
-                        val_rules['max'] = edit_row['Validation_Max']
-                
-                # Convert Is_Required to boolean
-                is_required = edit_row['Is_Required'] == 'Yes' if edit_row['Is_Required'] else False
-                
-                update_data = {
-                    'name': edit_row['Attribute_Name'],
-                    'data_type': edit_row['Data_Type'],
-                    'unit': edit_row['Unit'] if edit_row['Unit'] else None,
-                    'is_required': is_required,
-                    'default_value': edit_row['Default_Value'] if edit_row['Default_Value'] else None,
-                    'validation_rules': val_rules,
-                    'description': edit_row['Description'] if edit_row['Description'] else None
-                }
-                
-                client.table('attribute_definitions') \
-                    .update(update_data) \
-                    .eq('id', edit_row['_attribute_id']) \
-                    .eq('user_id', user_id) \
-                    .execute()
-                
-                stats['attributes'] += 1
+            except Exception as e:
+                stats['errors'] += 1
+                errors.append(f"Row {idx + 1}: {str(e)}")
+                # Continue processing other rows
         
         total_updates = stats['categories'] + stats['attributes']
         
-        if total_updates == 0:
+        if stats['errors'] > 0:
+            error_msg = f"Completed with {stats['errors']} errors. Check details below."
+            return False, error_msg, stats
+        elif total_updates == 0:
             return True, "No changes detected", stats
         else:
             return True, f"Successfully updated {total_updates} items", stats
@@ -715,165 +793,255 @@ def render_interactive_structure_viewer(client, user_id: str):
         )
     
     else:
-        # Edit mode - use data_editor
-        st.markdown("### ✏️ Structure (Edit Mode)")
+        # Edit mode - use tabbed interface with 3 editors
+        st.markdown("### ✏️ Structure (Edit Mode) - Choose What to Edit")
         
-        # LEGEND - Visual guide for column types
-        st.markdown("""
-        <div style='background-color: #f8f9fa; padding: 12px; border-left: 4px solid #0066cc; border-radius: 4px; margin-bottom: 15px;'>
-            <div style='display: flex; gap: 30px; align-items: center;'>
-                <div>
-                    <span style='background-color: #ffe6f0; padding: 4px 12px; border-radius: 3px; font-weight: bold; color: #c2185b;'>
-                        🔒 LOCKED
-                    </span>
-                    <span style='color: #666; margin-left: 8px;'>Auto-calculated (Type, Level, Sort_Order, Area, Category_Path)</span>
-                </div>
-                <div>
-                    <span style='background-color: #e3f2fd; padding: 4px 12px; border-radius: 3px; font-weight: bold; color: #1976d2;'>
-                        ✏️ EDITABLE
-                    </span>
-                    <span style='color: #666; margin-left: 8px;'>Click to edit (Category, Attribute_Name, Data_Type, etc.)</span>
-                </div>
-            </div>
-            <div style='margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd; color: #888; font-size: 0.9em;'>
-                <strong>Note:</strong> Area and Category rows don't use all columns - "—" means not applicable
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Configure column properties with help text and placeholders
-        column_config = {}
-        
-        for col_name, is_editable, col_type in COLUMN_CONFIG:
-            if col_name not in display_df.columns:
-                continue
-            
-            # Help text based on editability
-            if is_editable:
-                help_text = "Click to edit"
-            else:
-                help_text = "Auto-calculated - locked"
-            
-            if col_type == 'select':
-                if col_name == 'Data_Type':
-                    column_config[col_name] = st.column_config.SelectboxColumn(
-                        col_name,
-                        help=help_text,
-                        options=DATA_TYPES,
-                        required=False,  # Not required for all row types
-                        disabled=not is_editable
-                    )
-                elif col_name == 'Is_Required':
-                    column_config[col_name] = st.column_config.SelectboxColumn(
-                        col_name,
-                        help=help_text,
-                        options=IS_REQUIRED_OPTIONS,
-                        required=False,
-                        disabled=not is_editable
-                    )
-            elif col_type == 'number':
-                column_config[col_name] = st.column_config.NumberColumn(
-                    col_name,
-                    help=help_text,
-                    disabled=not is_editable
-                )
-            else:  # text
-                column_config[col_name] = st.column_config.TextColumn(
-                    col_name,
-                    help=help_text,
-                    disabled=not is_editable
-                )
-        
-        # Render data editor
-        edited_df = st.data_editor(
-            display_df,
-            use_container_width=True,
-            height=600,
-            column_config=column_config,
-            hide_index=True,
-            num_rows="fixed"  # Don't allow adding/deleting rows in this version
-        )
-        
-        # Store edited dataframe
-        st.session_state.edited_df = edited_df
+        # Create tabs for different entity types
+        tab1, tab2, tab3 = st.tabs(["📦 Edit Areas", "📁 Edit Categories", "🏷️ Edit Attributes"])
         
         # ============================================
-        # SAVE CONTROLS
+        # TAB 1: EDIT AREAS
         # ============================================
-        
-        st.markdown("---")
-        st.markdown("### 💾 Save Changes")
-        
-        # Check if there are changes
-        has_changes = False
-        if st.session_state.original_df is not None:
-            # Compare display columns only
-            orig_display = st.session_state.original_df[display_cols]
-            has_changes = not orig_display.equals(edited_df)
-        
-        if not has_changes:
-            st.info("ℹ️ No changes detected")
-        else:
-            st.warning("⚠️ **You have unsaved changes**")
+        with tab1:
+            st.markdown("#### 📦 Edit Areas")
+            st.info("Edit area names, icons, colors, and descriptions. Areas are top-level organizational units.")
             
-            # Validate changes
-            is_valid, errors = validate_changes(edited_df)
+            # Filter to show ONLY Area rows
+            area_df = display_df[display_df['Type'] == 'Area'].copy()
             
-            if not is_valid:
-                st.error("❌ **Validation Errors:**")
-                for error in errors:
-                    st.error(f"  • {error}")
+            if area_df.empty:
+                st.warning("⚠️ No areas found.")
             else:
-                st.success("✅ All changes are valid")
-            
-            # Save controls
-            col1, col2, col3 = st.columns([2, 1, 1])
-            
-            with col1:
-                confirmation_text = st.text_input(
-                    "Type 'SAVE' to confirm batch save",
-                    key="save_confirmation"
+                st.markdown(f"**Editing {len(area_df)} areas**")
+                
+                # Select relevant columns for Areas
+                area_cols = ['Type', 'Sort_Order', 'Area', 'Description']
+                area_display = area_df[area_cols].copy()
+                
+                # Configure columns for Area editing
+                area_column_config = {
+                    'Type': st.column_config.TextColumn('Type', disabled=True, help="Row type (locked)"),
+                    'Sort_Order': st.column_config.NumberColumn('Sort_Order', disabled=True, help="Display order (locked)"),
+                    'Area': st.column_config.TextColumn('Area', help="Area name - editable", disabled=False),
+                    'Description': st.column_config.TextColumn('Description', help="Area description - editable", disabled=False)
+                }
+                
+                # Render area editor
+                edited_area_df = st.data_editor(
+                    area_display,
+                    use_container_width=True,
+                    height=400,
+                    column_config=area_column_config,
+                    hide_index=True,
+                    num_rows="fixed"
                 )
+                
+                # Save logic for areas
+                if st.button("💾 Save Area Changes", key="save_areas"):
+                    st.info("⚠️ Area editing will be implemented in next version. For now, use Download Structure → Upload Template workflow.")
+        
+        # ============================================
+        # TAB 2: EDIT CATEGORIES
+        # ============================================
+        with tab2:
+            st.markdown("#### 📁 Edit Categories")
+            st.info("Edit category names and descriptions. Categories organize events hierarchically.")
             
-            with col2:
-                if st.button("💾 Save Changes", disabled=not is_valid, use_container_width=True):
-                    if confirmation_text == "SAVE":
-                        with st.spinner("Saving changes..."):
-                            # Merge edited data back with metadata
-                            full_edited_df = filtered_df.copy()
-                            full_edited_df[display_cols] = edited_df
-                            
-                            success, message, stats = save_changes_to_database(
-                                client,
-                                user_id,
-                                st.session_state.original_df,
-                                full_edited_df
-                            )
-                            
-                            if success:
-                                st.success(f"✅ {message}")
-                                if stats['categories'] > 0 or stats['attributes'] > 0:
-                                    st.info(
-                                        f"Updated: {stats['categories']} categories, "
-                                        f"{stats['attributes']} attributes"
-                                    )
+            # Filter to show ONLY Category rows
+            category_df = display_df[display_df['Type'] == 'Category'].copy()
+            
+            if category_df.empty:
+                st.warning("⚠️ No categories found. Please select a different Area.")
+            else:
+                st.markdown(f"**Editing {len(category_df)} categories**")
+                
+                # Select relevant columns for Categories
+                cat_cols = ['Type', 'Level', 'Sort_Order', 'Area', 'Category_Path', 'Category', 'Description']
+                cat_display = category_df[cat_cols].copy()
+                
+                # Configure columns for Category editing
+                cat_column_config = {
+                    'Type': st.column_config.TextColumn('Type', disabled=True),
+                    'Level': st.column_config.NumberColumn('Level', disabled=True),
+                    'Sort_Order': st.column_config.NumberColumn('Sort_Order', disabled=True),
+                    'Area': st.column_config.TextColumn('Area', disabled=True),
+                    'Category_Path': st.column_config.TextColumn('Category_Path', disabled=True, help="Full hierarchical path"),
+                    'Category': st.column_config.TextColumn('Category', help="Category name - editable", disabled=False),
+                    'Description': st.column_config.TextColumn('Description', help="Category description - editable", disabled=False)
+                }
+                
+                # Render category editor
+                edited_cat_df = st.data_editor(
+                    cat_display,
+                    use_container_width=True,
+                    height=400,
+                    column_config=cat_column_config,
+                    hide_index=True,
+                    num_rows="fixed"
+                )
+                
+                # Check for changes
+                has_cat_changes = not category_df[cat_cols].equals(edited_cat_df)
+                
+                if has_cat_changes:
+                    st.warning("⚠️ You have unsaved changes")
+                    
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        confirm = st.text_input("Type 'SAVE' to confirm", key="save_cat_confirm")
+                    with col2:
+                        if st.button("💾 Save Changes", key="save_categories", disabled=(confirm != "SAVE")):
+                            with st.spinner("Saving category changes..."):
+                                # Save category changes
+                                success, stats = _save_category_changes(
+                                    client, user_id, category_df, edited_cat_df, filtered_df
+                                )
                                 
-                                # Reset session state
-                                st.session_state.original_df = None
-                                st.session_state.edited_df = None
-                                
-                                st.balloons()
-                                st.rerun()
-                            else:
-                                st.error(f"❌ {message}")
+                                if success:
+                                    st.success(f"✅ Updated {stats} categories")
+                                    st.cache_data.clear()
+                                    st.session_state.original_df = None
+                                    st.session_state.edited_df = None
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Failed to save changes")
+                else:
+                    st.info("ℹ️ No changes detected")
+        
+        # ============================================
+        # TAB 3: EDIT ATTRIBUTES
+        # ============================================
+        with tab3:
+            st.markdown("#### 🏷️ Edit Attributes")
+            st.info("Edit attribute definitions: name, data type, unit, validation rules, and more.")
+            
+            # Filter to show ONLY Attribute rows
+            attribute_df = display_df[display_df['Type'] == 'Attribute'].copy()
+            
+            if attribute_df.empty:
+                st.warning("⚠️ No attributes to edit. Please select a different Area or add attributes first.")
+            else:
+                st.markdown(f"**Editing {len(attribute_df)} attributes**")
+                
+                # Select relevant columns for Attributes
+                attr_cols = ['Type', 'Level', 'Sort_Order', 'Area', 'Category_Path', 'Category',
+                            'Attribute_Name', 'Data_Type', 'Unit', 'Is_Required', 
+                            'Default_Value', 'Validation_Min', 'Validation_Max', 'Description']
+                
+                attr_display = attribute_df[attr_cols].copy()
+                
+                # Configure columns for Attribute editing
+                attr_column_config = {
+                    'Type': st.column_config.TextColumn('Type', disabled=True),
+                    'Level': st.column_config.NumberColumn('Level', disabled=True),
+                    'Sort_Order': st.column_config.NumberColumn('Sort_Order', disabled=True),
+                    'Area': st.column_config.TextColumn('Area', disabled=True),
+                    'Category_Path': st.column_config.TextColumn('Category_Path', disabled=True),
+                    'Category': st.column_config.TextColumn('Category', disabled=True),
+                    'Attribute_Name': st.column_config.TextColumn('Attribute_Name', help="Attribute name - editable", disabled=False),
+                    'Data_Type': st.column_config.SelectboxColumn('Data_Type', options=DATA_TYPES, help="Select data type", disabled=False),
+                    'Unit': st.column_config.TextColumn('Unit', help="Measurement unit", disabled=False),
+                    'Is_Required': st.column_config.SelectboxColumn('Is_Required', options=IS_REQUIRED_OPTIONS, help="Required field?", disabled=False),
+                    'Default_Value': st.column_config.TextColumn('Default_Value', help="Default value", disabled=False),
+                    'Validation_Min': st.column_config.TextColumn('Validation_Min', help="Minimum value", disabled=False),
+                    'Validation_Max': st.column_config.TextColumn('Validation_Max', help="Maximum value", disabled=False),
+                    'Description': st.column_config.TextColumn('Description', help="Attribute description", disabled=False)
+                }
+                
+                # Render attribute editor
+                edited_attr_df = st.data_editor(
+                    attr_display,
+                    use_container_width=True,
+                    height=400,
+                    column_config=attr_column_config,
+                    hide_index=True,
+                    num_rows="fixed"
+                )
+                
+                # Store edited dataframe
+                st.session_state.edited_df = edited_attr_df
+                
+                # Check for changes
+                has_attr_changes = not attribute_df[attr_cols].equals(edited_attr_df)
+                
+                if not has_attr_changes:
+                    st.info("ℹ️ No changes detected")
+                else:
+                    st.warning("⚠️ **You have unsaved changes**")
+                    
+                    # Validate changes
+                    is_valid, errors = validate_changes(edited_attr_df)
+                    
+                    if not is_valid:
+                        st.error("❌ **Validation Errors:**")
+                        for error in errors:
+                            st.error(f"  • {error}")
                     else:
-                        st.error("❌ Please type 'SAVE' to confirm")
-            
-            with col3:
-                if st.button("⏪ Discard Changes", use_container_width=True):
-                    st.session_state.original_df = None
-                    st.session_state.edited_df = None
-                    st.rerun()
+                        st.success("✅ All changes are valid")
+                    
+                    # Save controls
+                    col1, col2, col3 = st.columns([2, 1, 1])
+                    
+                    with col1:
+                        confirmation_text = st.text_input(
+                            "Type 'SAVE' to confirm batch save",
+                            key="save_attr_confirmation"
+                        )
+                    
+                    with col2:
+                        if st.button("💾 Save Changes", disabled=not is_valid, use_container_width=True, key="save_attributes"):
+                            if confirmation_text == "SAVE":
+                                with st.spinner("Saving changes..."):
+                                    # Merge edited attributes back with full dataframe
+                                    full_edited_df = st.session_state.original_df.copy()
+                                    
+                                    # Update only the attribute rows that were edited
+                                    for idx, edited_row in edited_attr_df.iterrows():
+                                        # Find matching row in original df by metadata IDs
+                                        attr_id = attribute_df.loc[idx, '_attribute_id']
+                                        mask = (full_edited_df['_attribute_id'] == attr_id)
+                                        if mask.any():
+                                            # Update editable columns
+                                            for col in attr_cols:
+                                                if col in edited_attr_df.columns:
+                                                    full_edited_df.loc[mask, col] = edited_row[col]
+                                    
+                                    success, message, stats = save_changes_to_database(
+                                        client,
+                                        user_id,
+                                        st.session_state.original_df,
+                                        full_edited_df
+                                    )
+                                    
+                                    if success:
+                                        st.success(f"✅ {message}")
+                                        if stats.get('attributes', 0) > 0:
+                                            st.info(f"Updated: {stats['attributes']} attributes")
+                                        
+                                        # Show errors if any
+                                        if stats.get('errors', 0) > 0:
+                                            st.warning(f"⚠️ {stats['errors']} rows had errors (skipped)")
+                                        
+                                        # Clear cache and reset session state
+                                        st.cache_data.clear()
+                                        st.session_state.original_df = None
+                                        st.session_state.edited_df = None
+                                        
+                                        st.balloons()
+                                        st.rerun()
+                                    else:
+                                        st.error(f"❌ {message}")
+                                        if stats.get('errors', 0) > 0:
+                                            st.error(f"Failed to update {stats['errors']} rows")
+                            else:
+                                st.error("❌ Please type 'SAVE' to confirm")
+                    
+                    with col3:
+                        if st.button("⏪ Discard Changes", use_container_width=True, key="discard_attributes"):
+                            st.cache_data.clear()
+                            st.session_state.original_df = None
+                            st.session_state.edited_df = None
+                            st.rerun()
     
     # ============================================
     # STATISTICS
