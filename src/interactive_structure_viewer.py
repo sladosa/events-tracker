@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-11-26 11:30 UTC
+Last Modified: 2025-11-26 11:45 UTC
 Python: 3.11
-Version: 1.4 - Fixed Tab 3 Bug + Added Filters in Tabs
+Version: 1.5 - ADD & DELETE Functionality
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -12,9 +12,10 @@ Uses st.data_editor with live database connection, validation, and batch save.
 
 Features:
 - **THREE SEPARATE EDITORS**: Areas, Categories, and Attributes in tabs
-- **FIXED**: Tab 3 now uses filtered_df with metadata columns (no more KeyError)
-- **NEW**: Filter by Area in Tab 2 (Edit Categories)
-- **NEW**: Filter by Area + Category in Tab 3 (Edit Attributes)
+- **FIXED**: Tab 3 uses filtered_df with metadata columns (no KeyError)
+- **FILTERS**: Area filter in Tab 2, Area + Category cascade filter in Tab 3
+- **NEW**: Add new Areas, Categories, and Attributes
+- **NEW**: Delete Areas, Categories, and Attributes with cascade warnings
 - Each editor shows only relevant columns for that entity type
 - Read-Only mode: Shows ALL rows (Areas, Categories, Attributes)
 - Edit Mode: Choose which entity type to edit via tabs
@@ -36,12 +37,19 @@ Technical Details:
 - Validates changes before committing to database
 - Uses @st.cache_data for 10x faster loading
 - Tab-based interface for clarity and simplicity
+- UUID generation for new entities
+- Slug auto-generation from names
+- CASCADE delete warnings
 
-CHANGELOG v1.4:
-- 🐛 FIXED: Tab 3 bug - now uses filtered_df instead of display_df (has metadata columns)
-- ✨ NEW: Filter by Area in Tab 2 (Edit Categories)
-- ✨ NEW: Filter by Area + Category in Tab 3 (Edit Attributes)
-- 🔧 IMPROVED: Better metadata column handling in all tabs
+CHANGELOG v1.5:
+- ✨ NEW: Add new Areas with auto-generated UUID and slug
+- ✨ NEW: Add new Categories with parent selection
+- ✨ NEW: Add new Attributes with full validation
+- ✨ NEW: Delete Areas with cascade warning (will delete all categories & attributes)
+- ✨ NEW: Delete Categories with cascade warning (will delete all attributes)
+- ✨ NEW: Delete Attributes (direct delete)
+- 🔧 IMPROVED: Better UUID and slug generation
+- 🔧 IMPROVED: Sort order auto-calculation
 """
 
 import streamlit as st
@@ -49,6 +57,8 @@ import pandas as pd
 from typing import Dict, List, Optional, Tuple, Any
 import json
 from datetime import datetime
+import uuid
+import re
 
 
 # ============================================
@@ -78,6 +88,149 @@ COLUMN_CONFIG = [
     ('Validation_Max', True, 'text'),  # Editable
     ('Description', True, 'text')      # Editable
 ]
+
+
+# ============================================
+# HELPER FUNCTIONS
+# ============================================
+
+def generate_slug(name: str) -> str:
+    """
+    Generate URL-friendly slug from name.
+    
+    Args:
+        name: Original name
+    
+    Returns:
+        Slugified name (lowercase, no spaces, no special chars)
+    """
+    # Convert to lowercase
+    slug = name.lower()
+    # Replace spaces and underscores with hyphens
+    slug = re.sub(r'[\s_]+', '-', slug)
+    # Remove special characters
+    slug = re.sub(r'[^a-z0-9-]', '', slug)
+    # Remove multiple consecutive hyphens
+    slug = re.sub(r'-+', '-', slug)
+    # Remove leading/trailing hyphens
+    slug = slug.strip('-')
+    
+    return slug
+
+
+def get_next_sort_order(client, table: str, user_id: str, parent_field: Optional[str] = None, parent_id: Optional[str] = None) -> int:
+    """
+    Get next sort_order value for a table.
+    
+    Args:
+        client: Supabase client
+        table: Table name ('areas', 'categories', 'attribute_definitions')
+        user_id: Current user's UUID
+        parent_field: Optional parent field name ('area_id', 'category_id')
+        parent_id: Optional parent ID
+    
+    Returns:
+        Next sort_order value (max + 1)
+    """
+    try:
+        query = client.table(table).select('sort_order').eq('user_id', user_id)
+        
+        # Add parent filter if specified
+        if parent_field and parent_id:
+            query = query.eq(parent_field, parent_id)
+        
+        result = query.execute()
+        
+        if result.data:
+            max_sort = max([row['sort_order'] for row in result.data])
+            return max_sort + 1
+        else:
+            return 1
+    
+    except Exception as e:
+        st.error(f"Error getting next sort_order: {str(e)}")
+        return 1
+
+
+def check_area_has_dependencies(client, area_id: str, user_id: str) -> Tuple[bool, str]:
+    """
+    Check if area has categories or events.
+    
+    Args:
+        client: Supabase client
+        area_id: Area UUID
+        user_id: User UUID
+    
+    Returns:
+        Tuple of (has_dependencies, warning_message)
+    """
+    try:
+        # Check categories
+        cat_result = client.table('categories').select('id').eq('area_id', area_id).eq('user_id', user_id).execute()
+        num_categories = len(cat_result.data) if cat_result.data else 0
+        
+        # Check events (through categories)
+        if num_categories > 0:
+            cat_ids = [c['id'] for c in cat_result.data]
+            event_result = client.table('events').select('id').in_('category_id', cat_ids).eq('user_id', user_id).execute()
+            num_events = len(event_result.data) if event_result.data else 0
+        else:
+            num_events = 0
+        
+        if num_categories > 0 or num_events > 0:
+            msg = f"⚠️ **WARNING:** This area has {num_categories} categories"
+            if num_events > 0:
+                msg += f" and {num_events} events"
+            msg += ". Deleting it will CASCADE DELETE all of them!"
+            return True, msg
+        
+        return False, ""
+    
+    except Exception as e:
+        return False, f"Error checking dependencies: {str(e)}"
+
+
+def check_category_has_dependencies(client, category_id: str, user_id: str) -> Tuple[bool, str]:
+    """
+    Check if category has attributes or events.
+    
+    Args:
+        client: Supabase client
+        category_id: Category UUID
+        user_id: User UUID
+    
+    Returns:
+        Tuple of (has_dependencies, warning_message)
+    """
+    try:
+        # Check attributes
+        attr_result = client.table('attribute_definitions').select('id').eq('category_id', category_id).eq('user_id', user_id).execute()
+        num_attributes = len(attr_result.data) if attr_result.data else 0
+        
+        # Check events
+        event_result = client.table('events').select('id').eq('category_id', category_id).eq('user_id', user_id).execute()
+        num_events = len(event_result.data) if event_result.data else 0
+        
+        # Check child categories
+        child_result = client.table('categories').select('id').eq('parent_category_id', category_id).eq('user_id', user_id).execute()
+        num_children = len(child_result.data) if child_result.data else 0
+        
+        if num_attributes > 0 or num_events > 0 or num_children > 0:
+            msg = f"⚠️ **WARNING:** This category has"
+            parts = []
+            if num_children > 0:
+                parts.append(f"{num_children} child categories")
+            if num_attributes > 0:
+                parts.append(f"{num_attributes} attributes")
+            if num_events > 0:
+                parts.append(f"{num_events} events")
+            msg += " " + ", ".join(parts) + ". Deleting it will CASCADE DELETE all of them!"
+            return True, msg
+        
+        return False, ""
+    
+    except Exception as e:
+        return False, f"Error checking dependencies: {str(e)}"
 
 
 # ============================================
@@ -619,6 +772,283 @@ def _save_category_changes(
 
 
 # ============================================
+# ADD FUNCTIONS
+# ============================================
+
+def add_new_area(client, user_id: str, name: str, description: str = "") -> Tuple[bool, str]:
+    """
+    Add new area to database.
+    
+    Args:
+        client: Supabase client
+        user_id: User ID
+        name: Area name
+        description: Area description
+    
+    Returns:
+        Tuple of (success, message)
+    """
+    try:
+        # Generate UUID and slug
+        new_id = str(uuid.uuid4())
+        slug = generate_slug(name)
+        
+        # Get next sort_order
+        sort_order = get_next_sort_order(client, 'areas', user_id)
+        
+        # Prepare data
+        area_data = {
+            'id': new_id,
+            'user_id': user_id,
+            'name': name,
+            'slug': slug,
+            'sort_order': sort_order,
+            'description': description if description else None,
+            'icon': None,
+            'color': None,
+            'template_id': None
+        }
+        
+        # Insert
+        client.table('areas').insert(area_data).execute()
+        
+        return True, f"✅ Successfully added area: {name}"
+    
+    except Exception as e:
+        return False, f"❌ Error adding area: {str(e)}"
+
+
+def add_new_category(
+    client, 
+    user_id: str, 
+    area_id: str,
+    name: str,
+    description: str = "",
+    parent_category_id: Optional[str] = None
+) -> Tuple[bool, str]:
+    """
+    Add new category to database.
+    
+    Args:
+        client: Supabase client
+        user_id: User ID
+        area_id: Area UUID
+        name: Category name
+        description: Category description
+        parent_category_id: Optional parent category UUID
+    
+    Returns:
+        Tuple of (success, message)
+    """
+    try:
+        # Generate UUID and slug
+        new_id = str(uuid.uuid4())
+        slug = generate_slug(name)
+        
+        # Determine level
+        if parent_category_id:
+            # Get parent level
+            parent = client.table('categories').select('level').eq('id', parent_category_id).execute()
+            if parent.data:
+                level = parent.data[0]['level'] + 1
+            else:
+                return False, "❌ Parent category not found"
+        else:
+            level = 1  # Root category
+        
+        # Get next sort_order
+        sort_order = get_next_sort_order(client, 'categories', user_id, 'area_id', area_id)
+        
+        # Prepare data
+        category_data = {
+            'id': new_id,
+            'user_id': user_id,
+            'area_id': area_id,
+            'parent_category_id': parent_category_id,
+            'name': name,
+            'slug': slug,
+            'level': level,
+            'sort_order': sort_order,
+            'description': description if description else None
+        }
+        
+        # Insert
+        client.table('categories').insert(category_data).execute()
+        
+        return True, f"✅ Successfully added category: {name}"
+    
+    except Exception as e:
+        return False, f"❌ Error adding category: {str(e)}"
+
+
+def add_new_attribute(
+    client,
+    user_id: str,
+    category_id: str,
+    name: str,
+    data_type: str,
+    unit: str = "",
+    is_required: bool = False,
+    default_value: str = "",
+    validation_min: str = "",
+    validation_max: str = "",
+    description: str = ""
+) -> Tuple[bool, str]:
+    """
+    Add new attribute to database.
+    
+    Args:
+        client: Supabase client
+        user_id: User ID
+        category_id: Category UUID
+        name: Attribute name
+        data_type: Data type
+        unit: Unit
+        is_required: Is required flag
+        default_value: Default value
+        validation_min: Validation min value
+        validation_max: Validation max value
+        description: Description
+    
+    Returns:
+        Tuple of (success, message)
+    """
+    try:
+        # Generate UUID and slug
+        new_id = str(uuid.uuid4())
+        slug = generate_slug(name)
+        
+        # Get next sort_order
+        sort_order = get_next_sort_order(client, 'attribute_definitions', user_id, 'category_id', category_id)
+        
+        # Parse validation rules
+        val_rules = {}
+        if validation_min:
+            try:
+                val_rules['min'] = float(validation_min)
+            except:
+                val_rules['min'] = validation_min
+        
+        if validation_max:
+            try:
+                val_rules['max'] = float(validation_max)
+            except:
+                val_rules['max'] = validation_max
+        
+        # Prepare data
+        attribute_data = {
+            'id': new_id,
+            'user_id': user_id,
+            'category_id': category_id,
+            'name': name,
+            'slug': slug,
+            'data_type': data_type,
+            'unit': unit if unit else None,
+            'is_required': is_required,
+            'default_value': default_value if default_value else None,
+            'validation_rules': val_rules if val_rules else {},
+            'description': description if description else None,
+            'sort_order': sort_order
+        }
+        
+        # Insert
+        client.table('attribute_definitions').insert(attribute_data).execute()
+        
+        return True, f"✅ Successfully added attribute: {name}"
+    
+    except Exception as e:
+        return False, f"❌ Error adding attribute: {str(e)}"
+
+
+# ============================================
+# DELETE FUNCTIONS
+# ============================================
+
+def delete_area(client, user_id: str, area_id: str) -> Tuple[bool, str]:
+    """
+    Delete area from database (CASCADE deletes categories and attributes).
+    
+    Args:
+        client: Supabase client
+        user_id: User ID
+        area_id: Area UUID
+    
+    Returns:
+        Tuple of (success, message)
+    """
+    try:
+        # First delete all attributes for categories in this area
+        categories = client.table('categories').select('id').eq('area_id', area_id).eq('user_id', user_id).execute()
+        if categories.data:
+            cat_ids = [c['id'] for c in categories.data]
+            client.table('attribute_definitions').delete().in_('category_id', cat_ids).eq('user_id', user_id).execute()
+        
+        # Then delete all categories in this area
+        client.table('categories').delete().eq('area_id', area_id).eq('user_id', user_id).execute()
+        
+        # Finally delete the area
+        client.table('areas').delete().eq('id', area_id).eq('user_id', user_id).execute()
+        
+        return True, "✅ Successfully deleted area and all its categories/attributes"
+    
+    except Exception as e:
+        return False, f"❌ Error deleting area: {str(e)}"
+
+
+def delete_category(client, user_id: str, category_id: str) -> Tuple[bool, str]:
+    """
+    Delete category from database (CASCADE deletes attributes).
+    
+    Args:
+        client: Supabase client
+        user_id: User ID
+        category_id: Category UUID
+    
+    Returns:
+        Tuple of (success, message)
+    """
+    try:
+        # First delete all child categories recursively
+        children = client.table('categories').select('id').eq('parent_category_id', category_id).eq('user_id', user_id).execute()
+        if children.data:
+            for child in children.data:
+                delete_category(client, user_id, child['id'])
+        
+        # Delete all attributes for this category
+        client.table('attribute_definitions').delete().eq('category_id', category_id).eq('user_id', user_id).execute()
+        
+        # Delete the category
+        client.table('categories').delete().eq('id', category_id).eq('user_id', user_id).execute()
+        
+        return True, "✅ Successfully deleted category and all its attributes"
+    
+    except Exception as e:
+        return False, f"❌ Error deleting category: {str(e)}"
+
+
+def delete_attribute(client, user_id: str, attribute_id: str) -> Tuple[bool, str]:
+    """
+    Delete attribute from database.
+    
+    Args:
+        client: Supabase client
+        user_id: User ID
+        attribute_id: Attribute UUID
+    
+    Returns:
+        Tuple of (success, message)
+    """
+    try:
+        # Delete the attribute
+        client.table('attribute_definitions').delete().eq('id', attribute_id).eq('user_id', user_id).execute()
+        
+        return True, "✅ Successfully deleted attribute"
+    
+    except Exception as e:
+        return False, f"❌ Error deleting attribute: {str(e)}"
+
+
+# ============================================
 # MAIN RENDER FUNCTION
 # ============================================
 
@@ -637,9 +1067,11 @@ def render_interactive_structure_viewer(client, user_id: str):
     - 🎨 **Color-coded columns**: Pink (auto-calculated) vs Blue (editable)
     - ✏️ **Direct editing**: No Excel download/upload needed
     - ✅ **Live validation**: Checks before saving
+    - ➕ **Add new**: Areas, Categories, Attributes
+    - ❌ **Delete**: With cascade warnings
     - 💾 **Batch save**: Save all changes at once with confirmation
     - ⏪ **Rollback**: Discard changes without saving
-    - 🆕 **v1.4**: Fixed Tab 3 bug + Added filters in Tab 2 & Tab 3
+    - 🆕 **v1.5**: Add & Delete functionality!
     """)
     
     st.markdown("---")
@@ -725,6 +1157,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                         st.stop()
             
             # Safe to refresh
+            st.cache_data.clear()
             st.session_state.original_df = None
             st.session_state.edited_df = None
             st.rerun()
@@ -788,7 +1221,7 @@ def render_interactive_structure_viewer(client, user_id: str):
         # ============================================
         with tab1:
             st.markdown("#### 📦 Edit Areas")
-            st.info("Edit area names, icons, colors, and descriptions. Areas are top-level organizational units.")
+            st.info("Edit area names and descriptions. Add new areas or delete existing ones.")
             
             # Filter to show ONLY Area rows - USE filtered_df (has metadata)
             area_mask = filtered_df['Type'] == 'Area'
@@ -797,14 +1230,18 @@ def render_interactive_structure_viewer(client, user_id: str):
             if area_full_df.empty:
                 st.warning("⚠️ No areas found.")
             else:
-                st.markdown(f"**Editing {len(area_full_df)} areas**")
+                st.markdown(f"**Viewing {len(area_full_df)} areas**")
                 
                 # Select relevant columns for Areas (display only)
                 area_cols = ['Type', 'Sort_Order', 'Area', 'Description']
                 area_display = area_full_df[area_cols].copy()
                 
+                # Add checkbox column for deletion
+                area_display.insert(0, '🗑️', False)
+                
                 # Configure columns for Area editing
                 area_column_config = {
+                    '🗑️': st.column_config.CheckboxColumn('Delete?', help="Check to mark for deletion"),
                     'Type': st.column_config.TextColumn('Type', disabled=True, help="Row type (locked)"),
                     'Sort_Order': st.column_config.NumberColumn('Sort_Order', disabled=True, help="Display order (locked)"),
                     'Area': st.column_config.TextColumn('Area', help="Area name - editable", disabled=False),
@@ -815,31 +1252,85 @@ def render_interactive_structure_viewer(client, user_id: str):
                 edited_area_df = st.data_editor(
                     area_display,
                     use_container_width=True,
-                    height=400,
+                    height=300,
                     column_config=area_column_config,
                     hide_index=True,
                     num_rows="fixed"
                 )
                 
-                # Save logic for areas
-                if st.button("💾 Save Area Changes", key="save_areas"):
-                    st.info("⚠️ Area editing will be implemented in next version. For now, use Download Structure → Upload Template workflow.")
+                # Check if any areas are marked for deletion
+                areas_to_delete = edited_area_df[edited_area_df['🗑️'] == True]
+                
+                if not areas_to_delete.empty:
+                    st.error(f"⚠️ **{len(areas_to_delete)} area(s) marked for deletion!**")
+                    
+                    # Show warnings for each area
+                    for idx in areas_to_delete.index:
+                        area_id = area_full_df.loc[idx, '_area_id']
+                        has_deps, warning = check_area_has_dependencies(client, area_id, user_id)
+                        if has_deps:
+                            st.warning(warning)
+                    
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        del_confirm = st.text_input("Type 'DELETE' to confirm deletion", key="delete_area_confirm")
+                    with col2:
+                        if st.button("❌ Delete Marked", key="delete_areas_btn", disabled=(del_confirm != "DELETE")):
+                            with st.spinner("Deleting areas..."):
+                                deleted_count = 0
+                                for idx in areas_to_delete.index:
+                                    area_id = area_full_df.loc[idx, '_area_id']
+                                    success, msg = delete_area(client, user_id, area_id)
+                                    if success:
+                                        deleted_count += 1
+                                    else:
+                                        st.error(msg)
+                                
+                                if deleted_count > 0:
+                                    st.success(f"✅ Deleted {deleted_count} area(s)")
+                                    st.cache_data.clear()
+                                    st.session_state.original_df = None
+                                    st.rerun()
+                
+                st.markdown("---")
+                
+                # Add new area form
+                with st.expander("➕ Add New Area", expanded=False):
+                    with st.form("add_area_form"):
+                        new_area_name = st.text_input("Area Name *", placeholder="e.g., Fitness, Nutrition, Health")
+                        new_area_desc = st.text_area("Description", placeholder="Optional description...")
+                        
+                        submitted = st.form_submit_button("➕ Add Area", use_container_width=True)
+                        
+                        if submitted:
+                            if not new_area_name:
+                                st.error("❌ Area name is required!")
+                            else:
+                                with st.spinner("Adding area..."):
+                                    success, msg = add_new_area(client, user_id, new_area_name, new_area_desc)
+                                    if success:
+                                        st.success(msg)
+                                        st.cache_data.clear()
+                                        st.session_state.original_df = None
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
         
         # ============================================
         # TAB 2: EDIT CATEGORIES
         # ============================================
         with tab2:
             st.markdown("#### 📁 Edit Categories")
-            st.info("Edit category names and descriptions. Categories organize events hierarchically.")
+            st.info("Edit category names and descriptions. Add new categories or delete existing ones.")
             
             # Filter to show ONLY Category rows - USE filtered_df (has metadata)
             category_mask = filtered_df['Type'] == 'Category'
             category_full_df = filtered_df[category_mask].copy()
             
             if category_full_df.empty:
-                st.warning("⚠️ No categories found. Please select a different Area or create categories first.")
+                st.warning("⚠️ No categories found. Please create categories first.")
             else:
-                # ⭐ NEW: Filter by Area within Tab 2
+                # Filter by Area within Tab 2
                 st.markdown("---")
                 col_filter = st.columns([1, 3])
                 
@@ -859,14 +1350,18 @@ def render_interactive_structure_viewer(client, user_id: str):
                 if category_full_df.empty:
                     st.warning(f"⚠️ No categories found for Area: {selected_area_cat}")
                 else:
-                    st.markdown(f"**Editing {len(category_full_df)} categories**")
+                    st.markdown(f"**Viewing {len(category_full_df)} categories**")
                     
                     # Select relevant columns for Categories (display only)
                     cat_cols = ['Type', 'Level', 'Sort_Order', 'Area', 'Category_Path', 'Category', 'Description']
                     cat_display = category_full_df[cat_cols].copy()
                     
+                    # Add checkbox column for deletion
+                    cat_display.insert(0, '🗑️', False)
+                    
                     # Configure columns for Category editing
                     cat_column_config = {
+                        '🗑️': st.column_config.CheckboxColumn('Delete?', help="Check to mark for deletion"),
                         'Type': st.column_config.TextColumn('Type', disabled=True),
                         'Level': st.column_config.NumberColumn('Level', disabled=True),
                         'Sort_Order': st.column_config.NumberColumn('Sort_Order', disabled=True),
@@ -880,17 +1375,53 @@ def render_interactive_structure_viewer(client, user_id: str):
                     edited_cat_df = st.data_editor(
                         cat_display,
                         use_container_width=True,
-                        height=400,
+                        height=300,
                         column_config=cat_column_config,
                         hide_index=True,
                         num_rows="fixed"
                     )
                     
-                    # Check for changes
-                    has_cat_changes = not category_full_df[cat_cols].equals(edited_cat_df)
+                    # Check if any categories are marked for deletion
+                    cats_to_delete = edited_cat_df[edited_cat_df['🗑️'] == True]
+                    
+                    if not cats_to_delete.empty:
+                        st.error(f"⚠️ **{len(cats_to_delete)} category(ies) marked for deletion!**")
+                        
+                        # Show warnings for each category
+                        for idx in cats_to_delete.index:
+                            cat_id = category_full_df.loc[idx, '_category_id']
+                            has_deps, warning = check_category_has_dependencies(client, cat_id, user_id)
+                            if has_deps:
+                                st.warning(warning)
+                        
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            del_confirm = st.text_input("Type 'DELETE' to confirm deletion", key="delete_cat_confirm")
+                        with col2:
+                            if st.button("❌ Delete Marked", key="delete_cats_btn", disabled=(del_confirm != "DELETE")):
+                                with st.spinner("Deleting categories..."):
+                                    deleted_count = 0
+                                    for idx in cats_to_delete.index:
+                                        cat_id = category_full_df.loc[idx, '_category_id']
+                                        success, msg = delete_category(client, user_id, cat_id)
+                                        if success:
+                                            deleted_count += 1
+                                        else:
+                                            st.error(msg)
+                                    
+                                    if deleted_count > 0:
+                                        st.success(f"✅ Deleted {deleted_count} category(ies)")
+                                        st.cache_data.clear()
+                                        st.session_state.original_df = None
+                                        st.rerun()
+                    
+                    # Check for edit changes (non-delete)
+                    edited_cat_df_no_del = edited_cat_df.drop(columns=['🗑️'])
+                    cat_display_no_del = cat_display.drop(columns=['🗑️'])
+                    has_cat_changes = not cat_display_no_del.equals(edited_cat_df_no_del)
                     
                     if has_cat_changes:
-                        st.warning("⚠️ You have unsaved changes")
+                        st.warning("⚠️ You have unsaved edit changes")
                         
                         col1, col2 = st.columns([3, 1])
                         with col1:
@@ -898,15 +1429,13 @@ def render_interactive_structure_viewer(client, user_id: str):
                         with col2:
                             if st.button("💾 Save Changes", key="save_categories", disabled=(confirm != "SAVE")):
                                 with st.spinner("Saving category changes..."):
-                                    # Save category changes - pass filtered_df which has metadata
+                                    # Save category changes
                                     success, stats = _save_category_changes(
-                                        client, user_id, category_full_df[cat_cols], edited_cat_df, filtered_df
+                                        client, user_id, cat_display_no_del, edited_cat_df_no_del, filtered_df
                                     )
                                     
                                     if success:
                                         st.success(f"✅ Successfully updated {stats['categories']} categories!")
-                                        
-                                        # Clear cache and reset
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
                                         st.session_state.edited_df = None
@@ -914,22 +1443,69 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.rerun()
                                     else:
                                         st.error(f"❌ Failed to save changes. {stats['errors']} errors occurred.")
+                    
+                    st.markdown("---")
+                    
+                    # Add new category form
+                    with st.expander("➕ Add New Category", expanded=False):
+                        # Get areas for selection
+                        areas_response = client.table('areas').select('id, name').eq('user_id', user_id).execute()
+                        areas_dict = {a['name']: a['id'] for a in areas_response.data} if areas_response.data else {}
+                        
+                        with st.form("add_category_form"):
+                            new_cat_area = st.selectbox("Select Area *", list(areas_dict.keys()))
+                            new_cat_name = st.text_input("Category Name *", placeholder="e.g., Cardio, Strength Training")
+                            new_cat_desc = st.text_area("Description", placeholder="Optional description...")
+                            
+                            # Parent category selection (optional)
+                            if new_cat_area:
+                                area_id_for_cats = areas_dict[new_cat_area]
+                                cats_in_area = client.table('categories').select('id, name').eq('area_id', area_id_for_cats).eq('user_id', user_id).execute()
+                                parent_options = ["None (Root Category)"] + [c['name'] for c in (cats_in_area.data if cats_in_area.data else [])]
+                                parent_cats_dict = {c['name']: c['id'] for c in (cats_in_area.data if cats_in_area.data else [])}
+                                
+                                new_cat_parent = st.selectbox("Parent Category", parent_options)
+                            else:
+                                new_cat_parent = "None (Root Category)"
+                            
+                            submitted = st.form_submit_button("➕ Add Category", use_container_width=True)
+                            
+                            if submitted:
+                                if not new_cat_name:
+                                    st.error("❌ Category name is required!")
+                                elif not new_cat_area:
+                                    st.error("❌ Please select an area!")
+                                else:
+                                    parent_id = None if new_cat_parent == "None (Root Category)" else parent_cats_dict.get(new_cat_parent)
+                                    
+                                    with st.spinner("Adding category..."):
+                                        success, msg = add_new_category(
+                                            client, user_id, areas_dict[new_cat_area],
+                                            new_cat_name, new_cat_desc, parent_id
+                                        )
+                                        if success:
+                                            st.success(msg)
+                                            st.cache_data.clear()
+                                            st.session_state.original_df = None
+                                            st.rerun()
+                                        else:
+                                            st.error(msg)
         
         # ============================================
         # TAB 3: EDIT ATTRIBUTES
         # ============================================
         with tab3:
             st.markdown("#### 🏷️ Edit Attributes")
-            st.info("Edit attribute definitions: name, data type, unit, validation rules, and more.")
+            st.info("Edit attribute definitions. Add new attributes or delete existing ones.")
             
-            # Filter to show ONLY Attribute rows - USE filtered_df (has metadata) ⭐ THIS IS THE FIX!
+            # Filter to show ONLY Attribute rows - USE filtered_df (has metadata)
             attribute_mask = filtered_df['Type'] == 'Attribute'
             attribute_full_df = filtered_df[attribute_mask].copy()
             
             if attribute_full_df.empty:
-                st.warning("⚠️ No attributes to edit. Please select a different Area or add attributes first.")
+                st.warning("⚠️ No attributes to edit. Please create attributes first.")
             else:
-                # ⭐ NEW: Filter by Area and Category within Tab 3
+                # Cascade filters (Area → Category)
                 st.markdown("---")
                 col_filter1, col_filter2 = st.columns(2)
                 
@@ -965,7 +1541,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                 if attribute_full_df.empty:
                     st.warning(f"⚠️ No attributes found for the selected filters.")
                 else:
-                    st.markdown(f"**Editing {len(attribute_full_df)} attributes**")
+                    st.markdown(f"**Viewing {len(attribute_full_df)} attributes**")
                     
                     # Select relevant columns for Attributes (display only)
                     attr_cols = ['Type', 'Level', 'Sort_Order', 'Area', 'Category_Path', 'Category',
@@ -974,8 +1550,12 @@ def render_interactive_structure_viewer(client, user_id: str):
                     
                     attr_display = attribute_full_df[attr_cols].copy()
                     
+                    # Add checkbox column for deletion
+                    attr_display.insert(0, '🗑️', False)
+                    
                     # Configure columns for Attribute editing
                     attr_column_config = {
+                        '🗑️': st.column_config.CheckboxColumn('Delete?', help="Check to mark for deletion"),
                         'Type': st.column_config.TextColumn('Type', disabled=True),
                         'Level': st.column_config.NumberColumn('Level', disabled=True),
                         'Sort_Order': st.column_config.NumberColumn('Sort_Order', disabled=True),
@@ -996,25 +1576,54 @@ def render_interactive_structure_viewer(client, user_id: str):
                     edited_attr_df = st.data_editor(
                         attr_display,
                         use_container_width=True,
-                        height=400,
+                        height=300,
                         column_config=attr_column_config,
                         hide_index=True,
                         num_rows="fixed"
                     )
                     
-                    # Store edited dataframe
-                    st.session_state.edited_df = edited_attr_df
+                    # Check if any attributes are marked for deletion
+                    attrs_to_delete = edited_attr_df[edited_attr_df['🗑️'] == True]
                     
-                    # Check for changes
-                    has_attr_changes = not attribute_full_df[attr_cols].equals(edited_attr_df)
+                    if not attrs_to_delete.empty:
+                        st.error(f"⚠️ **{len(attrs_to_delete)} attribute(s) marked for deletion!**")
+                        
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            del_confirm = st.text_input("Type 'DELETE' to confirm deletion", key="delete_attr_confirm")
+                        with col2:
+                            if st.button("❌ Delete Marked", key="delete_attrs_btn", disabled=(del_confirm != "DELETE")):
+                                with st.spinner("Deleting attributes..."):
+                                    deleted_count = 0
+                                    for idx in attrs_to_delete.index:
+                                        attr_id = attribute_full_df.loc[idx, '_attribute_id']
+                                        success, msg = delete_attribute(client, user_id, attr_id)
+                                        if success:
+                                            deleted_count += 1
+                                        else:
+                                            st.error(msg)
+                                    
+                                    if deleted_count > 0:
+                                        st.success(f"✅ Deleted {deleted_count} attribute(s)")
+                                        st.cache_data.clear()
+                                        st.session_state.original_df = None
+                                        st.rerun()
+                    
+                    # Store edited dataframe
+                    st.session_state.edited_df = edited_attr_df.drop(columns=['🗑️'])
+                    
+                    # Check for edit changes (non-delete)
+                    edited_attr_df_no_del = edited_attr_df.drop(columns=['🗑️'])
+                    attr_display_no_del = attr_display.drop(columns=['🗑️'])
+                    has_attr_changes = not attr_display_no_del.equals(edited_attr_df_no_del)
                     
                     if not has_attr_changes:
-                        st.info("ℹ️ No changes detected")
+                        st.info("ℹ️ No edit changes detected")
                     else:
-                        st.warning("⚠️ **You have unsaved changes**")
+                        st.warning("⚠️ **You have unsaved edit changes**")
                         
                         # Validate changes
-                        is_valid, errors = validate_changes(edited_attr_df)
+                        is_valid, errors = validate_changes(edited_attr_df_no_del)
                         
                         if not is_valid:
                             st.error("❌ **Validation Errors:**")
@@ -1036,19 +1645,18 @@ def render_interactive_structure_viewer(client, user_id: str):
                             if st.button("💾 Save Changes", disabled=not is_valid, use_container_width=True, key="save_attributes"):
                                 if confirmation_text == "SAVE":
                                     with st.spinner("Saving changes..."):
-                                        # ⭐ FIX: Use attribute_full_df which has metadata columns (_attribute_id)
+                                        # Use attribute_full_df which has metadata columns (_attribute_id)
                                         full_edited_df = st.session_state.original_df.copy()
                                         
                                         # Update only the attribute rows that were edited
-                                        for idx, edited_row in edited_attr_df.iterrows():
+                                        for idx, edited_row in edited_attr_df_no_del.iterrows():
                                             # Find matching row in original df by metadata IDs
-                                            # ⭐ FIX: Use attribute_full_df which has _attribute_id column
                                             attr_id = attribute_full_df.loc[idx, '_attribute_id']
                                             mask = (full_edited_df['_attribute_id'] == attr_id)
                                             if mask.any():
                                                 # Update editable columns
                                                 for col in attr_cols:
-                                                    if col in edited_attr_df.columns:
+                                                    if col in edited_attr_df_no_del.columns:
                                                         full_edited_df.loc[mask, col] = edited_row[col]
                                         
                                         success, message, stats = save_changes_to_database(
@@ -1085,3 +1693,59 @@ def render_interactive_structure_viewer(client, user_id: str):
                             if st.button("⏪ Discard Changes", use_container_width=True, key="discard_attributes"):
                                 st.session_state.edited_df = None
                                 st.rerun()
+                    
+                    st.markdown("---")
+                    
+                    # Add new attribute form
+                    with st.expander("➕ Add New Attribute", expanded=False):
+                        # Get categories for selection
+                        cats_response = client.table('categories').select('id, name, area_id, areas(name)').eq('user_id', user_id).execute()
+                        
+                        # Build category options with area names
+                        cat_options = {}
+                        if cats_response.data:
+                            for cat in cats_response.data:
+                                area_name = cat['areas']['name'] if cat.get('areas') else 'Unknown'
+                                display_name = f"{area_name} > {cat['name']}"
+                                cat_options[display_name] = cat['id']
+                        
+                        with st.form("add_attribute_form"):
+                            new_attr_category = st.selectbox("Select Category *", list(cat_options.keys()))
+                            new_attr_name = st.text_input("Attribute Name *", placeholder="e.g., Duration, Distance, Weight")
+                            new_attr_datatype = st.selectbox("Data Type *", DATA_TYPES)
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                new_attr_unit = st.text_input("Unit", placeholder="e.g., km, kg, minutes")
+                                new_attr_required = st.selectbox("Is Required?", ["No", "Yes"])
+                            with col2:
+                                new_attr_default = st.text_input("Default Value", placeholder="Optional")
+                                new_attr_val_min = st.text_input("Validation Min", placeholder="Optional")
+                            
+                            new_attr_val_max = st.text_input("Validation Max", placeholder="Optional")
+                            new_attr_desc = st.text_area("Description", placeholder="Optional description...")
+                            
+                            submitted = st.form_submit_button("➕ Add Attribute", use_container_width=True)
+                            
+                            if submitted:
+                                if not new_attr_name:
+                                    st.error("❌ Attribute name is required!")
+                                elif not new_attr_category:
+                                    st.error("❌ Please select a category!")
+                                else:
+                                    is_req = new_attr_required == "Yes"
+                                    
+                                    with st.spinner("Adding attribute..."):
+                                        success, msg = add_new_attribute(
+                                            client, user_id, cat_options[new_attr_category],
+                                            new_attr_name, new_attr_datatype,
+                                            new_attr_unit, is_req, new_attr_default,
+                                            new_attr_val_min, new_attr_val_max, new_attr_desc
+                                        )
+                                        if success:
+                                            st.success(msg)
+                                            st.cache_data.clear()
+                                            st.session_state.original_df = None
+                                            st.rerun()
+                                        else:
+                                            st.error(msg)
