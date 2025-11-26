@@ -2,17 +2,18 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-11-24 12:00 UTC
+Last Modified: 2025-11-25 10:00 UTC
 Python: 3.11
 
 Description:
 Main Streamlit application with authentication and multiple pages.
-Integrates all modules: structure viewer, event entry, bulk import,
-view data export/import, download/upload structure.
+Integrates all modules: structure viewer, interactive structure viewer,
+event entry, bulk import, view data export/import, download/upload structure.
 
 Modules:
 - auth: User authentication
-- structure_viewer: Browse hierarchical structure
+- structure_viewer: Browse hierarchical structure (tree view)
+- interactive_structure_viewer: Excel-like editing interface (NEW)
 - event_entry: Add single events
 - bulk_import: Import multiple events from Excel/CSV
 - view_data_export: Export events to Excel for editing
@@ -31,6 +32,7 @@ from dotenv import load_dotenv
 from src.auth import AuthManager
 from src import supabase_client
 from src import structure_viewer
+from src.interactive_structure_viewer import render_interactive_structure_viewer
 from src import event_entry
 from src import bulk_import
 from src import view_data_export
@@ -94,6 +96,7 @@ def main():
         "Navigation",
         [
             "📊 View Structure",
+            "📋 Interactive Structure Viewer",
             "➕ Add Event",
             "📤 Bulk Import",
             "📊 View Data - Export",
@@ -137,6 +140,9 @@ def main():
     # Route to appropriate page
     if page == "📊 View Structure":
         structure_viewer.render_structure_viewer(supabase.client, user_id)
+    
+    elif page == "📋 Interactive Structure Viewer":
+        render_interactive_structure_viewer(supabase.client, user_id)
     
     elif page == "➕ Add Event":
         event_entry.render_event_entry(supabase.client, user_id)
