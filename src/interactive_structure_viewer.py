@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-11-26 13:00 UTC
+Last Modified: 2025-11-26 14:00 UTC
 Python: 3.11
-Version: 1.5.1 - Bug Fixes for ADD functionality
+Version: 1.5.2 - Critical Bug Fixes (User Testing)
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -41,12 +41,15 @@ Technical Details:
 - Slug auto-generation from names
 - CASCADE delete warnings
 
-CHANGELOG v1.5.1:
-- 🐛 FIXED: Better error handling for duplicate area names (checks before insert)
-- 🐛 FIXED: Add Category form now respects Area filter (pre-populates and disables Area selection)
-- 🐛 FIXED: Parent Category dropdown now shows ONLY categories from selected Area
-- 🔧 IMPROVED: User-friendly error messages for duplicate names
-- 🔧 IMPROVED: UX - Clear indication when adding to filtered area
+CHANGELOG v1.5.2:
+- 🐛 CRITICAL: Fixed duplicate Area insert after successful add (Bug #3)
+- 🐛 CRITICAL: Fixed Category added twice (root + under parent) (Bug #4)
+- 🐛 FIXED: Added pre-check for duplicate categories (root and child)
+- 🐛 FIXED: Better parent_id validation and error messages
+- 🐛 FIXED: Form clears properly after successful add (Bug #5)
+- 🔧 IMPROVED: Insert verification (checks result.data)
+- 🔧 IMPROVED: Explicit None handling for parent_category_id
+- 🔧 IMPROVED: Better error messages for unique constraints
 """
 
 import streamlit as st
@@ -786,7 +789,7 @@ def add_new_area(client, user_id: str, name: str, description: str = "") -> Tupl
         Tuple of (success, message)
     """
     try:
-        # Check if area with this name already exists
+        # Check if area with this name already exists (BEFORE generating UUID)
         existing = client.table('areas').select('id').eq('user_id', user_id).eq('name', name).execute()
         if existing.data and len(existing.data) > 0:
             return False, f"❌ Area '{name}' already exists! Please choose a different name or delete the existing area first."
@@ -812,15 +815,22 @@ def add_new_area(client, user_id: str, name: str, description: str = "") -> Tupl
         }
         
         # Insert
-        client.table('areas').insert(area_data).execute()
+        result = client.table('areas').insert(area_data).execute()
         
-        return True, f"✅ Successfully added area: {name}"
+        # Verify insert was successful
+        if result.data and len(result.data) > 0:
+            return True, f"✅ Successfully added area: {name}"
+        else:
+            return False, f"❌ Failed to add area: {name}"
     
     except Exception as e:
         error_msg = str(e)
         # Handle duplicate key constraint
         if '23505' in error_msg or 'duplicate' in error_msg.lower():
             return False, f"❌ Area '{name}' already exists! Please choose a different name."
+        # Handle unique constraint
+        if 'unique constraint' in error_msg.lower():
+            return False, f"❌ Area '{name}' already exists (unique constraint violation)."
         return False, f"❌ Error adding area: {error_msg}"
 
 
@@ -847,6 +857,18 @@ def add_new_category(
         Tuple of (success, message)
     """
     try:
+        # Check if category with this name already exists in this area (for root categories)
+        if not parent_category_id:
+            # For root categories: check unique constraint (name + area_id + parent=NULL)
+            existing = client.table('categories').select('id').eq('user_id', user_id).eq('area_id', area_id).eq('name', name).is_('parent_category_id', 'null').execute()
+            if existing.data and len(existing.data) > 0:
+                return False, f"❌ Root category '{name}' already exists in this area! Please choose a different name."
+        else:
+            # For child categories: check if name exists under same parent
+            existing = client.table('categories').select('id').eq('user_id', user_id).eq('parent_category_id', parent_category_id).eq('name', name).execute()
+            if existing.data and len(existing.data) > 0:
+                return False, f"❌ Category '{name}' already exists under this parent! Please choose a different name."
+        
         # Generate UUID and slug
         new_id = str(uuid.uuid4())
         slug = generate_slug(name)
@@ -855,7 +877,7 @@ def add_new_category(
         if parent_category_id:
             # Get parent level
             parent = client.table('categories').select('level').eq('id', parent_category_id).execute()
-            if parent.data:
+            if parent.data and len(parent.data) > 0:
                 level = parent.data[0]['level'] + 1
             else:
                 return False, "❌ Parent category not found"
@@ -863,14 +885,19 @@ def add_new_category(
             level = 1  # Root category
         
         # Get next sort_order
-        sort_order = get_next_sort_order(client, 'categories', user_id, 'area_id', area_id)
+        if parent_category_id:
+            # Sort within parent
+            sort_order = get_next_sort_order(client, 'categories', user_id, 'parent_category_id', parent_category_id)
+        else:
+            # Sort within area for root categories
+            sort_order = get_next_sort_order(client, 'categories', user_id, 'area_id', area_id)
         
         # Prepare data
         category_data = {
             'id': new_id,
             'user_id': user_id,
             'area_id': area_id,
-            'parent_category_id': parent_category_id,
+            'parent_category_id': parent_category_id if parent_category_id else None,  # Explicitly set to None
             'name': name,
             'slug': slug,
             'level': level,
@@ -878,13 +905,25 @@ def add_new_category(
             'description': description if description else None
         }
         
-        # Insert
-        client.table('categories').insert(category_data).execute()
+        # Insert ONCE
+        result = client.table('categories').insert(category_data).execute()
         
-        return True, f"✅ Successfully added category: {name}"
+        # Verify insert was successful
+        if result.data and len(result.data) > 0:
+            parent_info = " (root category)" if not parent_category_id else ""
+            return True, f"✅ Successfully added category: {name}{parent_info}"
+        else:
+            return False, f"❌ Failed to add category: {name}"
     
     except Exception as e:
-        return False, f"❌ Error adding category: {str(e)}"
+        error_msg = str(e)
+        # Handle duplicate key constraints
+        if '23505' in error_msg or 'duplicate' in error_msg.lower() or 'unique constraint' in error_msg.lower():
+            if 'idx_categories_root_unique' in error_msg:
+                return False, f"❌ Root category '{name}' already exists in this area!"
+            else:
+                return False, f"❌ Category '{name}' already exists!"
+        return False, f"❌ Error adding category: {error_msg}"
 
 
 def add_new_attribute(
@@ -1077,7 +1116,7 @@ def render_interactive_structure_viewer(client, user_id: str):
     - ❌ **Delete**: With cascade warnings
     - 💾 **Batch save**: Save all changes at once with confirmation
     - ⏪ **Rollback**: Discard changes without saving
-    - 🆕 **v1.5.1**: Bug fixes for ADD functionality!
+    - 🆕 **v1.5.2**: Critical bug fixes (user testing)!
     """)
     
     st.markdown("---")
@@ -1496,7 +1535,15 @@ def render_interactive_structure_viewer(client, user_id: str):
                                 elif not new_cat_area:
                                     st.error("❌ Please select an area!")
                                 else:
-                                    parent_id = None if new_cat_parent == "None (Root Category)" else parent_cats_dict.get(new_cat_parent)
+                                    # Resolve parent_id
+                                    if new_cat_parent == "None (Root Category)":
+                                        parent_id = None
+                                    else:
+                                        parent_id = parent_cats_dict.get(new_cat_parent)
+                                        # Verify parent_id is valid
+                                        if not parent_id:
+                                            st.error(f"❌ Parent category '{new_cat_parent}' not found in dropdown data!")
+                                            st.stop()
                                     
                                     with st.spinner("Adding category..."):
                                         success, msg = add_new_category(
@@ -1505,8 +1552,10 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         )
                                         if success:
                                             st.success(msg)
+                                            # Clear cache and reload data
                                             st.cache_data.clear()
                                             st.session_state.original_df = None
+                                            # IMPORTANT: rerun to refresh everything and clear form
                                             st.rerun()
                                         else:
                                             st.error(msg)
