@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-11-26 11:45 UTC
+Last Modified: 2025-11-26 13:00 UTC
 Python: 3.11
-Version: 1.5 - ADD & DELETE Functionality
+Version: 1.5.1 - Bug Fixes for ADD functionality
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -14,8 +14,8 @@ Features:
 - **THREE SEPARATE EDITORS**: Areas, Categories, and Attributes in tabs
 - **FIXED**: Tab 3 uses filtered_df with metadata columns (no KeyError)
 - **FILTERS**: Area filter in Tab 2, Area + Category cascade filter in Tab 3
-- **NEW**: Add new Areas, Categories, and Attributes
-- **NEW**: Delete Areas, Categories, and Attributes with cascade warnings
+- **ADD**: Add new Areas, Categories, and Attributes
+- **DELETE**: Delete Areas, Categories, and Attributes with cascade warnings
 - Each editor shows only relevant columns for that entity type
 - Read-Only mode: Shows ALL rows (Areas, Categories, Attributes)
 - Edit Mode: Choose which entity type to edit via tabs
@@ -41,15 +41,12 @@ Technical Details:
 - Slug auto-generation from names
 - CASCADE delete warnings
 
-CHANGELOG v1.5:
-- ✨ NEW: Add new Areas with auto-generated UUID and slug
-- ✨ NEW: Add new Categories with parent selection
-- ✨ NEW: Add new Attributes with full validation
-- ✨ NEW: Delete Areas with cascade warning (will delete all categories & attributes)
-- ✨ NEW: Delete Categories with cascade warning (will delete all attributes)
-- ✨ NEW: Delete Attributes (direct delete)
-- 🔧 IMPROVED: Better UUID and slug generation
-- 🔧 IMPROVED: Sort order auto-calculation
+CHANGELOG v1.5.1:
+- 🐛 FIXED: Better error handling for duplicate area names (checks before insert)
+- 🐛 FIXED: Add Category form now respects Area filter (pre-populates and disables Area selection)
+- 🐛 FIXED: Parent Category dropdown now shows ONLY categories from selected Area
+- 🔧 IMPROVED: User-friendly error messages for duplicate names
+- 🔧 IMPROVED: UX - Clear indication when adding to filtered area
 """
 
 import streamlit as st
@@ -789,6 +786,11 @@ def add_new_area(client, user_id: str, name: str, description: str = "") -> Tupl
         Tuple of (success, message)
     """
     try:
+        # Check if area with this name already exists
+        existing = client.table('areas').select('id').eq('user_id', user_id).eq('name', name).execute()
+        if existing.data and len(existing.data) > 0:
+            return False, f"❌ Area '{name}' already exists! Please choose a different name or delete the existing area first."
+        
         # Generate UUID and slug
         new_id = str(uuid.uuid4())
         slug = generate_slug(name)
@@ -815,7 +817,11 @@ def add_new_area(client, user_id: str, name: str, description: str = "") -> Tupl
         return True, f"✅ Successfully added area: {name}"
     
     except Exception as e:
-        return False, f"❌ Error adding area: {str(e)}"
+        error_msg = str(e)
+        # Handle duplicate key constraint
+        if '23505' in error_msg or 'duplicate' in error_msg.lower():
+            return False, f"❌ Area '{name}' already exists! Please choose a different name."
+        return False, f"❌ Error adding area: {error_msg}"
 
 
 def add_new_category(
@@ -1071,7 +1077,7 @@ def render_interactive_structure_viewer(client, user_id: str):
     - ❌ **Delete**: With cascade warnings
     - 💾 **Batch save**: Save all changes at once with confirmation
     - ⏪ **Rollback**: Discard changes without saving
-    - 🆕 **v1.5**: Add & Delete functionality!
+    - 🆕 **v1.5.1**: Bug fixes for ADD functionality!
     """)
     
     st.markdown("---")
@@ -1453,18 +1459,32 @@ def render_interactive_structure_viewer(client, user_id: str):
                         areas_dict = {a['name']: a['id'] for a in areas_response.data} if areas_response.data else {}
                         
                         with st.form("add_category_form"):
-                            new_cat_area = st.selectbox("Select Area *", list(areas_dict.keys()))
+                            # If Area filter is active, pre-populate and disable Area selection
+                            if selected_area_cat != "All Areas":
+                                st.info(f"ℹ️ Adding category to filtered area: **{selected_area_cat}**")
+                                # Display as disabled text input (can't change)
+                                st.text_input("Select Area *", value=selected_area_cat, disabled=True, key="new_cat_area_disabled")
+                                new_cat_area = selected_area_cat
+                            else:
+                                # Show full dropdown if no filter
+                                new_cat_area = st.selectbox("Select Area *", list(areas_dict.keys()), key="new_cat_area_select")
+                            
                             new_cat_name = st.text_input("Category Name *", placeholder="e.g., Cardio, Strength Training")
                             new_cat_desc = st.text_area("Description", placeholder="Optional description...")
                             
                             # Parent category selection (optional)
                             if new_cat_area:
                                 area_id_for_cats = areas_dict[new_cat_area]
+                                # Get ONLY categories from the selected area
                                 cats_in_area = client.table('categories').select('id, name').eq('area_id', area_id_for_cats).eq('user_id', user_id).execute()
                                 parent_options = ["None (Root Category)"] + [c['name'] for c in (cats_in_area.data if cats_in_area.data else [])]
                                 parent_cats_dict = {c['name']: c['id'] for c in (cats_in_area.data if cats_in_area.data else [])}
                                 
-                                new_cat_parent = st.selectbox("Parent Category", parent_options)
+                                if len(parent_options) > 1:
+                                    new_cat_parent = st.selectbox("Parent Category", parent_options, help=f"Select parent category from '{new_cat_area}' area")
+                                else:
+                                    st.info(f"ℹ️ No existing categories in '{new_cat_area}' - this will be a root category")
+                                    new_cat_parent = "None (Root Category)"
                             else:
                                 new_cat_parent = "None (Root Category)"
                             
