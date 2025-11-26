@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-11-26 14:00 UTC
+Last Modified: 2025-11-26 15:00 UTC
 Python: 3.11
-Version: 1.5.2 - Critical Bug Fixes (User Testing)
+Version: 1.5.3 - Form Double Submit Fix
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -41,15 +41,15 @@ Technical Details:
 - Slug auto-generation from names
 - CASCADE delete warnings
 
-CHANGELOG v1.5.2:
-- 🐛 CRITICAL: Fixed duplicate Area insert after successful add (Bug #3)
-- 🐛 CRITICAL: Fixed Category added twice (root + under parent) (Bug #4)
-- 🐛 FIXED: Added pre-check for duplicate categories (root and child)
-- 🐛 FIXED: Better parent_id validation and error messages
-- 🐛 FIXED: Form clears properly after successful add (Bug #5)
-- 🔧 IMPROVED: Insert verification (checks result.data)
-- 🔧 IMPROVED: Explicit None handling for parent_category_id
-- 🔧 IMPROVED: Better error messages for unique constraints
+CHANGELOG v1.5.3:
+- 🐛 CRITICAL FIX: Form double submit prevention with unique keys
+- 🐛 FIXED: Add Area form now uses unique key per submit (Bug #3)
+- 🐛 FIXED: Add Category form now uses unique key per submit (Bug #4 - prevents duplicate inserts)
+- 🐛 FIXED: Add Attribute form now uses unique key per submit
+- 🐛 FIXED: Form fields clear properly after successful add (Bug #5)
+- 🔧 IMPROVED: Form counter in session state increments after success
+- 🔧 IMPROVED: Each form gets fresh state after rerun
+- ✨ NEW: Form submission counters (area_form_counter, category_form_counter, attribute_form_counter)
 """
 
 import streamlit as st
@@ -1116,7 +1116,7 @@ def render_interactive_structure_viewer(client, user_id: str):
     - ❌ **Delete**: With cascade warnings
     - 💾 **Batch save**: Save all changes at once with confirmation
     - ⏪ **Rollback**: Discard changes without saving
-    - 🆕 **v1.5.2**: Critical bug fixes (user testing)!
+    - 🆕 **v1.5.3**: Form double submit fix!
     """)
     
     st.markdown("---")
@@ -1341,7 +1341,12 @@ def render_interactive_structure_viewer(client, user_id: str):
                 
                 # Add new area form
                 with st.expander("➕ Add New Area", expanded=False):
-                    with st.form("add_area_form"):
+                    # Initialize form submission counter in session state
+                    if 'area_form_counter' not in st.session_state:
+                        st.session_state.area_form_counter = 0
+                    
+                    # Use unique key with counter to force form reset after successful submit
+                    with st.form(f"add_area_form_{st.session_state.area_form_counter}"):
                         new_area_name = st.text_input("Area Name *", placeholder="e.g., Fitness, Nutrition, Health")
                         new_area_desc = st.text_area("Description", placeholder="Optional description...")
                         
@@ -1355,8 +1360,12 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     success, msg = add_new_area(client, user_id, new_area_name, new_area_desc)
                                     if success:
                                         st.success(msg)
+                                        # Increment counter to create NEW form (prevents double submit)
+                                        st.session_state.area_form_counter += 1
+                                        # Clear cache
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
+                                        # Rerun to refresh
                                         st.rerun()
                                     else:
                                         st.error(msg)
@@ -1493,20 +1502,25 @@ def render_interactive_structure_viewer(client, user_id: str):
                     
                     # Add new category form
                     with st.expander("➕ Add New Category", expanded=False):
+                        # Initialize form submission counter in session state
+                        if 'category_form_counter' not in st.session_state:
+                            st.session_state.category_form_counter = 0
+                        
                         # Get areas for selection
                         areas_response = client.table('areas').select('id, name').eq('user_id', user_id).execute()
                         areas_dict = {a['name']: a['id'] for a in areas_response.data} if areas_response.data else {}
                         
-                        with st.form("add_category_form"):
+                        # Use unique key with counter to force form reset after successful submit
+                        with st.form(f"add_category_form_{st.session_state.category_form_counter}"):
                             # If Area filter is active, pre-populate and disable Area selection
                             if selected_area_cat != "All Areas":
                                 st.info(f"ℹ️ Adding category to filtered area: **{selected_area_cat}**")
                                 # Display as disabled text input (can't change)
-                                st.text_input("Select Area *", value=selected_area_cat, disabled=True, key="new_cat_area_disabled")
+                                st.text_input("Select Area *", value=selected_area_cat, disabled=True)
                                 new_cat_area = selected_area_cat
                             else:
                                 # Show full dropdown if no filter
-                                new_cat_area = st.selectbox("Select Area *", list(areas_dict.keys()), key="new_cat_area_select")
+                                new_cat_area = st.selectbox("Select Area *", list(areas_dict.keys()))
                             
                             new_cat_name = st.text_input("Category Name *", placeholder="e.g., Cardio, Strength Training")
                             new_cat_desc = st.text_area("Description", placeholder="Optional description...")
@@ -1552,6 +1566,8 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         )
                                         if success:
                                             st.success(msg)
+                                            # Increment counter to create NEW form (prevents double submit)
+                                            st.session_state.category_form_counter += 1
                                             # Clear cache and reload data
                                             st.cache_data.clear()
                                             st.session_state.original_df = None
@@ -1767,6 +1783,10 @@ def render_interactive_structure_viewer(client, user_id: str):
                     
                     # Add new attribute form
                     with st.expander("➕ Add New Attribute", expanded=False):
+                        # Initialize form submission counter in session state
+                        if 'attribute_form_counter' not in st.session_state:
+                            st.session_state.attribute_form_counter = 0
+                        
                         # Get categories for selection
                         cats_response = client.table('categories').select('id, name, area_id, areas(name)').eq('user_id', user_id).execute()
                         
@@ -1778,7 +1798,8 @@ def render_interactive_structure_viewer(client, user_id: str):
                                 display_name = f"{area_name} > {cat['name']}"
                                 cat_options[display_name] = cat['id']
                         
-                        with st.form("add_attribute_form"):
+                        # Use unique key with counter to force form reset after successful submit
+                        with st.form(f"add_attribute_form_{st.session_state.attribute_form_counter}"):
                             new_attr_category = st.selectbox("Select Category *", list(cat_options.keys()))
                             new_attr_name = st.text_input("Attribute Name *", placeholder="e.g., Duration, Distance, Weight")
                             new_attr_datatype = st.selectbox("Data Type *", DATA_TYPES)
@@ -1813,8 +1834,12 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         )
                                         if success:
                                             st.success(msg)
+                                            # Increment counter to create NEW form (prevents double submit)
+                                            st.session_state.attribute_form_counter += 1
+                                            # Clear cache
                                             st.cache_data.clear()
                                             st.session_state.original_df = None
+                                            # Rerun
                                             st.rerun()
                                         else:
                                             st.error(msg)
