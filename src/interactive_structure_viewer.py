@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-11-27 15:00 UTC
+Last Modified: 2025-11-27 16:00 UTC
 Python: 3.11
-Version: 1.5.6 - Add Attribute Always Visible & Smart Field Masking
+Version: 1.5.7 - Smart Field Masking Fix (Disabled Fields)
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -16,7 +16,7 @@ Features:
 - **FILTERS**: Area filter in Tab 2, Area + Category cascade filter in Tab 3
 - **ADD**: Add new Areas, Categories, and Attributes
 - **DELETE**: Delete Areas, Categories, and Attributes with cascade warnings
-- **SMART FORMS**: Fields adapt based on Data Type selection
+- **SMART FORMS**: Fields disable based on Data Type selection (not hide)
 - Each editor shows only relevant columns for that entity type
 - Read-Only mode: Shows ALL rows (Areas, Categories, Attributes)
 - Edit Mode: Choose which entity type to edit via tabs
@@ -41,7 +41,17 @@ Technical Details:
 - UUID generation for new entities
 - Slug auto-generation from names
 - CASCADE delete warnings
-- Context-aware form fields
+- Context-aware form fields with disabled states
+
+CHANGELOG v1.5.7:
+- 🐛 FIXED: Smart field masking now works correctly - uses DISABLED fields instead of hiding
+- 🔧 IMPROVED: Non-applicable fields shown as disabled (greyed out) with help text
+- 🔧 IMPROVED: Added caption explaining disabled field behavior
+- ✅ VERIFIED: Disabled fields don't allow input and pass empty values to database
+- Field behavior by Data Type:
+  - 'link' & 'image': Unit, Default Value, Validation Min/Max → DISABLED
+  - 'text' & 'boolean': Validation Min/Max → DISABLED
+  - 'number' & 'datetime': All fields → ENABLED
 
 CHANGELOG v1.5.6:
 - 🐛 FIXED: Add Attribute form now always visible, even when no attributes exist (Bug #11 - CRITICAL)
@@ -1831,6 +1841,8 @@ def render_interactive_structure_viewer(client, user_id: str):
             # Add Attribute form - ALWAYS visible, regardless of whether attributes exist
             st.markdown("---")
             with st.expander("➕ Add New Attribute", expanded=False):
+                st.caption("💡 Tip: Fields shown as 'disabled' (greyed out) are not applicable for the selected Data Type.")
+                
                 # Initialize form submission counter in session state
                 if 'attribute_form_counter' not in st.session_state:
                     st.session_state.attribute_form_counter = 0
@@ -1897,39 +1909,38 @@ def render_interactive_structure_viewer(client, user_id: str):
                     new_attr_datatype = st.selectbox("Data Type *", DATA_TYPES)
                     
                     # Smart field masking based on Data Type
-                    # For 'link' and 'image' types, hide Unit, Default Value, and Validation fields
-                    show_unit = new_attr_datatype not in ['link', 'image']
-                    show_default = new_attr_datatype not in ['link', 'image']
-                    show_validation = new_attr_datatype in ['number', 'datetime']
+                    # For 'link' and 'image' types, disable Unit, Default Value, and Validation fields
+                    is_link_or_image = new_attr_datatype in ['link', 'image']
+                    is_validatable = new_attr_datatype in ['number', 'datetime']
                     
                     col1, col2 = st.columns(2)
                     with col1:
-                        if show_unit:
-                            new_attr_unit = st.text_input("Unit", placeholder="e.g., km, kg, minutes")
+                        if is_link_or_image:
+                            new_attr_unit = st.text_input("Unit", value="", disabled=True, 
+                                                         help=f"Not applicable for '{new_attr_datatype}' type")
                         else:
-                            new_attr_unit = ""
-                            st.info(f"ℹ️ Unit not applicable for '{new_attr_datatype}' type")
+                            new_attr_unit = st.text_input("Unit", placeholder="e.g., km, kg, minutes")
                         
                         new_attr_required = st.selectbox("Is Required?", ["No", "Yes"])
                     
                     with col2:
-                        if show_default:
-                            new_attr_default = st.text_input("Default Value", placeholder="Optional")
+                        if is_link_or_image:
+                            new_attr_default = st.text_input("Default Value", value="", disabled=True,
+                                                            help=f"Not applicable for '{new_attr_datatype}' type")
                         else:
-                            new_attr_default = ""
-                            st.info(f"ℹ️ Default Value not applicable for '{new_attr_datatype}' type")
+                            new_attr_default = st.text_input("Default Value", placeholder="Optional")
                         
-                        if show_validation:
+                        if is_validatable:
                             new_attr_val_min = st.text_input("Validation Min", placeholder="Optional")
                         else:
-                            new_attr_val_min = ""
-                            if not show_unit:  # Only show info if we haven't already shown one
-                                st.info(f"ℹ️ Validation not applicable for '{new_attr_datatype}' type")
+                            new_attr_val_min = st.text_input("Validation Min", value="", disabled=True,
+                                                            help="Only for number/datetime types")
                     
-                    if show_validation:
+                    if is_validatable:
                         new_attr_val_max = st.text_input("Validation Max", placeholder="Optional")
                     else:
-                        new_attr_val_max = ""
+                        new_attr_val_max = st.text_input("Validation Max", value="", disabled=True,
+                                                        help="Only for number/datetime types")
                     
                     new_attr_desc = st.text_area("Description", placeholder="Optional description...")
                     
