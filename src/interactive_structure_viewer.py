@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-11-27 13:00 UTC
+Last Modified: 2025-11-27 15:00 UTC
 Python: 3.11
-Version: 1.5.5 - Filter Improvements & Add Category Always Visible
+Version: 1.5.6 - Add Attribute Always Visible & Smart Field Masking
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -16,6 +16,7 @@ Features:
 - **FILTERS**: Area filter in Tab 2, Area + Category cascade filter in Tab 3
 - **ADD**: Add new Areas, Categories, and Attributes
 - **DELETE**: Delete Areas, Categories, and Attributes with cascade warnings
+- **SMART FORMS**: Fields adapt based on Data Type selection
 - Each editor shows only relevant columns for that entity type
 - Read-Only mode: Shows ALL rows (Areas, Categories, Attributes)
 - Edit Mode: Choose which entity type to edit via tabs
@@ -40,6 +41,17 @@ Technical Details:
 - UUID generation for new entities
 - Slug auto-generation from names
 - CASCADE delete warnings
+- Context-aware form fields
+
+CHANGELOG v1.5.6:
+- 🐛 FIXED: Add Attribute form now always visible, even when no attributes exist (Bug #11 - CRITICAL)
+- 🐛 FIXED: Filter by Area in Edit Attributes now queries database directly (Bug #12)
+- ✨ NEW FEATURE: Smart field masking based on Data Type
+  - 'link' and 'image' types: Hide Unit, Default Value, Validation fields
+  - 'text' and 'boolean' types: Hide Validation Min/Max
+  - 'number' and 'datetime' types: Show all fields
+- 🔧 IMPROVED: Better UX with info messages for hidden fields
+- 🔧 IMPROVED: Consistent behavior across all tabs (forms always accessible)
 
 CHANGELOG v1.5.5:
 - 🐛 FIXED: Add Category form now always visible, even when no categories exist (Bug #8)
@@ -1606,58 +1618,63 @@ def render_interactive_structure_viewer(client, user_id: str):
             attribute_mask = filtered_df['Type'] == 'Attribute'
             attribute_full_df = filtered_df[attribute_mask].copy()
             
-            if attribute_full_df.empty:
-                st.warning("⚠️ No attributes to edit. Please create attributes first.")
-            else:
-                # Cascade filters (Area → Category)
-                st.markdown("---")
-                col_filter1, col_filter2 = st.columns(2)
+            # Always show filters and Add Attribute form, even if no attributes exist
+            st.markdown("---")
+            col_filter1, col_filter2 = st.columns(2)
+            
+            with col_filter1:
+                # Get ALL areas directly from database (not just those with attributes)
+                # This ensures new areas appear immediately after adding (Bug #12 fix)
+                all_areas_response = client.table('areas').select('name').eq('user_id', user_id).order('name').execute()
+                all_areas_list = [area['name'] for area in all_areas_response.data] if all_areas_response.data else []
+                available_areas_attr = ["All Areas"] + sorted(all_areas_list)
                 
-                with col_filter1:
-                    # Get unique areas from attribute rows
-                    available_areas_attr = ["All Areas"] + sorted(attribute_full_df['Area'].unique().tolist())
-                    selected_area_attr = st.selectbox(
-                        "Filter by Area",
-                        available_areas_attr,
-                        key="area_filter_attributes"
-                    )
+                selected_area_attr = st.selectbox(
+                    "Filter by Area",
+                    available_areas_attr,
+                    key="area_filter_attributes"
+                )
+            
+            # Apply area filter first
+            if selected_area_attr != "All Areas" and not attribute_full_df.empty:
+                attribute_full_df = attribute_full_df[attribute_full_df['Area'] == selected_area_attr]
+            
+            with col_filter2:
+                # Get ALL categories from filtered area (not just those with attributes)
+                available_cats = ["All Categories"]
                 
-                # Apply area filter first
                 if selected_area_attr != "All Areas":
-                    attribute_full_df = attribute_full_df[attribute_full_df['Area'] == selected_area_attr]
-                
-                with col_filter2:
-                    # Get ALL categories from filtered area (not just those with attributes)
-                    available_cats = ["All Categories"]
-                    
-                    if selected_area_attr != "All Areas":
-                        # Query database for ALL categories in the selected area
-                        area_cats_response = client.table('categories').select('name, areas(name)').eq('user_id', user_id).execute()
-                        if area_cats_response.data:
-                            # Filter to selected area and get category names
-                            area_cat_names = [
-                                cat['name'] for cat in area_cats_response.data 
-                                if cat.get('areas') and cat['areas']['name'] == selected_area_attr
-                            ]
-                            available_cats += sorted(area_cat_names)
-                    else:
-                        # Show categories from ALL areas that have attributes
-                        if not attribute_full_df.empty:
-                            available_cats += sorted(attribute_full_df['Category'].unique().tolist())
-                    
-                    selected_category = st.selectbox(
-                        "Filter by Category",
-                        available_cats,
-                        key="category_filter_attributes"
-                    )
-                
-                # Apply category filter
-                if selected_category != "All Categories":
-                    attribute_full_df = attribute_full_df[attribute_full_df['Category'] == selected_category]
-                
-                if attribute_full_df.empty:
-                    st.warning(f"⚠️ No attributes found for the selected filters.")
+                    # Query database for ALL categories in the selected area
+                    area_cats_response = client.table('categories').select('name, areas(name)').eq('user_id', user_id).execute()
+                    if area_cats_response.data:
+                        # Filter to selected area and get category names
+                        area_cat_names = [
+                            cat['name'] for cat in area_cats_response.data 
+                            if cat.get('areas') and cat['areas']['name'] == selected_area_attr
+                        ]
+                        available_cats += sorted(area_cat_names)
                 else:
+                    # Show categories from ALL areas that have attributes
+                    if not attribute_full_df.empty:
+                        available_cats += sorted(attribute_full_df['Category'].unique().tolist())
+                
+                selected_category = st.selectbox(
+                    "Filter by Category",
+                    available_cats,
+                    key="category_filter_attributes"
+                )
+            
+            # Apply category filter
+            if selected_category != "All Categories" and not attribute_full_df.empty:
+                attribute_full_df = attribute_full_df[attribute_full_df['Category'] == selected_category]
+            
+            # Show attributes if they exist
+            if attribute_full_df.empty:
+                if selected_area_attr != "All Areas" or selected_category != "All Categories":
+                    st.info(f"ℹ️ No attributes found for the selected filters. Add your first attribute below.")
+                else:
+                    st.info("ℹ️ No attributes found. Add your first attribute below.")
+            else:
                     st.markdown(f"**Viewing {len(attribute_full_df)} attributes**")
                     
                     # Select relevant columns for Attributes (display only)
@@ -1810,114 +1827,139 @@ def render_interactive_structure_viewer(client, user_id: str):
                             if st.button("⏪ Discard Changes", use_container_width=True, key="discard_attributes"):
                                 st.session_state.edited_df = None
                                 st.rerun()
+            
+            # Add Attribute form - ALWAYS visible, regardless of whether attributes exist
+            st.markdown("---")
+            with st.expander("➕ Add New Attribute", expanded=False):
+                # Initialize form submission counter in session state
+                if 'attribute_form_counter' not in st.session_state:
+                    st.session_state.attribute_form_counter = 0
+                
+                # Get current filters from session state
+                current_area_filter = st.session_state.get('area_filter_attributes', 'All Areas')
+                current_category_filter = st.session_state.get('category_filter_attributes', 'All Categories')
+                
+                # Get categories for selection
+                cats_response = client.table('categories').select('id, name, area_id, areas(name)').eq('user_id', user_id).execute()
+                
+                # Filter categories based on active filters
+                filtered_cats = []
+                if cats_response.data:
+                    for cat in cats_response.data:
+                        area_name = cat['areas']['name'] if cat.get('areas') else 'Unknown'
+                        
+                        # Apply Area filter if active
+                        if current_area_filter != "All Areas":
+                            if area_name != current_area_filter:
+                                continue  # Skip categories not from filtered area
+                        
+                        # Apply Category filter if active
+                        if current_category_filter != "All Categories":
+                            if cat['name'] != current_category_filter:
+                                continue  # Skip categories not matching filter
+                        
+                        filtered_cats.append(cat)
+                
+                # Build category options from filtered list
+                cat_options = {}
+                for cat in filtered_cats:
+                    area_name = cat['areas']['name'] if cat.get('areas') else 'Unknown'
+                    display_name = f"{area_name} > {cat['name']}"
+                    cat_options[display_name] = cat['id']
+                
+                # Show info if filters are active
+                if current_area_filter != "All Areas" or current_category_filter != "All Categories":
+                    filter_parts = []
+                    if current_area_filter != "All Areas":
+                        filter_parts.append(f"**Area:** {current_area_filter}")
+                    if current_category_filter != "All Categories":
+                        filter_parts.append(f"**Category:** {current_category_filter}")
                     
-                    st.markdown("---")
+                    st.info(f"ℹ️ Adding attribute to filtered: {' > '.join(filter_parts)}")
+                
+                # Use unique key with counter to force form reset after successful submit
+                with st.form(f"add_attribute_form_{st.session_state.attribute_form_counter}"):
+                    # Category selection - locked if only one option
+                    if len(cat_options) == 0:
+                        st.warning("⚠️ No categories available for the current filter. Please adjust filters or create categories first.")
+                        new_attr_category = None
+                    elif len(cat_options) == 1:
+                        # Only one option - show as locked/disabled
+                        category_name = list(cat_options.keys())[0]
+                        st.text_input("Select Category *", value=category_name, disabled=True, 
+                                    help="Locked to filtered category")
+                        new_attr_category = category_name
+                    else:
+                        # Multiple options - show dropdown
+                        new_attr_category = st.selectbox("Select Category *", list(cat_options.keys()))
                     
-                    # Add new attribute form
-                    with st.expander("➕ Add New Attribute", expanded=False):
-                        # Initialize form submission counter in session state
-                        if 'attribute_form_counter' not in st.session_state:
-                            st.session_state.attribute_form_counter = 0
+                    new_attr_name = st.text_input("Attribute Name *", placeholder="e.g., Duration, Distance, Weight")
+                    new_attr_datatype = st.selectbox("Data Type *", DATA_TYPES)
+                    
+                    # Smart field masking based on Data Type
+                    # For 'link' and 'image' types, hide Unit, Default Value, and Validation fields
+                    show_unit = new_attr_datatype not in ['link', 'image']
+                    show_default = new_attr_datatype not in ['link', 'image']
+                    show_validation = new_attr_datatype in ['number', 'datetime']
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if show_unit:
+                            new_attr_unit = st.text_input("Unit", placeholder="e.g., km, kg, minutes")
+                        else:
+                            new_attr_unit = ""
+                            st.info(f"ℹ️ Unit not applicable for '{new_attr_datatype}' type")
                         
-                        # Get current filters from session state
-                        current_area_filter = st.session_state.get('area_filter_attributes', 'All Areas')
-                        current_category_filter = st.session_state.get('category_filter_attributes', 'All Categories')
+                        new_attr_required = st.selectbox("Is Required?", ["No", "Yes"])
+                    
+                    with col2:
+                        if show_default:
+                            new_attr_default = st.text_input("Default Value", placeholder="Optional")
+                        else:
+                            new_attr_default = ""
+                            st.info(f"ℹ️ Default Value not applicable for '{new_attr_datatype}' type")
                         
-                        # Get categories for selection
-                        cats_response = client.table('categories').select('id, name, area_id, areas(name)').eq('user_id', user_id).execute()
-                        
-                        # Filter categories based on active filters
-                        filtered_cats = []
-                        if cats_response.data:
-                            for cat in cats_response.data:
-                                area_name = cat['areas']['name'] if cat.get('areas') else 'Unknown'
-                                
-                                # Apply Area filter if active
-                                if current_area_filter != "All Areas":
-                                    if area_name != current_area_filter:
-                                        continue  # Skip categories not from filtered area
-                                
-                                # Apply Category filter if active
-                                if current_category_filter != "All Categories":
-                                    if cat['name'] != current_category_filter:
-                                        continue  # Skip categories not matching filter
-                                
-                                filtered_cats.append(cat)
-                        
-                        # Build category options from filtered list
-                        cat_options = {}
-                        for cat in filtered_cats:
-                            area_name = cat['areas']['name'] if cat.get('areas') else 'Unknown'
-                            display_name = f"{area_name} > {cat['name']}"
-                            cat_options[display_name] = cat['id']
-                        
-                        # Show info if filters are active
-                        if current_area_filter != "All Areas" or current_category_filter != "All Categories":
-                            filter_parts = []
-                            if current_area_filter != "All Areas":
-                                filter_parts.append(f"**Area:** {current_area_filter}")
-                            if current_category_filter != "All Categories":
-                                filter_parts.append(f"**Category:** {current_category_filter}")
+                        if show_validation:
+                            new_attr_val_min = st.text_input("Validation Min", placeholder="Optional")
+                        else:
+                            new_attr_val_min = ""
+                            if not show_unit:  # Only show info if we haven't already shown one
+                                st.info(f"ℹ️ Validation not applicable for '{new_attr_datatype}' type")
+                    
+                    if show_validation:
+                        new_attr_val_max = st.text_input("Validation Max", placeholder="Optional")
+                    else:
+                        new_attr_val_max = ""
+                    
+                    new_attr_desc = st.text_area("Description", placeholder="Optional description...")
+                    
+                    submitted = st.form_submit_button("➕ Add Attribute", use_container_width=True)
+                    
+                    if submitted:
+                        if not new_attr_name:
+                            st.error("❌ Attribute name is required!")
+                        elif not new_attr_category:
+                            st.error("❌ Please select a category!")
+                        elif len(cat_options) == 0:
+                            st.error("❌ No categories available. Please adjust filters.")
+                        else:
+                            is_req = new_attr_required == "Yes"
                             
-                            st.info(f"ℹ️ Adding attribute to filtered: {' > '.join(filter_parts)}")
-                        
-                        # Use unique key with counter to force form reset after successful submit
-                        with st.form(f"add_attribute_form_{st.session_state.attribute_form_counter}"):
-                            # Category selection - locked if only one option
-                            if len(cat_options) == 0:
-                                st.warning("⚠️ No categories available for the current filter. Please adjust filters or create categories first.")
-                                new_attr_category = None
-                            elif len(cat_options) == 1:
-                                # Only one option - show as locked/disabled
-                                category_name = list(cat_options.keys())[0]
-                                st.text_input("Select Category *", value=category_name, disabled=True, 
-                                            help="Locked to filtered category")
-                                new_attr_category = category_name
-                            else:
-                                # Multiple options - show dropdown
-                                new_attr_category = st.selectbox("Select Category *", list(cat_options.keys()))
-                            
-                            new_attr_name = st.text_input("Attribute Name *", placeholder="e.g., Duration, Distance, Weight")
-                            new_attr_datatype = st.selectbox("Data Type *", DATA_TYPES)
-                            
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                new_attr_unit = st.text_input("Unit", placeholder="e.g., km, kg, minutes")
-                                new_attr_required = st.selectbox("Is Required?", ["No", "Yes"])
-                            with col2:
-                                new_attr_default = st.text_input("Default Value", placeholder="Optional")
-                                new_attr_val_min = st.text_input("Validation Min", placeholder="Optional")
-                            
-                            new_attr_val_max = st.text_input("Validation Max", placeholder="Optional")
-                            new_attr_desc = st.text_area("Description", placeholder="Optional description...")
-                            
-                            submitted = st.form_submit_button("➕ Add Attribute", use_container_width=True)
-                            
-                            if submitted:
-                                if not new_attr_name:
-                                    st.error("❌ Attribute name is required!")
-                                elif not new_attr_category:
-                                    st.error("❌ Please select a category!")
-                                elif len(cat_options) == 0:
-                                    st.error("❌ No categories available. Please adjust filters.")
+                            with st.spinner("Adding attribute..."):
+                                success, msg = add_new_attribute(
+                                    client, user_id, cat_options[new_attr_category],
+                                    new_attr_name, new_attr_datatype,
+                                    new_attr_unit, is_req, new_attr_default,
+                                    new_attr_val_min, new_attr_val_max, new_attr_desc
+                                )
+                                if success:
+                                    st.success(msg)
+                                    # Increment counter to create NEW form (prevents double submit)
+                                    st.session_state.attribute_form_counter += 1
+                                    # Clear cache
+                                    st.cache_data.clear()
+                                    st.session_state.original_df = None
+                                    # Rerun
+                                    st.rerun()
                                 else:
-                                    is_req = new_attr_required == "Yes"
-                                    
-                                    with st.spinner("Adding attribute..."):
-                                        success, msg = add_new_attribute(
-                                            client, user_id, cat_options[new_attr_category],
-                                            new_attr_name, new_attr_datatype,
-                                            new_attr_unit, is_req, new_attr_default,
-                                            new_attr_val_min, new_attr_val_max, new_attr_desc
-                                        )
-                                        if success:
-                                            st.success(msg)
-                                            # Increment counter to create NEW form (prevents double submit)
-                                            st.session_state.attribute_form_counter += 1
-                                            # Clear cache
-                                            st.cache_data.clear()
-                                            st.session_state.original_df = None
-                                            # Rerun
-                                            st.rerun()
-                                        else:
-                                            st.error(msg)
+                                    st.error(msg)
