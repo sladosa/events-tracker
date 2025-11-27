@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-11-27 16:00 UTC
+Last Modified: 2025-11-27 17:00 UTC
 Python: 3.11
-Version: 1.5.7 - Smart Field Masking Fix (Disabled Fields)
+Version: 1.5.8 - Smart Field Visibility (Show/Hide Instead of Disable)
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -16,7 +16,7 @@ Features:
 - **FILTERS**: Area filter in Tab 2, Area + Category cascade filter in Tab 3
 - **ADD**: Add new Areas, Categories, and Attributes
 - **DELETE**: Delete Areas, Categories, and Attributes with cascade warnings
-- **SMART FORMS**: Fields disable based on Data Type selection (not hide)
+- **SMART FORMS**: Fields show/hide based on Data Type selection
 - Each editor shows only relevant columns for that entity type
 - Read-Only mode: Shows ALL rows (Areas, Categories, Attributes)
 - Edit Mode: Choose which entity type to edit via tabs
@@ -41,7 +41,19 @@ Technical Details:
 - UUID generation for new entities
 - Slug auto-generation from names
 - CASCADE delete warnings
-- Context-aware form fields with disabled states
+- Context-aware form fields with conditional visibility
+
+CHANGELOG v1.5.8:
+- 🐛 FIXED: Reverted to show/hide approach instead of disabled fields
+- 🔧 IMPROVED: Unit field now shows ONLY for 'number' type (user feedback)
+- 🔧 IMPROVED: Default Value hidden for 'link' and 'image' types
+- 🔧 IMPROVED: Validation Min/Max show only for 'number' and 'datetime' types
+- 💡 IMPROVED: Helper caption shows which fields are hidden and why
+- Field visibility rules:
+  - Unit: ONLY 'number' type
+  - Default Value: All EXCEPT 'link' and 'image'
+  - Validation Min/Max: ONLY 'number' and 'datetime'
+- ⚠️ NOTE: Table editing still allows all columns - validation needed (future fix)
 
 CHANGELOG v1.5.7:
 - 🐛 FIXED: Smart field masking now works correctly - uses DISABLED fields instead of hiding
@@ -1841,7 +1853,7 @@ def render_interactive_structure_viewer(client, user_id: str):
             # Add Attribute form - ALWAYS visible, regardless of whether attributes exist
             st.markdown("---")
             with st.expander("➕ Add New Attribute", expanded=False):
-                st.caption("💡 Tip: Fields shown as 'disabled' (greyed out) are not applicable for the selected Data Type.")
+                st.caption("💡 Tip: Some fields appear/disappear based on selected Data Type to show only relevant options.")
                 
                 # Initialize form submission counter in session state
                 if 'attribute_form_counter' not in st.session_state:
@@ -1908,39 +1920,46 @@ def render_interactive_structure_viewer(client, user_id: str):
                     new_attr_name = st.text_input("Attribute Name *", placeholder="e.g., Duration, Distance, Weight")
                     new_attr_datatype = st.selectbox("Data Type *", DATA_TYPES)
                     
-                    # Smart field masking based on Data Type
-                    # For 'link' and 'image' types, disable Unit, Default Value, and Validation fields
-                    is_link_or_image = new_attr_datatype in ['link', 'image']
-                    is_validatable = new_attr_datatype in ['number', 'datetime']
+                    # Field visibility based on Data Type
+                    # Unit: Only for 'number' type
+                    # Default Value: For all except 'link' and 'image'
+                    # Validation: Only for 'number' and 'datetime'
+                    show_unit = new_attr_datatype == 'number'
+                    show_default = new_attr_datatype not in ['link', 'image']
+                    show_validation = new_attr_datatype in ['number', 'datetime']
                     
                     col1, col2 = st.columns(2)
                     with col1:
-                        if is_link_or_image:
-                            new_attr_unit = st.text_input("Unit", value="", disabled=True, 
-                                                         help=f"Not applicable for '{new_attr_datatype}' type")
-                        else:
+                        if show_unit:
                             new_attr_unit = st.text_input("Unit", placeholder="e.g., km, kg, minutes")
+                        else:
+                            new_attr_unit = ""
                         
                         new_attr_required = st.selectbox("Is Required?", ["No", "Yes"])
                     
                     with col2:
-                        if is_link_or_image:
-                            new_attr_default = st.text_input("Default Value", value="", disabled=True,
-                                                            help=f"Not applicable for '{new_attr_datatype}' type")
-                        else:
+                        if show_default:
                             new_attr_default = st.text_input("Default Value", placeholder="Optional")
+                        else:
+                            new_attr_default = ""
                         
-                        if is_validatable:
+                        if show_validation:
                             new_attr_val_min = st.text_input("Validation Min", placeholder="Optional")
                         else:
-                            new_attr_val_min = st.text_input("Validation Min", value="", disabled=True,
-                                                            help="Only for number/datetime types")
+                            new_attr_val_min = ""
                     
-                    if is_validatable:
+                    if show_validation:
                         new_attr_val_max = st.text_input("Validation Max", placeholder="Optional")
                     else:
-                        new_attr_val_max = st.text_input("Validation Max", value="", disabled=True,
-                                                        help="Only for number/datetime types")
+                        new_attr_val_max = ""
+                    
+                    # Show helper message about field visibility
+                    if not show_unit and not show_validation:
+                        st.caption(f"💡 Note: Unit and Validation fields are not applicable for '{new_attr_datatype}' type")
+                    elif not show_unit:
+                        st.caption(f"💡 Note: Unit field is not applicable for '{new_attr_datatype}' type")
+                    elif not show_validation:
+                        st.caption(f"💡 Note: Validation fields are not applicable for '{new_attr_datatype}' type")
                     
                     new_attr_desc = st.text_area("Description", placeholder="Optional description...")
                     
