@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-11-27 17:00 UTC
+Last Modified: 2025-11-27 18:00 UTC
 Python: 3.11
-Version: 1.5.8 - Smart Field Visibility (Show/Hide Instead of Disable)
+Version: 1.5.9 - Two-Step Form (Data Type First, Then Fields)
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -16,7 +16,7 @@ Features:
 - **FILTERS**: Area filter in Tab 2, Area + Category cascade filter in Tab 3
 - **ADD**: Add new Areas, Categories, and Attributes
 - **DELETE**: Delete Areas, Categories, and Attributes with cascade warnings
-- **SMART FORMS**: Fields show/hide based on Data Type selection
+- **SMART FORMS**: Two-step form - select Data Type first, then relevant fields appear
 - Each editor shows only relevant columns for that entity type
 - Read-Only mode: Shows ALL rows (Areas, Categories, Attributes)
 - Edit Mode: Choose which entity type to edit via tabs
@@ -41,7 +41,19 @@ Technical Details:
 - UUID generation for new entities
 - Slug auto-generation from names
 - CASCADE delete warnings
-- Context-aware form fields with conditional visibility
+- Dynamic form generation based on Data Type
+
+CHANGELOG v1.5.9:
+- ✅ MAJOR FIX: Two-step form approach - select Data Type OUTSIDE form first
+- 🎯 SOLUTION: Data Type selector triggers form re-render with relevant fields
+- ✨ NEW UX: Step 1: Select Data Type → Step 2: Fill relevant fields
+- 🔧 FIXED: Fields now actually hide/show when Data Type changes (user feedback!)
+- 💡 IMPROVED: Helper text shows which fields are hidden and why
+- Field visibility rules (unchanged):
+  - Unit: ONLY 'number' type
+  - Default Value: All EXCEPT 'link' and 'image'
+  - Validation Min/Max: ONLY 'number' and 'datetime'
+- Technical: Data Type selectbox outside st.form() allows dynamic field rendering
 
 CHANGELOG v1.5.8:
 - 🐛 FIXED: Reverted to show/hide approach instead of disabled fields
@@ -1853,7 +1865,7 @@ def render_interactive_structure_viewer(client, user_id: str):
             # Add Attribute form - ALWAYS visible, regardless of whether attributes exist
             st.markdown("---")
             with st.expander("➕ Add New Attribute", expanded=False):
-                st.caption("💡 Tip: Some fields appear/disappear based on selected Data Type to show only relevant options.")
+                st.caption("💡 Two-step process: (1) Select Data Type first → (2) Form shows only relevant fields for that type")
                 
                 # Initialize form submission counter in session state
                 if 'attribute_form_counter' not in st.session_state:
@@ -1901,6 +1913,43 @@ def render_interactive_structure_viewer(client, user_id: str):
                     
                     st.info(f"ℹ️ Adding attribute to filtered: {' > '.join(filter_parts)}")
                 
+                # TWO-STEP APPROACH: Select Data Type first (outside form), then show relevant form
+                st.markdown("**Step 1:** Select Data Type")
+                
+                # Initialize selected_data_type in session state if not exists
+                if 'selected_data_type' not in st.session_state:
+                    st.session_state.selected_data_type = 'number'
+                
+                # Data Type selector OUTSIDE the form (allows dynamic form generation)
+                selected_data_type = st.selectbox(
+                    "Data Type *",
+                    DATA_TYPES,
+                    key="attr_data_type_selector",
+                    help="Select data type first - form fields will adapt automatically"
+                )
+                
+                # Update session state
+                st.session_state.selected_data_type = selected_data_type
+                
+                st.markdown("**Step 2:** Fill in attribute details")
+                
+                # Determine which fields to show based on selected type
+                show_unit = selected_data_type == 'number'
+                show_default = selected_data_type not in ['link', 'image']
+                show_validation = selected_data_type in ['number', 'datetime']
+                
+                # Show helper text about field visibility
+                field_notes = []
+                if not show_unit:
+                    field_notes.append("Unit field hidden (only for 'number' type)")
+                if not show_default:
+                    field_notes.append("Default Value hidden (not for 'link'/'image')")
+                if not show_validation:
+                    field_notes.append("Validation fields hidden (only for 'number'/'datetime')")
+                
+                if field_notes:
+                    st.caption(f"💡 {', '.join(field_notes)}")
+                
                 # Use unique key with counter to force form reset after successful submit
                 with st.form(f"add_attribute_form_{st.session_state.attribute_form_counter}"):
                     # Category selection - locked if only one option
@@ -1918,16 +1967,8 @@ def render_interactive_structure_viewer(client, user_id: str):
                         new_attr_category = st.selectbox("Select Category *", list(cat_options.keys()))
                     
                     new_attr_name = st.text_input("Attribute Name *", placeholder="e.g., Duration, Distance, Weight")
-                    new_attr_datatype = st.selectbox("Data Type *", DATA_TYPES)
                     
-                    # Field visibility based on Data Type
-                    # Unit: Only for 'number' type
-                    # Default Value: For all except 'link' and 'image'
-                    # Validation: Only for 'number' and 'datetime'
-                    show_unit = new_attr_datatype == 'number'
-                    show_default = new_attr_datatype not in ['link', 'image']
-                    show_validation = new_attr_datatype in ['number', 'datetime']
-                    
+                    # Show ONLY relevant fields based on selected data type
                     col1, col2 = st.columns(2)
                     with col1:
                         if show_unit:
@@ -1953,14 +1994,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                     else:
                         new_attr_val_max = ""
                     
-                    # Show helper message about field visibility
-                    if not show_unit and not show_validation:
-                        st.caption(f"💡 Note: Unit and Validation fields are not applicable for '{new_attr_datatype}' type")
-                    elif not show_unit:
-                        st.caption(f"💡 Note: Unit field is not applicable for '{new_attr_datatype}' type")
-                    elif not show_validation:
-                        st.caption(f"💡 Note: Validation fields are not applicable for '{new_attr_datatype}' type")
-                    
                     new_attr_desc = st.text_area("Description", placeholder="Optional description...")
                     
                     submitted = st.form_submit_button("➕ Add Attribute", use_container_width=True)
@@ -1976,9 +2009,10 @@ def render_interactive_structure_viewer(client, user_id: str):
                             is_req = new_attr_required == "Yes"
                             
                             with st.spinner("Adding attribute..."):
+                                # Use selected_data_type from outside the form
                                 success, msg = add_new_attribute(
                                     client, user_id, cat_options[new_attr_category],
-                                    new_attr_name, new_attr_datatype,
+                                    new_attr_name, st.session_state.selected_data_type,
                                     new_attr_unit, is_req, new_attr_default,
                                     new_attr_val_min, new_attr_val_max, new_attr_desc
                                 )
