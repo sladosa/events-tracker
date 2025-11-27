@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-11-26 15:00 UTC
+Last Modified: 2025-11-27 13:00 UTC
 Python: 3.11
-Version: 1.5.3 - Form Double Submit Fix
+Version: 1.5.5 - Filter Improvements & Add Category Always Visible
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -40,6 +40,19 @@ Technical Details:
 - UUID generation for new entities
 - Slug auto-generation from names
 - CASCADE delete warnings
+
+CHANGELOG v1.5.5:
+- 🐛 FIXED: Add Category form now always visible, even when no categories exist (Bug #8)
+- 🐛 FIXED: Filter by Category in Edit Attributes shows ALL categories from filtered Area (Bug #9)
+- ✅ VERIFIED: Add Attribute respects filters correctly (Bug #10 was already fixed in v1.5.4)
+- 🔧 IMPROVED: Better info messages when no categories/attributes found
+- 🔧 IMPROVED: Add Category accessible even with empty filtered areas
+
+CHANGELOG v1.5.4:
+- 🐛 FIXED: Filter by Area dropdown in Edit Categories now queries database directly (Bug #6)
+- 🐛 FIXED: Add Attribute form respects Area and Category filters (Bug #7)
+- 🔧 IMPROVED: Add Attribute shows filter context with info box
+- 🔧 IMPROVED: Category selection locked when single option available
 
 CHANGELOG v1.5.3:
 - 🐛 CRITICAL FIX: Form double submit prevention with unique keys
@@ -1381,33 +1394,34 @@ def render_interactive_structure_viewer(client, user_id: str):
             category_mask = filtered_df['Type'] == 'Category'
             category_full_df = filtered_df[category_mask].copy()
             
+            # Always show filter and Add Category form, even if no categories exist
+            st.markdown("---")
+            col_filter = st.columns([1, 3])
+            
+            with col_filter[0]:
+                # Get ALL areas directly from database (not just those with categories)
+                # This ensures new areas appear immediately after adding
+                all_areas_response = client.table('areas').select('name').eq('user_id', user_id).order('name').execute()
+                all_areas_list = [area['name'] for area in all_areas_response.data] if all_areas_response.data else []
+                available_areas = ["All Areas"] + sorted(all_areas_list)
+                
+                selected_area_cat = st.selectbox(
+                    "Filter by Area",
+                    available_areas,
+                    key="area_filter_categories"
+                )
+            
+            # Apply area filter
+            if selected_area_cat != "All Areas" and not category_full_df.empty:
+                category_full_df = category_full_df[category_full_df['Area'] == selected_area_cat]
+            
+            # Show categories if they exist
             if category_full_df.empty:
-                st.warning("⚠️ No categories found. Please create categories first.")
-            else:
-                # Filter by Area within Tab 2
-                st.markdown("---")
-                col_filter = st.columns([1, 3])
-                
-                with col_filter[0]:
-                    # Get ALL areas directly from database (not just those with categories)
-                    # This ensures new areas appear immediately after adding
-                    all_areas_response = client.table('areas').select('name').eq('user_id', user_id).order('name').execute()
-                    all_areas_list = [area['name'] for area in all_areas_response.data] if all_areas_response.data else []
-                    available_areas = ["All Areas"] + sorted(all_areas_list)
-                    
-                    selected_area_cat = st.selectbox(
-                        "Filter by Area",
-                        available_areas,
-                        key="area_filter_categories"
-                    )
-                
-                # Apply area filter
                 if selected_area_cat != "All Areas":
-                    category_full_df = category_full_df[category_full_df['Area'] == selected_area_cat]
-                
-                if category_full_df.empty:
-                    st.warning(f"⚠️ No categories found for Area: {selected_area_cat}")
+                    st.info(f"ℹ️ No categories found for Area: {selected_area_cat}. Add your first category below.")
                 else:
+                    st.info("ℹ️ No categories found. Add your first category below.")
+            else:
                     st.markdown(f"**Viewing {len(category_full_df)} categories**")
                     
                     # Select relevant columns for Categories (display only)
@@ -1501,84 +1515,85 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.rerun()
                                     else:
                                         st.error(f"❌ Failed to save changes. {stats['errors']} errors occurred.")
+            
+            # Add Category form - ALWAYS visible, regardless of whether categories exist
+            st.markdown("---")
+            
+            # Add new category form
+            with st.expander("➕ Add New Category", expanded=False):
+                # Initialize form submission counter in session state
+                if 'category_form_counter' not in st.session_state:
+                    st.session_state.category_form_counter = 0
+                
+                # Get areas for selection
+                areas_response = client.table('areas').select('id, name').eq('user_id', user_id).execute()
+                areas_dict = {a['name']: a['id'] for a in areas_response.data} if areas_response.data else {}
+                
+                # Use unique key with counter to force form reset after successful submit
+                with st.form(f"add_category_form_{st.session_state.category_form_counter}"):
+                    # If Area filter is active, pre-populate and disable Area selection
+                    if selected_area_cat != "All Areas":
+                        st.info(f"ℹ️ Adding category to filtered area: **{selected_area_cat}**")
+                        # Display as disabled text input (can't change)
+                        st.text_input("Select Area *", value=selected_area_cat, disabled=True)
+                        new_cat_area = selected_area_cat
+                    else:
+                        # Show full dropdown if no filter
+                        new_cat_area = st.selectbox("Select Area *", list(areas_dict.keys()))
                     
-                    st.markdown("---")
+                    new_cat_name = st.text_input("Category Name *", placeholder="e.g., Cardio, Strength Training")
+                    new_cat_desc = st.text_area("Description", placeholder="Optional description...")
                     
-                    # Add new category form
-                    with st.expander("➕ Add New Category", expanded=False):
-                        # Initialize form submission counter in session state
-                        if 'category_form_counter' not in st.session_state:
-                            st.session_state.category_form_counter = 0
+                    # Parent category selection (optional)
+                    if new_cat_area:
+                        area_id_for_cats = areas_dict[new_cat_area]
+                        # Get ONLY categories from the selected area
+                        cats_in_area = client.table('categories').select('id, name').eq('area_id', area_id_for_cats).eq('user_id', user_id).execute()
+                        parent_options = ["None (Root Category)"] + [c['name'] for c in (cats_in_area.data if cats_in_area.data else [])]
+                        parent_cats_dict = {c['name']: c['id'] for c in (cats_in_area.data if cats_in_area.data else [])}
                         
-                        # Get areas for selection
-                        areas_response = client.table('areas').select('id, name').eq('user_id', user_id).execute()
-                        areas_dict = {a['name']: a['id'] for a in areas_response.data} if areas_response.data else {}
-                        
-                        # Use unique key with counter to force form reset after successful submit
-                        with st.form(f"add_category_form_{st.session_state.category_form_counter}"):
-                            # If Area filter is active, pre-populate and disable Area selection
-                            if selected_area_cat != "All Areas":
-                                st.info(f"ℹ️ Adding category to filtered area: **{selected_area_cat}**")
-                                # Display as disabled text input (can't change)
-                                st.text_input("Select Area *", value=selected_area_cat, disabled=True)
-                                new_cat_area = selected_area_cat
+                        if len(parent_options) > 1:
+                            new_cat_parent = st.selectbox("Parent Category", parent_options, help=f"Select parent category from '{new_cat_area}' area")
+                        else:
+                            st.info(f"ℹ️ No existing categories in '{new_cat_area}' - this will be a root category")
+                            new_cat_parent = "None (Root Category)"
+                    else:
+                        new_cat_parent = "None (Root Category)"
+                    
+                    submitted = st.form_submit_button("➕ Add Category", use_container_width=True)
+                    
+                    if submitted:
+                        if not new_cat_name:
+                            st.error("❌ Category name is required!")
+                        elif not new_cat_area:
+                            st.error("❌ Please select an area!")
+                        else:
+                            # Resolve parent_id
+                            if new_cat_parent == "None (Root Category)":
+                                parent_id = None
                             else:
-                                # Show full dropdown if no filter
-                                new_cat_area = st.selectbox("Select Area *", list(areas_dict.keys()))
+                                parent_id = parent_cats_dict.get(new_cat_parent)
+                                # Verify parent_id is valid
+                                if not parent_id:
+                                    st.error(f"❌ Parent category '{new_cat_parent}' not found in dropdown data!")
+                                    st.stop()
                             
-                            new_cat_name = st.text_input("Category Name *", placeholder="e.g., Cardio, Strength Training")
-                            new_cat_desc = st.text_area("Description", placeholder="Optional description...")
-                            
-                            # Parent category selection (optional)
-                            if new_cat_area:
-                                area_id_for_cats = areas_dict[new_cat_area]
-                                # Get ONLY categories from the selected area
-                                cats_in_area = client.table('categories').select('id, name').eq('area_id', area_id_for_cats).eq('user_id', user_id).execute()
-                                parent_options = ["None (Root Category)"] + [c['name'] for c in (cats_in_area.data if cats_in_area.data else [])]
-                                parent_cats_dict = {c['name']: c['id'] for c in (cats_in_area.data if cats_in_area.data else [])}
-                                
-                                if len(parent_options) > 1:
-                                    new_cat_parent = st.selectbox("Parent Category", parent_options, help=f"Select parent category from '{new_cat_area}' area")
+                            with st.spinner("Adding category..."):
+                                success, msg = add_new_category(
+                                    client, user_id, areas_dict[new_cat_area],
+                                    new_cat_name, new_cat_desc, parent_id
+                                )
+                                if success:
+                                    st.success(msg)
+                                    # Increment counter to create NEW form (prevents double submit)
+                                    st.session_state.category_form_counter += 1
+                                    # Clear cache and reload data
+                                    st.cache_data.clear()
+                                    st.session_state.original_df = None
+                                    # IMPORTANT: rerun to refresh everything and clear form
+                                    st.rerun()
                                 else:
-                                    st.info(f"ℹ️ No existing categories in '{new_cat_area}' - this will be a root category")
-                                    new_cat_parent = "None (Root Category)"
-                            else:
-                                new_cat_parent = "None (Root Category)"
-                            
-                            submitted = st.form_submit_button("➕ Add Category", use_container_width=True)
-                            
-                            if submitted:
-                                if not new_cat_name:
-                                    st.error("❌ Category name is required!")
-                                elif not new_cat_area:
-                                    st.error("❌ Please select an area!")
-                                else:
-                                    # Resolve parent_id
-                                    if new_cat_parent == "None (Root Category)":
-                                        parent_id = None
-                                    else:
-                                        parent_id = parent_cats_dict.get(new_cat_parent)
-                                        # Verify parent_id is valid
-                                        if not parent_id:
-                                            st.error(f"❌ Parent category '{new_cat_parent}' not found in dropdown data!")
-                                            st.stop()
-                                    
-                                    with st.spinner("Adding category..."):
-                                        success, msg = add_new_category(
-                                            client, user_id, areas_dict[new_cat_area],
-                                            new_cat_name, new_cat_desc, parent_id
-                                        )
-                                        if success:
-                                            st.success(msg)
-                                            # Increment counter to create NEW form (prevents double submit)
-                                            st.session_state.category_form_counter += 1
-                                            # Clear cache and reload data
-                                            st.cache_data.clear()
-                                            st.session_state.original_df = None
-                                            # IMPORTANT: rerun to refresh everything and clear form
-                                            st.rerun()
-                                        else:
-                                            st.error(msg)
+                                    st.error(msg)
         
         # ============================================
         # TAB 3: EDIT ATTRIBUTES
@@ -1612,10 +1627,23 @@ def render_interactive_structure_viewer(client, user_id: str):
                     attribute_full_df = attribute_full_df[attribute_full_df['Area'] == selected_area_attr]
                 
                 with col_filter2:
-                    # Get unique categories based on filtered areas
+                    # Get ALL categories from filtered area (not just those with attributes)
                     available_cats = ["All Categories"]
-                    if not attribute_full_df.empty:
-                        available_cats += sorted(attribute_full_df['Category'].unique().tolist())
+                    
+                    if selected_area_attr != "All Areas":
+                        # Query database for ALL categories in the selected area
+                        area_cats_response = client.table('categories').select('name, areas(name)').eq('user_id', user_id).execute()
+                        if area_cats_response.data:
+                            # Filter to selected area and get category names
+                            area_cat_names = [
+                                cat['name'] for cat in area_cats_response.data 
+                                if cat.get('areas') and cat['areas']['name'] == selected_area_attr
+                            ]
+                            available_cats += sorted(area_cat_names)
+                    else:
+                        # Show categories from ALL areas that have attributes
+                        if not attribute_full_df.empty:
+                            available_cats += sorted(attribute_full_df['Category'].unique().tolist())
                     
                     selected_category = st.selectbox(
                         "Filter by Category",
