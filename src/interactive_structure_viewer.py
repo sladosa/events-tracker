@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-11-27 18:00 UTC
+Last Modified: 2025-11-29 12:00 UTC
 Python: 3.11
-Version: 1.5.9 - Two-Step Form (Data Type First, Then Fields)
+Version: 2.0.0 - REFACTORED with Utils Modules
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -118,6 +118,36 @@ import json
 from datetime import datetime
 import uuid
 import re
+
+# Import new utils modules
+from src.utils.db_operations import (
+    fetch_all_structure,
+    fetch_areas,
+    fetch_categories,
+    fetch_attributes,
+    count_dependent_items as utils_count_dependent_items,
+    generate_slug as utils_generate_slug
+)
+from src.utils.excel_operations import (
+    export_structure_to_excel,
+    generate_filename,
+    get_excel_mime_type
+)
+from src.utils.ui_components import (
+    show_contextual_help,
+    HELP_INTERACTIVE_STRUCTURE,
+    show_success,
+    show_error,
+    show_warning
+)
+from src.utils.validation import (
+    validate_area_data,
+    validate_category_data,
+    validate_attribute_data,
+    sanitize_area_data,
+    sanitize_category_data,
+    sanitize_attribute_data
+)
 
 
 # ============================================
@@ -1166,6 +1196,38 @@ def render_interactive_structure_viewer(client, user_id: str):
     """
     st.title("📋 Interactive Structure Viewer")
     
+    # ============================================
+    # CONTEXTUAL HELP
+    # ============================================
+    show_contextual_help("Interactive Structure Viewer", HELP_INTERACTIVE_STRUCTURE)
+    
+    st.markdown("---")
+    
+    # ============================================
+    # SESSION STATE INITIALIZATION (UNIFIED FILTERS)
+    # ============================================
+    
+    # Initialize filter state (shared between Read-Only and Edit Mode)
+    if 'isv_selected_area' not in st.session_state:
+        st.session_state.isv_selected_area = "All Areas"
+    
+    if 'isv_search_text' not in st.session_state:
+        st.session_state.isv_search_text = ""
+    
+    # Mode selection state
+    if 'isv_mode' not in st.session_state:
+        st.session_state.isv_mode = "Read-Only"
+    
+    # Form counters
+    if 'area_form_counter' not in st.session_state:
+        st.session_state.area_form_counter = 0
+    
+    if 'category_form_counter' not in st.session_state:
+        st.session_state.category_form_counter = 0
+    
+    if 'attribute_form_counter' not in st.session_state:
+        st.session_state.attribute_form_counter = 0
+    
     st.info("""
     **Excel-like editing interface** - Direct database connectivity
     - 🎨 **Color-coded columns**: Pink (auto-calculated) vs Blue (editable)
@@ -2027,3 +2089,173 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.rerun()
                                 else:
                                     st.error(msg)
+
+
+# ============================================
+# UPLOAD TEMPLATE TAB (TAB 4)
+# ============================================
+
+def render_upload_template_tab(client, user_id: str):
+    """
+    Render Upload Template tab - integrated into Edit Mode.
+    """
+    st.markdown("### 📤 Upload Structure Template")
+    
+    st.info("""
+    **Upload Excel with structure changes:**
+    
+    1. Download current structure (use Download Filtered in Read-Only mode)
+    2. Edit in Excel (add/rename/delete areas, categories, attributes)
+    3. Upload modified file here
+    4. Review detected changes
+    5. Confirm to apply
+    
+    **Supported:**
+    - ➕ Add new items
+    - ✏️ Update existing items
+    - ❌ Delete items
+    """)
+    
+    st.markdown("---")
+    
+    uploaded_file = st.file_uploader(
+        "Choose Excel file",
+        type=['xlsx'],
+        help="Upload Hierarchical_View template",
+        key="upload_template_file"
+    )
+    
+    if uploaded_file:
+        from src.hierarchical_parser import HierarchicalParser
+        import tempfile
+        import os
+        
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+                tmp.write(uploaded_file.read())
+                tmp_path = tmp.name
+            
+            st.info("📄 File uploaded. Parsing...")
+            
+            with st.spinner("🔍 Analyzing changes..."):
+                parser = HierarchicalParser(client, user_id, tmp_path)
+                success, message, changes = parser.parse_hierarchical_excel()
+            
+            if not success:
+                show_error(message)
+                os.remove(tmp_path)
+                return
+            
+            show_success(message)
+            
+            # Count changes
+            total_new = sum([
+                len(changes.new_areas) if hasattr(changes, 'new_areas') else 0,
+                len(changes.new_categories) if hasattr(changes, 'new_categories') else 0,
+                len(changes.new_attributes) if hasattr(changes, 'new_attributes') else 0
+            ])
+            
+            total_updated = sum([
+                len(changes.updated_areas) if hasattr(changes, 'updated_areas') else 0,
+                len(changes.updated_categories) if hasattr(changes, 'updated_categories') else 0,
+                len(changes.updated_attributes) if hasattr(changes, 'updated_attributes') else 0
+            ])
+            
+            st.markdown("---")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("➕ New", total_new)
+            with col2:
+                st.metric("✏️ Updated", total_updated)
+            with col3:
+                st.metric("Total", total_new + total_updated)
+            
+            st.markdown("---")
+            
+            tabs = st.tabs(["➕ New Items", "✏️ Updates"])
+            
+            with tabs[0]:
+                if total_new == 0:
+                    st.info("No new items")
+                else:
+                    if hasattr(changes, 'new_areas') and changes.new_areas:
+                        st.markdown("#### 🎯 New Areas")
+                        for area in changes.new_areas:
+                            with st.expander(f"📍 {area.get('name', 'Unknown')}"):
+                                st.json(area)
+                    
+                    if hasattr(changes, 'new_categories') and changes.new_categories:
+                        st.markdown("#### 📁 New Categories")
+                        for cat in changes.new_categories:
+                            with st.expander(f"📂 {cat.get('path', 'Unknown')}"):
+                                st.json(cat)
+                    
+                    if hasattr(changes, 'new_attributes') and changes.new_attributes:
+                        st.markdown("#### ⚙️ New Attributes")
+                        for attr in changes.new_attributes:
+                            with st.expander(f"🏷️ {attr.get('name', 'Unknown')}"):
+                                st.json(attr)
+            
+            with tabs[1]:
+                if total_updated == 0:
+                    st.info("No updates")
+                else:
+                    if hasattr(changes, 'updated_areas') and changes.updated_areas:
+                        st.markdown("#### ✏️ Updated Areas")
+                        for area in changes.updated_areas:
+                            with st.expander(f"📍 {area.get('name', 'Unknown')}"):
+                                if 'updates' in area:
+                                    for key, value in area['updates'].items():
+                                        st.markdown(f"- **{key}:** `{value}`")
+                    
+                    if hasattr(changes, 'updated_categories') and changes.updated_categories:
+                        st.markdown("#### ✏️ Updated Categories")
+                        for cat in changes.updated_categories:
+                            with st.expander(f"📂 {cat.get('path', 'Unknown')}"):
+                                if 'updates' in cat:
+                                    for key, value in cat['updates'].items():
+                                        st.markdown(f"- **{key}:** `{value}`")
+            
+            st.markdown("---")
+            st.markdown("### ✅ Confirm Changes")
+            st.warning("⚠️ **Important:** Changes will be applied immediately.")
+            
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                confirm_text = st.text_input(
+                    "Type 'CONFIRM' to apply:",
+                    placeholder="CONFIRM",
+                    key="upload_confirm_text"
+                )
+            
+            with col2:
+                st.markdown("<br>", unsafe_allow_html=True)
+                apply_button = st.button(
+                    "🚀 Apply",
+                    type="primary",
+                    disabled=(confirm_text != "CONFIRM"),
+                    use_container_width=True,
+                    key="upload_apply_button"
+                )
+            
+            if apply_button and confirm_text == "CONFIRM":
+                with st.spinner("💾 Applying..."):
+                    success, message = parser.apply_changes()
+                    
+                    if success:
+                        show_success(message, balloons=True)
+                        st.info("🔄 Changes applied! Refresh or switch to Read-Only mode.")
+                        st.cache_data.clear()
+                    else:
+                        show_error(message)
+            
+            os.remove(tmp_path)
+        
+        except Exception as e:
+            show_error(f"Error: {str(e)}")
+            with st.expander("🔍 Details"):
+                st.exception(e)
+            if 'tmp_path' in locals() and os.path.exists(tmp_path):
+                os.remove(tmp_path)
