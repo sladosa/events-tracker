@@ -2,8 +2,11 @@
 Events Tracker - Structure Viewer Module - ssl
 =========================================
 Created: 2025-11-11 12:37 UTC
-Last Modified: 2025-11-15 18:30 UTC
+Last Modified: 2025-12-01 12:00 UTC
 Python: 3.11
+
+⚠️ DEPRECATED: This module will be removed in next version.
+All functionality moved to Interactive Structure Viewer.
 
 Description:
 Interactive hierarchical structure viewer with tree navigation.
@@ -337,6 +340,19 @@ def render_structure_viewer(client, user_id: str):
     - Proper field filtering before dataclass initialization
     """
     st.title("📊 Structure Viewer")
+    
+    # DEPRECATION WARNING
+    st.warning("""
+    ⚠️ **DEPRECATED - This page will be removed in the next version**
+    
+    This functionality has been moved to **Interactive Structure Viewer** with enhanced features:
+    - Direct editing capabilities
+    - Excel export/import
+    - Better performance and UX
+    
+    Please use **Interactive Structure Viewer** instead.
+    """)
+    
     st.markdown("""
     Browse your hierarchical structure:
     - **Areas** - Top-level organization

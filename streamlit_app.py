@@ -2,13 +2,16 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-11-25 10:00 UTC
+Last Modified: 2025-12-01 12:00 UTC
 Python: 3.11
 
 Description:
 Main Streamlit application with authentication and multiple pages.
-Integrates all modules: structure viewer, interactive structure viewer,
-event entry, bulk import, view data export/import, download/upload structure.
+Integrates all modules: structure viewer (deprecated), interactive structure viewer (enhanced),
+event entry, bulk import, view data export/import, download/upload structure (deprecated).
+
+Note: View Structure, Download Structure, and Upload Template pages are deprecated
+and will be removed in next version. All functionality moved to Interactive Structure Viewer.
 
 Modules:
 - auth: User authentication
@@ -170,6 +173,18 @@ def render_download_page(supabase, user_id: str):
     """Download structure to Excel with enhanced features."""
     st.title("📥 Download Structure")
     
+    # DEPRECATION WARNING
+    st.warning("""
+    ⚠️ **DEPRECATED - This page will be removed in the next version**
+    
+    This functionality has been moved to **Interactive Structure Viewer**:
+    - Go to **Interactive Structure Viewer**
+    - Stay in **Read-Only Mode**
+    - Click **Generate Enhanced Excel** button
+    
+    Please use **Interactive Structure Viewer** for better integration and workflow.
+    """)
+    
     st.info("""
     **Enhanced Excel Export Features:**
     - 🎨 **Color-coded columns**: PINK (auto-calculated) vs BLUE (editable)
@@ -252,6 +267,20 @@ def render_upload_page(supabase, user_id: str):
     Render the upload template page with full parsing and update functionality.
     """
     st.title("📤 Upload Template")
+    
+    # DEPRECATION WARNING
+    st.warning("""
+    ⚠️ **DEPRECATED - This page will be removed in the next version**
+    
+    This functionality has been moved to **Interactive Structure Viewer**:
+    - Go to **Interactive Structure Viewer**
+    - Switch to **Edit Mode**
+    - Go to **Upload Hierarchical Excel** tab (4th tab)
+    - Upload your edited Excel file there
+    
+    Please use **Interactive Structure Viewer** for better integration and workflow.
+    """)
+    
     st.markdown("Update your structure by uploading an edited Hierarchical_View Excel")
     
     st.info("""
@@ -590,153 +619,164 @@ def render_upload_page(supabase, user_id: str):
 
 
 def render_help_page():
-    """Render the help page"""
+    """Render the help page with basic application concepts only"""
     st.title("ℹ️ Help & Documentation")
     
     st.markdown("""
-    ## 📚 Events Tracker Guide
+    ## 📚 Events Tracker - Basic Concepts
     
-    ### 🎯 Overview
-    Events Tracker helps you organize and track events using a hierarchical structure:
-    - **Areas** (e.g., Health, Work, Finance)
-    - **Categories** (e.g., Sleep, Exercise, Meetings)
-    - **Attributes** (e.g., Duration, Amount, Quality)
+    ### 🎯 What is Events Tracker?
     
-    ---
+    Events Tracker helps you organize and track events using a **hierarchical structure**:
     
-    ### 📊 View Structure
-    Browse your hierarchical structure in an interactive tree view:
-    - Expand/collapse areas and categories
-    - View all attributes with their properties
-    - Search and filter
-    - Navigate the structure
+    - **Areas** → Top-level organization (e.g., Health, Work, Finance)
+    - **Categories** → Specific event types (e.g., Sleep, Exercise, Meetings)  
+    - **Attributes** → Data fields you want to track (e.g., Duration, Amount, Quality)
     
-    ---
-    
-    ### 📝 Add Event
-    Add single events with a user-friendly form:
-    - Select category (hierarchical dropdown)
-    - Pick date
-    - Fill attribute values
-    - Add optional comment
-    - **Sticky mode**: Keep category selected for multiple entries
+    This flexible structure allows you to:
+    - Track any type of event (health, work, finance, personal, etc.)
+    - Define custom attributes for each category
+    - Maintain relationships and hierarchies
+    - Export and analyze your data
     
     ---
     
-    ### 📤 Bulk Import
-    Import multiple events from Excel/CSV:
-    1. Download template
-    2. Fill with your data
-    3. Upload file
-    4. Preview and validate
-    5. Confirm import
+    ### 📊 Core Components
     
-    **Supported formats:**
-    - Excel (.xlsx)
-    - CSV (.csv)
+    **1. Structure Management**
+    - Define your hierarchical structure (Areas → Categories → Attributes)
+    - Edit structure directly or via Excel templates
+    - Add/modify/delete items with validation
     
-    **Required columns:**
-    - `event_date` (YYYY-MM-DD)
-    - `category_path` (e.g., "Health > Sleep")
-    - Attribute columns (e.g., `Duration`, `Quality`)
+    **2. Event Entry**
+    - Add individual events through forms
+    - Bulk import from Excel/CSV
+    - Link events to categories with automatic attribute capture
     
-    ---
-    
-    ### 📊 View Data - Export
-    Export your events to Excel for viewing and editing:
-    1. Apply filters (category, date range, attributes)
-    2. Export to Excel
-    3. Download file
-    4. View/edit in Excel
-    
-    **Color coding:**
-    - 🟪 **PINK columns** = READ-ONLY (Event_ID, Category_Path, Date)
-    - 🔵 **BLUE columns** = EDITABLE (attribute values, comment)
+    **3. Data Management**
+    - Export events to Excel for editing
+    - Import edited data with change detection
+    - Filter and search capabilities
     
     ---
     
-    ### 📥 View Data - Import
-    Import edited Excel file with change detection:
-    1. Upload edited Excel file (from Export)
-    2. System detects changes automatically
-    3. Review detailed diff (old vs new values)
-    4. Confirm to apply changes
-    5. Changes applied to database
+    ### 🗺️ Application Navigation
     
-    **Safety features:**
-    - Only changed values are updated
-    - Unchanged data remains untouched
-    - Full validation before applying
-    - Error reporting
+    **Interactive Structure Viewer** 🌟
+    - **Main hub** for structure management
+    - Two modes: Read-Only (view/export) and Edit (modify/upload)
+    - Detailed help available within the page
     
-    ---
+    **Add Event**
+    - Quick single event entry
+    - Form-based interface
+    - Sticky mode for repeated entries
     
-    ### 📥 Download Structure (Enhanced)
-    Export your structure to Excel template with advanced features:
-    - **Color-coded columns**: PINK (auto) vs BLUE (editable)
-    - **Drop-down validations** for data types, required fields
-    - **Auto-formulas** for Level, Area extraction
-    - **Row grouping**: Collapsible Areas and Categories
-    - **Column grouping**: Hide/show attribute details
-    - **Validation fields**: Min/Max for number attributes
+    **Bulk Import**
+    - Import multiple events from Excel/CSV
+    - Template download available
+    - Preview and validation before import
+    
+    **View Data - Export/Import**
+    - Export events to Excel for editing
+    - Import with automatic change detection
+    - Color-coded editable vs read-only fields
     
     ---
     
-    ### 📤 Upload Template
-    Update your structure by uploading Excel template:
-    - Download current structure first
-    - Edit in Excel (add/rename/delete areas, categories, attributes)
-    - Upload modified template
-    - Review changes
-    - Confirm updates
+    ### 💡 Getting Started
     
-    **Features:**
-    - Rename detection (smart matching)
-    - Hierarchical structure support
-    - Validation before applying changes
+    **New to Events Tracker?**
+    
+    1. **Define your structure** using Interactive Structure Viewer
+       - Start with a few Areas (e.g., "Health", "Work")
+       - Add Categories under each Area
+       - Define Attributes for each Category
+    
+    2. **Add some events**
+       - Use "Add Event" for individual entries
+       - Or use "Bulk Import" for multiple events
+    
+    3. **Review and export your data**
+       - Use "View Data - Export" to see your events
+       - Edit in Excel if needed
+       - Import changes back
     
     ---
     
-    ### 💡 Tips & Best Practices
+    ### ℹ️ Page-Specific Help
     
-    **Structure Organization:**
-    - Use Areas for high-level grouping (Health, Work, etc.)
-    - Categories for specific event types (Sleep, Meetings, etc.)
-    - Attributes for data points you want to track
+    Each page in Events Tracker has its own detailed help section:
     
-    **Bulk Operations:**
-    - Use Bulk Import for initial data load
-    - Use View Data Export/Import for editing existing data
-    - Download structure template before making structural changes
+    - **Interactive Structure Viewer**: Collapsible help at top of page
+    - **Add Event**: Instructions within the form
+    - **Bulk Import**: Step-by-step guide with examples
+    - **View Data Export/Import**: Detailed workflow documentation
     
-    **Data Entry:**
-    - Enable Sticky Mode in Add Event for repeated entries in same category
-    - Use Bulk Import for multiple events at once
-    - Use View Data Export/Import to edit large datasets
+    💡 **Tip:** Look for expandable help sections (ℹ️) on each page for specific guidance.
+    
+    ---
+    
+    ### 🔧 Data Types
+    
+    When defining attributes, you can choose from:
+    
+    - **number** - Numeric values (e.g., duration, amount, quantity)
+    - **text** - Free text (e.g., notes, descriptions)
+    - **datetime** - Date and time values
+    - **boolean** - Yes/No or True/False
+    - **link** - URLs and web links
+    - **image** - Image file paths or URLs
+    
+    ---
+    
+    ### 🎨 Color Coding Convention
+    
+    Throughout the application, you'll see color-coded columns:
+    
+    - 🟪 **PINK columns** = AUTO-CALCULATED (read-only)
+      - System-generated values
+      - Don't edit these manually
+    
+    - 🔵 **BLUE columns** = EDITABLE
+      - Your data and properties
+      - Safe to modify
+    
+    ---
+    
+    ### ⚠️ Important Notes
     
     **Data Safety:**
     - Always review changes before confirming
     - Download backups before major structural changes
     - Check validation messages carefully
+    - Use CONFIRM dialogs for destructive operations
+    
+    **Best Practices:**
+    - Start small - add complexity gradually
+    - Use meaningful names for Areas, Categories, and Attributes
+    - Add descriptions to document your structure
+    - Test with sample data before bulk operations
     
     ---
     
     ### ❓ Need More Help?
     
-    If you encounter issues:
-    1. Check validation messages carefully
-    2. Review error details in expander sections
-    3. Ensure Excel files follow required format
-    4. Verify date formats (YYYY-MM-DD)
+    - **Page-specific help**: Available on each page (look for ℹ️ icons)
+    - **Interactive Structure Viewer**: Most comprehensive help section
+    - **Validation messages**: Read error messages carefully - they guide you to fixes
+    - **Expander sections**: Click to view detailed error information
     
     ---
     
     ### 🎉 Happy Tracking!
+    
+    Remember: Events Tracker is designed to be flexible. Start with basics and expand as you discover what works for your tracking needs.
     """)
     
     # Version info
     st.markdown("---")
-    st.caption("Version: 2025-11-23 16:00 UTC | Python: 3.11 | Streamlit: 1.28.0")
+    st.caption("Version: 2025-12-01 12:00 UTC | Python: 3.11 | Streamlit: 1.28.0")
 
 
 if __name__ == "__main__":
