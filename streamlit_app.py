@@ -2,16 +2,20 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-12-01 12:00 UTC
+Last Modified: 2025-12-01 13:00 UTC
 Python: 3.11
+Version: 1.6.1 - Production Release (Clean)
 
 Description:
 Main Streamlit application with authentication and multiple pages.
-Integrates all modules: structure viewer (deprecated), interactive structure viewer (enhanced),
-event entry, bulk import, view data export/import, download/upload structure (deprecated).
+Core modules: Interactive Structure Viewer (main hub), event entry, 
+bulk import, view data export/import.
 
-Note: View Structure, Download Structure, and Upload Template pages are deprecated
-and will be removed in next version. All functionality moved to Interactive Structure Viewer.
+REMOVED in v1.6.1:
+- View Structure page (deprecated → removed)
+- Download Structure page (deprecated → removed)  
+- Upload Template page (deprecated → removed)
+All functionality consolidated in Interactive Structure Viewer.
 
 Modules:
 - auth: User authentication
@@ -34,17 +38,12 @@ from dotenv import load_dotenv
 # Import local modules
 from src.auth import AuthManager
 from src import supabase_client
-from src import structure_viewer
 from src.interactive_structure_viewer import render_interactive_structure_viewer
 from src import event_entry
 from src import bulk_import
 from src import view_data_export
 from src import view_data_import
-from src.reverse_engineer import ReverseEngineer
-from src.enhanced_structure_exporter import EnhancedStructureExporter
-from src.hierarchical_parser import HierarchicalParser
 from src import excel_parser_new
-from src.error_reporter import generate_error_excel
 
 
 # Page configuration
@@ -98,14 +97,11 @@ def main():
     page = st.sidebar.radio(
         "Navigation",
         [
-            "📊 View Structure",
             "📋 Interactive Structure Viewer",
             "➕ Add Event",
             "📤 Bulk Import",
             "📊 View Data - Export",
             "📥 View Data - Import",
-            "📥 Download Structure",
-            "📤 Upload Template",
             "ℹ️ Help"
         ],
         label_visibility="collapsed"
@@ -141,10 +137,7 @@ def main():
     )
     
     # Route to appropriate page
-    if page == "📊 View Structure":
-        structure_viewer.render_structure_viewer(supabase.client, user_id)
-    
-    elif page == "📋 Interactive Structure Viewer":
+    if page == "📋 Interactive Structure Viewer":
         render_interactive_structure_viewer(supabase.client, user_id)
     
     elif page == "➕ Add Event":
@@ -159,463 +152,8 @@ def main():
     elif page == "📥 View Data - Import":
         view_data_import.render_view_data_import(supabase.client, user_id)
     
-    elif page == "📥 Download Structure":
-        render_download_page(supabase, user_id)
-    
-    elif page == "📤 Upload Template":
-        render_upload_page(supabase, user_id)
-    
     elif page == "ℹ️ Help":
         render_help_page()
-
-
-def render_download_page(supabase, user_id: str):
-    """Download structure to Excel with enhanced features."""
-    st.title("📥 Download Structure")
-    
-    # DEPRECATION WARNING
-    st.warning("""
-    ⚠️ **DEPRECATED - This page will be removed in the next version**
-    
-    This functionality has been moved to **Interactive Structure Viewer**:
-    - Go to **Interactive Structure Viewer**
-    - Stay in **Read-Only Mode**
-    - Click **Generate Enhanced Excel** button
-    
-    Please use **Interactive Structure Viewer** for better integration and workflow.
-    """)
-    
-    st.info("""
-    **Enhanced Excel Export Features:**
-    - 🎨 **Color-coded columns**: PINK (auto-calculated) vs BLUE (editable)
-    - ✅ **Drop-down validation**: Type, Data_Type, Is_Required
-    - 🔢 **Auto-formulas**: Level, Area, Sort_Order calculated automatically
-    - 📊 **Row grouping**: Collapse/expand by Area and Category
-    - 📋 **Column grouping**: Hide/show attribute details
-    - 🔍 **Validation fields**: Min/Max values for number attributes
-    """)
-    
-    st.markdown("---")
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.markdown("### 📋 What you can edit:")
-        st.markdown("""
-        **BLUE columns** (editable):
-        - Category name
-        - Attribute Name, Data Type, Unit
-        - Is Required, Default Value
-        - Validation Min/Max
-        - Description
-        
-        **PINK columns** (auto-calculated):
-        - Type, Level, Area
-        - Category Path
-        - Sort Order
-        """)
-    
-    with col2:
-        st.markdown("### 🎯 Best for:")
-        st.markdown("""
-        - Reviewing structure
-        - Adding descriptions
-        - Setting validation rules
-        - Bulk editing attributes
-        - Documentation
-        """)
-    
-    st.markdown("---")
-    
-    if st.button("📥 Generate Enhanced Excel", type="primary"):
-        with st.spinner("Generating enhanced Excel file..."):
-            try:
-                # Use EnhancedStructureExporter
-                exporter = EnhancedStructureExporter(
-                    client=supabase.client,
-                    user_id=user_id
-                )
-                
-                file_path = exporter.export_hierarchical_view()
-                
-                # Read file for download
-                with open(file_path, 'rb') as f:
-                    excel_data = f.read()
-                
-                st.success("✅ Enhanced Excel file generated successfully!")
-                
-                # Download button
-                st.download_button(
-                    label="⬇️ Download Hierarchical View Excel",
-                    data=excel_data,
-                    file_name=os.path.basename(file_path),
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    help="Enhanced Excel with validation, formulas, and grouping"
-                )
-                
-                # Cleanup temp file
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-                    
-            except Exception as e:
-                st.error(f"❌ Error generating Excel: {str(e)}")
-                st.exception(e)
-
-
-def render_upload_page(supabase, user_id: str):
-    """
-    Render the upload template page with full parsing and update functionality.
-    """
-    st.title("📤 Upload Template")
-    
-    # DEPRECATION WARNING
-    st.warning("""
-    ⚠️ **DEPRECATED - This page will be removed in the next version**
-    
-    This functionality has been moved to **Interactive Structure Viewer**:
-    - Go to **Interactive Structure Viewer**
-    - Switch to **Edit Mode**
-    - Go to **Upload Hierarchical Excel** tab (4th tab)
-    - Upload your edited Excel file there
-    
-    Please use **Interactive Structure Viewer** for better integration and workflow.
-    """)
-    
-    st.markdown("Update your structure by uploading an edited Hierarchical_View Excel")
-    
-    st.info("""
-    **What you can do:**
-    - ✅ **Add new rows** for Areas, Categories, Attributes
-    - ✅ **Edit BLUE columns** in existing rows (editable fields)
-    - ✅ **Create hierarchies** using Category_Path (e.g., "Health > Sleep > Quality")
-    - ✅ **Update properties** like descriptions, data types, validation rules
-    """)
-    
-    st.markdown("---")
-    
-    # File uploader
-    uploaded_file = st.file_uploader(
-        "Upload Hierarchical_View Excel",
-        type=["xlsx"],
-        help="Upload the Excel file you downloaded from 'Download Structure'"
-    )
-    
-    if not uploaded_file:
-        st.markdown("### 📋 How to Use")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("""
-            **Step 1: Download**
-            - Go to "📥 Download Structure"
-            - Generate and download Excel
-            
-            **Step 2: Edit in Excel**
-            - **Add rows** at bottom for new items
-            - **Edit BLUE columns** (editable)
-            - **Don't edit PINK columns** (auto-calculated)
-            
-            **Step 3: Upload**
-            - Come back here
-            - Upload edited file
-            - Review changes
-            - Confirm to apply
-            """)
-        
-        with col2:
-            st.markdown("""
-            **Adding New Items:**
-            
-            **New Area:**
-            - Type: `Area`
-            - Category_Path: `<AreaName>`
-            - Example: `Fitness`
-            
-            **New Category:**
-            - Type: `Category`
-            - Category_Path: `<Area> > <Category>`
-            - Category: `<CategoryName>`
-            - Example: `Fitness > Cardio`
-            
-            **New Subcategory:**
-            - Type: `Category`
-            - Category_Path: `<Area> > <Cat> > <SubCat>`
-            - Category: `<SubCategoryName>`
-            - Example: `Fitness > Cardio > Running`
-            
-            **New Attribute:**
-            - Type: `Attribute`
-            - Category_Path: `<full path to category>`
-            - Attribute_Name: `<AttributeName>`
-            - Data_Type: `number`, `text`, etc.
-            - Example: `Fitness > Cardio > Running` + `Distance`
-            """)
-        
-        st.markdown("---")
-        
-        st.markdown("""
-        ### ✏️ Editable Fields (BLUE columns)
-        
-        - **Category** - Category name
-        - **Attribute_Name** - Attribute name  
-        - **Data_Type** - number, text, datetime, boolean, link, image
-        - **Unit** - Unit of measurement (e.g., 'km', 'hours')
-        - **Is_Required** - TRUE or FALSE
-        - **Default_Value** - Default value for new events
-        - **Validation_Min** - Minimum value (for numbers)
-        - **Validation_Max** - Maximum value (for numbers)
-        - **Description** - Notes and documentation
-        
-        ### 🚫 Read-Only Fields (PINK columns)
-        
-        - **Type** - Auto-detected from row content
-        - **Level** - Auto-calculated from Category_Path
-        - **Sort_Order** - Auto-assigned
-        - **Area** - Extracted from Category_Path
-        - **Category_Path** - Full hierarchical path
-        
-        ⚠️ **Important:** Don't change PINK columns - they're auto-calculated!
-        """)
-        
-        return
-    
-    # Save uploaded file to temporary location
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
-        tmp_file.write(uploaded_file.getvalue())
-        tmp_path = tmp_file.name
-    
-    try:
-        # Parse and validate
-        with st.spinner("📖 Parsing Excel file..."):
-            parser = HierarchicalParser(
-                client=supabase.client,
-                user_id=user_id,
-                excel_path=tmp_path
-            )
-            
-            changes = parser.parse_and_validate()
-        
-        # Show validation errors if any
-        if changes.validation_errors:
-            st.error("❌ Validation Errors Found")
-            
-            with st.expander("🔍 View Validation Errors", expanded=True):
-                for error in changes.validation_errors:
-                    if error.row > 0:
-                        st.error(f"**Row {error.row}, Column '{error.column}':** {error.message}")
-                    else:
-                        st.error(f"**{error.column}:** {error.message}")
-            
-            st.warning("⚠️ Please fix the errors above and re-upload the file.")
-            
-            # Generate error Excel with highlighted cells
-            st.markdown("---")
-            st.markdown("### 📥 Download Error Report")
-            st.info("""
-            **Download an Excel file with errors highlighted:**
-            - 🟡 **Yellow cells** = Cells with validation errors
-            - 💬 **Comments** = Hover over yellow cells to see error details
-            - ✏️ **Fix errors** in Excel and re-upload
-            """)
-            
-            if st.button("📥 Generate Error Report Excel", type="primary"):
-                with st.spinner("Generating error report..."):
-                    try:
-                        # Generate error Excel
-                        error_excel_path = generate_error_excel(tmp_path, changes.validation_errors)
-                        
-                        # Read the file for download
-                        with open(error_excel_path, 'rb') as f:
-                            error_excel_data = f.read()
-                        
-                        st.success("✅ Error report generated successfully!")
-                        
-                        # Download button
-                        st.download_button(
-                            label="⬇️ Download Error Report Excel",
-                            data=error_excel_data,
-                            file_name=os.path.basename(error_excel_path),
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            help="Excel file with highlighted errors and comments"
-                        )
-                        
-                        # Cleanup
-                        if os.path.exists(error_excel_path):
-                            os.remove(error_excel_path)
-                    
-                    except Exception as e:
-                        st.error(f"❌ Error generating error report: {str(e)}")
-                        with st.expander("🔍 View Error Details"):
-                            st.exception(e)
-            
-            return
-        
-        # Show validation warnings if any
-        if changes.validation_warnings:
-            st.warning("⚠️ Validation Warnings")
-            
-            with st.expander("🔍 View Warnings", expanded=False):
-                for warning in changes.validation_warnings:
-                    st.warning(f"**Row {warning.row}, Column '{warning.column}':** {warning.message}")
-        
-        # If no changes detected
-        if not changes.has_changes():
-            st.info("ℹ️ No changes detected in the uploaded file.")
-            st.markdown("The file matches your current structure exactly.")
-            return
-        
-        # Show detected changes
-        st.success("✅ File parsed successfully!")
-        st.markdown("### 📊 Detected Changes")
-        
-        # Summary metrics
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
-        
-        with col1:
-            st.metric("New Areas", len(changes.new_areas))
-        with col2:
-            st.metric("New Categories", len(changes.new_categories))
-        with col3:
-            st.metric("New Attributes", len(changes.new_attributes))
-        with col4:
-            st.metric("Updated Areas", len(changes.updated_areas))
-        with col5:
-            st.metric("Updated Categories", len(changes.updated_categories))
-        with col6:
-            st.metric("Updated Attributes", len(changes.updated_attributes))
-        
-        st.markdown("---")
-        
-        # Detailed changes
-        tabs = st.tabs([
-            f"➕ New ({len(changes.new_areas) + len(changes.new_categories) + len(changes.new_attributes)})",
-            f"✏️ Updated ({len(changes.updated_areas) + len(changes.updated_categories) + len(changes.updated_attributes)})"
-        ])
-        
-        # Tab 1: New items
-        with tabs[0]:
-            if changes.new_areas:
-                st.markdown("#### 🆕 New Areas")
-                for area in changes.new_areas:
-                    with st.expander(f"📁 {area['name']} (Row {area['excel_row']})"):
-                        st.json({
-                            'name': area['name'],
-                            'icon': area['icon'],
-                            'color': area['color'],
-                            'sort_order': area['sort_order'],
-                            'description': area['description']
-                        })
-            
-            if changes.new_categories:
-                st.markdown("#### 🆕 New Categories")
-                for cat in changes.new_categories:
-                    with st.expander(f"📂 {cat['path']} (Row {cat['excel_row']})"):
-                        st.json({
-                            'name': cat['name'],
-                            'path': cat['path'],
-                            'level': cat['level'],
-                            'sort_order': cat['sort_order'],
-                            'description': cat['description']
-                        })
-            
-            if changes.new_attributes:
-                st.markdown("#### 🆕 New Attributes")
-                for attr in changes.new_attributes:
-                    with st.expander(f"🏷️ {attr['category_path']} → {attr['name']} (Row {attr['excel_row']})"):
-                        st.json({
-                            'name': attr['name'],
-                            'category_path': attr['category_path'],
-                            'data_type': attr['data_type'],
-                            'unit': attr['unit'],
-                            'is_required': attr['is_required'],
-                            'default_value': attr['default_value'],
-                            'validation_rules': attr['validation_rules'],
-                            'description': attr['description']
-                        })
-            
-            if not changes.new_areas and not changes.new_categories and not changes.new_attributes:
-                st.info("No new items to add")
-        
-        # Tab 2: Updated items
-        with tabs[1]:
-            if changes.updated_areas:
-                st.markdown("#### ✏️ Updated Areas")
-                for area in changes.updated_areas:
-                    with st.expander(f"📁 {area['name']} (Row {area['excel_row']})"):
-                        st.markdown("**Changes:**")
-                        for key, value in area['updates'].items():
-                            st.markdown(f"- **{key}:** `{value}`")
-            
-            if changes.updated_categories:
-                st.markdown("#### ✏️ Updated Categories")
-                for cat in changes.updated_categories:
-                    with st.expander(f"📂 {cat['path']} (Row {cat['excel_row']})"):
-                        st.markdown("**Changes:**")
-                        for key, value in cat['updates'].items():
-                            st.markdown(f"- **{key}:** `{value}`")
-            
-            if changes.updated_attributes:
-                st.markdown("#### ✏️ Updated Attributes")
-                for attr in changes.updated_attributes:
-                    with st.expander(f"🏷️ {attr['category_path']} → {attr['name']} (Row {attr['excel_row']})"):
-                        st.markdown("**Changes:**")
-                        for key, value in attr['updates'].items():
-                            st.markdown(f"- **{key}:** `{value}`")
-            
-            if not changes.updated_areas and not changes.updated_categories and not changes.updated_attributes:
-                st.info("No updates to existing items")
-        
-        st.markdown("---")
-        
-        # Confirmation
-        st.markdown("### ✅ Confirm Changes")
-        st.warning("⚠️ **Important:** Once you confirm, these changes will be applied to your database immediately.")
-        
-        col1, col2 = st.columns([3, 1])
-        
-        with col1:
-            confirm_text = st.text_input(
-                "Type 'CONFIRM' to apply changes:",
-                placeholder="CONFIRM",
-                help="Type CONFIRM in all caps to enable the Apply button"
-            )
-        
-        with col2:
-            st.markdown("<br>", unsafe_allow_html=True)  # Spacing
-            apply_button = st.button(
-                "🚀 Apply Changes",
-                type="primary",
-                disabled=(confirm_text != "CONFIRM"),
-                use_container_width=True
-            )
-        
-        if apply_button and confirm_text == "CONFIRM":
-            with st.spinner("💾 Applying changes to database..."):
-                success, message = parser.apply_changes()
-                
-                if success:
-                    st.success(f"✅ {message}")
-                    st.balloons()
-                    
-                    st.info("🔄 Changes applied successfully! Refresh the page to see updates.")
-                    
-                    # Add a button to view structure
-                    if st.button("📊 View Updated Structure"):
-                        st.switch_page("pages/1_📊_View_Structure.py")
-                else:
-                    st.error(f"❌ {message}")
-                    st.warning("Please check the errors and try again.")
-    
-    except Exception as e:
-        st.error(f"❌ Error processing file: {str(e)}")
-        with st.expander("🔍 View Error Details"):
-            st.exception(e)
-    
-    finally:
-        # Cleanup temporary file
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
 
 
 def render_help_page():

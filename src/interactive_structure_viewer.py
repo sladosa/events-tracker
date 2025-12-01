@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-01 12:00 UTC
+Last Modified: 2025-12-01 13:00 UTC
 Python: 3.11
-Version: 1.6.0 - Excel Export/Import Integration
+Version: 1.6.1 - Production Release (Clean)
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -45,6 +45,11 @@ Technical Details:
 - Slug auto-generation from names
 - CASCADE delete warnings
 - Dynamic form generation based on Data Type
+
+CHANGELOG v1.6.1 (Production Release):
+- 🗑️ REMOVED: Refresh button from Edit Mode (user feedback - not needed)
+- 🎯 CLEAN: Edit Mode col3 now empty (intentional - refresh via browser or navigation)
+- 📝 NOTE: Read-Only mode keeps Generate Excel button (primary action)
 
 CHANGELOG v1.6.0:
 - ✨ NEW: Collapsible Help section at page top with comprehensive guide
@@ -1385,25 +1390,9 @@ def render_interactive_structure_viewer(client, user_id: str):
                         with st.expander("🔍 View Error Details"):
                             st.exception(e)
         else:
-            # Refresh button in Edit mode - check for unsaved changes first
-            if st.button("🔄 Refresh", use_container_width=True):
-                # Check if there are unsaved changes
-                if st.session_state.viewer_mode == 'edit' and st.session_state.original_df is not None:
-                    if st.session_state.edited_df is not None:
-                        # Compare to see if there are changes
-                        display_cols = [col for col in st.session_state.original_df.columns if not col.startswith('_')]
-                        orig_display = st.session_state.original_df[display_cols]
-                        has_changes = not orig_display.equals(st.session_state.edited_df)
-                        
-                        if has_changes:
-                            st.error("⚠️ You have unsaved changes! Please save or discard changes before refreshing.")
-                            st.stop()
-                
-                # Safe to refresh
-                st.cache_data.clear()
-                st.session_state.original_df = None
-                st.session_state.edited_df = None
-                st.rerun()
+            # Edit mode - no button needed
+            # User can use browser refresh or navigate away and back
+            st.empty()
     
     # Search - warn about unsaved changes
     search_term = st.text_input("🔎 Search in Category Path", "", key="search_filter")
