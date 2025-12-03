@@ -1,5 +1,5 @@
 """
-Events Tracker - Structure Graph Viewer Module
+Events Tracker - Structure Graph Viewer Module - ssl
 ===============================================
 Created: 2025-12-03 13:30 UTC
 Last Modified: 2025-12-03 13:30 UTC
