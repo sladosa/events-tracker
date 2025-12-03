@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-03 11:15 UTC
+Last Modified: 2025-12-03 13:00 UTC
 Python: 3.11
-Version: 1.7.0 - Filtered Excel Export
+Version: 1.7.1 - Hotfix: Search Term Scope
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -45,6 +45,13 @@ Technical Details:
 - Slug auto-generation from names
 - CASCADE delete warnings
 - Dynamic form generation based on Data Type
+
+CHANGELOG v1.7.1 (Hotfix - Search Term Scope):
+- 🐛 FIXED: UnboundLocalError for search_term in Generate Excel
+- 🔧 MOVED: search_term definition before col3 (Generate Excel button)
+- ✅ TESTED: Filtered Excel export now works correctly
+- 📝 ISSUE: search_term was referenced before assignment (line 1373 before 1417)
+- 🎯 FIX: Moved search input widget before button to ensure scope availability
 
 CHANGELOG v1.7.0 (Filtered Excel Export):
 - ✨ NEW: Generate Excel respects active filters (Area + Search)
@@ -1358,6 +1365,19 @@ def render_interactive_structure_viewer(client, user_id: str):
         if selected_area != "All Areas":
             check_unsaved_changes_warning()
     
+    # Search input - define BEFORE col3 so it's available for Generate Excel button
+    search_term = st.text_input("🔎 Search in Category Path", "", key="search_filter")
+    
+    # Check for unsaved changes when search is used
+    if search_term and st.session_state.viewer_mode == 'edit':
+        if st.session_state.original_df is not None and st.session_state.edited_df is not None:
+            display_cols = [col for col in st.session_state.original_df.columns if not col.startswith('_')]
+            orig_display = st.session_state.original_df[display_cols]
+            has_changes = not orig_display.equals(st.session_state.edited_df)
+            
+            if has_changes:
+                st.warning("⚠️ Filtering with unsaved changes. Save or discard changes first to avoid confusion.")
+    
     with col3:
         # Conditional button based on mode
         if st.session_state.viewer_mode == 'read_only':
@@ -1412,19 +1432,6 @@ def render_interactive_structure_viewer(client, user_id: str):
             # Edit mode - no button needed
             # User can use browser refresh or navigate away and back
             st.empty()
-    
-    # Search - warn about unsaved changes
-    search_term = st.text_input("🔎 Search in Category Path", "", key="search_filter")
-    
-    # Check for unsaved changes when search is used
-    if search_term and st.session_state.viewer_mode == 'edit':
-        if st.session_state.original_df is not None and st.session_state.edited_df is not None:
-            display_cols = [col for col in st.session_state.original_df.columns if not col.startswith('_')]
-            orig_display = st.session_state.original_df[display_cols]
-            has_changes = not orig_display.equals(st.session_state.edited_df)
-            
-            if has_changes:
-                st.warning("⚠️ Filtering with unsaved changes. Save or discard changes first to avoid confusion.")
     
     st.markdown("---")
     

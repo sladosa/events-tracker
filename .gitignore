@@ -34,6 +34,7 @@ Perplexity-temp/
 templates/*.xlsx
 templates/*.xls
 templates/*.xlsm
+templates/*.txt
 
 # Temporary Excel files
 ~$*.xlsx
