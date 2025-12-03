@@ -28,6 +28,11 @@ ENV/
 env.bak/
 venv.bak/
 
+# Streamlit Cloud fix
+templates/*.xlsx
+templates/*.xls
+*.log
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
