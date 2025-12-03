@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-01 13:00 UTC
+Last Modified: 2025-12-03 11:15 UTC
 Python: 3.11
-Version: 1.6.1 - Production Release (Clean)
+Version: 1.7.0 - Filtered Excel Export
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -13,7 +13,7 @@ Integrated Excel export/import workflow for offline structure editing.
 
 Features:
 - **INTEGRATED HELP**: Collapsible help section at page top with comprehensive guide
-- **EXCEL EXPORT**: Generate Enhanced Excel in Read-Only mode (replaces Refresh button)
+- **EXCEL EXPORT**: Generate Enhanced Excel in Read-Only mode (respects active filters)
 - **EXCEL IMPORT**: Upload Hierarchical Excel in Edit Mode (new 4th tab)
 - **THREE SEPARATE EDITORS**: Areas, Categories, and Attributes in tabs
 - **FILTERS**: Area filter in Tab 2, Area + Category cascade filter in Tab 3
@@ -21,7 +21,7 @@ Features:
 - **DELETE**: Delete Areas, Categories, and Attributes with cascade warnings
 - **SMART FORMS**: Two-step form - select Data Type first, then relevant fields appear
 - Each editor shows only relevant columns for that entity type
-- Read-Only mode: Shows ALL rows + Excel Export button
+- Read-Only mode: Shows ALL rows + Excel Export button (respects filters)
 - Edit Mode: 4 tabs - Areas, Categories, Attributes, Upload Excel
 - Dropdown validations for Data_Type and Is_Required
 - Search and filtering (Area, Category_Path)
@@ -45,6 +45,13 @@ Technical Details:
 - Slug auto-generation from names
 - CASCADE delete warnings
 - Dynamic form generation based on Data Type
+
+CHANGELOG v1.7.0 (Filtered Excel Export):
+- ✨ NEW: Generate Excel respects active filters (Area + Search)
+- 🎯 FEATURE: Export filtered structure for sharing specific Area themes
+- 📦 USE CASE: Create starter templates for new users by exporting single Areas
+- 🔧 IMPROVED: Success message shows which filters were applied
+- 📝 TECHNICAL: EnhancedStructureExporter now accepts filter_area and filter_search params
 
 CHANGELOG v1.6.1 (Production Release):
 - 🗑️ REMOVED: Refresh button from Edit Mode (user feedback - not needed)
@@ -1358,10 +1365,12 @@ def render_interactive_structure_viewer(client, user_id: str):
             if st.button("📥 Generate Excel", use_container_width=True, type="primary"):
                 with st.spinner("Generating enhanced Excel file..."):
                     try:
-                        # Use EnhancedStructureExporter
+                        # Use EnhancedStructureExporter with current filters
                         exporter = EnhancedStructureExporter(
                             client=client,
-                            user_id=user_id
+                            user_id=user_id,
+                            filter_area=selected_area,
+                            filter_search=search_term
                         )
                         
                         file_path = exporter.export_hierarchical_view()
@@ -1370,7 +1379,17 @@ def render_interactive_structure_viewer(client, user_id: str):
                         with open(file_path, 'rb') as f:
                             excel_data = f.read()
                         
-                        st.success("✅ Enhanced Excel generated!")
+                        # Show filter info if filters are applied
+                        filter_info = []
+                        if selected_area != "All Areas":
+                            filter_info.append(f"Area: {selected_area}")
+                        if search_term:
+                            filter_info.append(f"Search: '{search_term}'")
+                        
+                        if filter_info:
+                            st.success(f"✅ Enhanced Excel generated with filters: {', '.join(filter_info)}")
+                        else:
+                            st.success("✅ Enhanced Excel generated (all data)")
                         
                         # Download button
                         st.download_button(

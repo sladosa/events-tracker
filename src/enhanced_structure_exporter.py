@@ -9,11 +9,12 @@ Features:
 - Column grouping (hide attribute details)
 - Description and Validation columns added
 - Smart Category_Path handling
+- **NEW:** Filter support - export only filtered data (by Area and/or search term)
 
 **UPDATED:** Headers in row 2, Sort_Order moved to column C, new grouping, auto filter
 
 Dependencies: openpyxl, pandas, supabase
-Last Modified: 2025-11-24 12:00 UTC
+Last Modified: 2025-12-03 11:15 UTC
 """
 
 import pandas as pd
@@ -31,16 +32,21 @@ class EnhancedStructureExporter:
     Enhanced Excel export with advanced features for structure editing.
     """
     
-    def __init__(self, client, user_id: str):
+    def __init__(self, client, user_id: str, filter_area: Optional[str] = None, 
+                 filter_search: Optional[str] = None):
         """
         Initialize exporter.
         
         Args:
             client: Supabase client instance
             user_id: Current user's UUID
+            filter_area: Optional area filter (e.g., "Health" or "All Areas")
+            filter_search: Optional search term for Category_Path filtering
         """
         self.client = client
         self.user_id = user_id
+        self.filter_area = filter_area if filter_area != "All Areas" else None
+        self.filter_search = filter_search
         
         # Define colors
         self.PINK_FILL = PatternFill(start_color="FFE6F0", end_color="FFE6F0", fill_type="solid")
@@ -118,6 +124,7 @@ class EnhancedStructureExporter:
     def _load_hierarchical_data(self) -> pd.DataFrame:
         """
         Load Areas, Categories, and Attributes from database in hierarchical format.
+        Applies filters if specified.
         
         Returns:
             DataFrame with columns: Type, Level, Sort_Order, Area, Category_Path, 
@@ -127,13 +134,16 @@ class EnhancedStructureExporter:
         """
         rows = []
         
-        # Load Areas
-        areas_response = self.client.table('areas') \
+        # Load Areas (with optional filter)
+        areas_query = self.client.table('areas') \
             .select('*') \
-            .eq('user_id', self.user_id) \
-            .order('sort_order') \
-            .execute()
+            .eq('user_id', self.user_id)
         
+        # Apply Area filter if specified
+        if self.filter_area:
+            areas_query = areas_query.eq('name', self.filter_area)
+        
+        areas_response = areas_query.order('sort_order').execute()
         areas = areas_response.data
         
         for area in areas:
@@ -158,7 +168,14 @@ class EnhancedStructureExporter:
             # Load Categories for this Area
             self._load_categories_recursive(area['id'], area['name'], rows)
         
-        return pd.DataFrame(rows)
+        # Create DataFrame
+        df = pd.DataFrame(rows)
+        
+        # Apply search filter if specified
+        if self.filter_search and not df.empty:
+            df = df[df['Category_Path'].str.contains(self.filter_search, case=False, na=False)]
+        
+        return df
     
     
     def _load_categories_recursive(self, area_id: str, area_name: str, 
