@@ -2,16 +2,18 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-03 13:00 UTC
+Last Modified: 2025-12-03 14:00 UTC
 Python: 3.11
-Version: 1.7.1 - Hotfix: Search Term Scope
+Version: 1.8.0 - Graph View Integration
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
 Uses st.data_editor with live database connection, validation, and batch save.
 Integrated Excel export/import workflow for offline structure editing.
+**NEW: Graph View for visual hierarchy exploration.**
 
 Features:
+- **GRAPH VIEW**: Visual hierarchy (Obsidian-style) in Read-Only mode
 - **INTEGRATED HELP**: Collapsible help section at page top with comprehensive guide
 - **EXCEL EXPORT**: Generate Enhanced Excel in Read-Only mode (respects active filters)
 - **EXCEL IMPORT**: Upload Hierarchical Excel in Edit Mode (new 4th tab)
@@ -21,7 +23,7 @@ Features:
 - **DELETE**: Delete Areas, Categories, and Attributes with cascade warnings
 - **SMART FORMS**: Two-step form - select Data Type first, then relevant fields appear
 - Each editor shows only relevant columns for that entity type
-- Read-Only mode: Shows ALL rows + Excel Export button (respects filters)
+- Read-Only mode: Table View OR Graph View selector
 - Edit Mode: 4 tabs - Areas, Categories, Attributes, Upload Excel
 - Dropdown validations for Data_Type and Is_Required
 - Search and filtering (Area, Category_Path)
@@ -31,7 +33,7 @@ Features:
 - OPTIMIZED: Batch data loading with caching (60s TTL)
 - IMPROVED: Unsaved changes warnings on filter/refresh
 
-Dependencies: streamlit, pandas, supabase, enhanced_structure_exporter, hierarchical_parser, error_reporter
+Dependencies: streamlit, pandas, supabase, enhanced_structure_exporter, hierarchical_parser, error_reporter, structure_graph_viewer
 
 Technical Details:
 - Layout matches Download Structure - Hierarchical_View format
@@ -45,6 +47,21 @@ Technical Details:
 - Slug auto-generation from names
 - CASCADE delete warnings
 - Dynamic form generation based on Data Type
+- **Graph View**: Plotly-based interactive treemap and sunburst visualizations
+
+CHANGELOG v1.8.0 (Graph View Integration):
+- ✨ NEW: Graph View option in Read-Only mode
+- 🎨 NEW: Display Mode selector (Table View / Graph View)
+- 📊 NEW: Plotly Treemap visualization of hierarchy
+- 📊 NEW: Plotly Sunburst circular visualization
+- 🔍 NEW: Interactive graph with click-to-drill-down
+- 🎯 NEW: Hover tooltips with entity details
+- 📈 NEW: Statistics panel in Graph View
+- 🎨 NEW: Color-coded nodes by type (Area, Category, Attribute, Events)
+- 🔄 NEW: Filter by Area works in Graph View
+- 💡 NEW: Toggle event counts on/off
+- ⚡ IMPROVED: Seamless switch between Table and Graph views
+- 📝 IMPORT: Added structure_graph_viewer module dependency
 
 CHANGELOG v1.7.1 (Hotfix - Search Term Scope):
 - 🐛 FIXED: UnboundLocalError for search_term in Generate Excel
@@ -157,6 +174,9 @@ import tempfile
 from .enhanced_structure_exporter import EnhancedStructureExporter
 from .hierarchical_parser import HierarchicalParser
 from .error_reporter import generate_error_excel
+
+# Import Graph Viewer module
+from .structure_graph_viewer import render_graph_viewer
 
 
 # ============================================
@@ -1342,6 +1362,38 @@ def render_interactive_structure_viewer(client, user_id: str):
         
         # Update session state
         st.session_state.viewer_mode = 'read_only' if new_mode == 'Read-Only' else 'edit'
+    
+    # ============================================
+    # READ-ONLY MODE: VIEW MODE SELECTOR (Table vs Graph)
+    # ============================================
+    
+    if st.session_state.viewer_mode == 'read_only':
+        st.markdown("---")
+        
+        # View mode selector for Read-Only mode
+        col_view1, col_view2 = st.columns([3, 1])
+        
+        with col_view1:
+            view_display_mode = st.radio(
+                "📊 Display Mode",
+                ["📋 Table View", "🎨 Graph View"],
+                horizontal=True,
+                key="structure_display_mode",
+                help="Table View: Spreadsheet-style data | Graph View: Visual hierarchy"
+            )
+        
+        with col_view2:
+            if view_display_mode == "🎨 Graph View":
+                st.info("💡 Interactive graph")
+        
+        st.markdown("---")
+        
+        # If Graph View selected, render graph and exit early
+        if view_display_mode == "🎨 Graph View":
+            render_graph_viewer(client, user_id)
+            return  # Exit function, don't render table
+    
+    # Continue with Table View (or Edit Mode which is always table)
     
     with col2:
         # Filters - warn if unsaved changes
