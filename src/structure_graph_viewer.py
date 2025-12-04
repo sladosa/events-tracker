@@ -2,32 +2,39 @@
 Events Tracker - Structure Graph Viewer Module
 ===============================================
 Created: 2025-12-03 13:30 UTC
-Last Modified: 2025-12-04 10:10 UTC
+Last Modified: 2025-12-04 10:30 UTC
 Python: 3.11
-Version: 1.0.3 - Fixed parent-child hierarchy mapping
+Version: 1.1.0 - Added Network Graph visualization
 
 Description:
 Interactive hierarchical graph visualization of Areas → Categories → Attributes → Events
-Similar to Obsidian graph view with expandable/collapsible nodes.
+Multiple visualization modes: Treemap, Sunburst, and Network Graph.
 
 Features:
 - Interactive tree/network diagram
+- THREE visualization modes:
+  * Treemap: Rectangular hierarchical view
+  * Sunburst: Circular hierarchical view
+  * Network Graph: Obsidian-style force-directed graph (NEW!)
 - Click to expand/collapse branches
 - Zoom, pan, and hover tooltips
 - Color-coded by entity type
 - Shows relationships with connectors (lines)
 - Filters: Area, Category, show/hide Events
+- Drag nodes to rearrange (Network Graph)
 
-Dependencies: plotly, streamlit, pandas
+Dependencies: plotly, streamlit, pandas, streamlit-agraph
 
 Technical Implementation:
-- Uses Plotly Graph Objects for rendering
-- Treemap or Network Graph layout options
+- Uses Plotly Graph Objects for Treemap/Sunburst
+- Uses streamlit-agraph for Network Graph
+- Force-directed layout with physics simulation
 - Dynamic data loading from Supabase
 - Session state for expand/collapse tracking
 
-Fix Log:
-- v1.0.3: Fixed parent-child mapping (ID → label conversion for Plotly)
+Version History:
+- v1.1.0: Added Network Graph with streamlit-agraph
+- v1.0.3: Fixed parent-child hierarchy mapping
 - v1.0.2: Fixed Supabase .order() method call
 - v1.0.1: Syntax fix + plotly dependency
 """
@@ -38,6 +45,7 @@ import plotly.express as px
 import pandas as pd
 from typing import Dict, List, Tuple, Optional
 import json
+from streamlit_agraph import agraph, Node, Edge, Config
 
 
 # ============================================
@@ -310,7 +318,7 @@ def build_plotly_sunburst(graph_data: Dict) -> go.Figure:
         ),
         text=texts,
         hovertemplate='%{text}<br>%{label}<extra></extra>',
-        branchvalues='total',
+        branchvalues='remainder',  # Changed from 'total' to 'remainder'
         textfont=dict(size=14, color='white')
     ))
     
@@ -325,6 +333,108 @@ def build_plotly_sunburst(graph_data: Dict) -> go.Figure:
     )
     
     return fig
+
+
+def build_network_graph(graph_data: Dict) -> Tuple[List, List, Dict]:
+    """
+    Build interactive network graph (Obsidian-style) using streamlit-agraph.
+    
+    Args:
+        graph_data: Dictionary with nodes and edges
+        
+    Returns:
+        Tuple of (nodes_list, edges_list, config)
+    """
+    nodes_list = []
+    edges_list = []
+    
+    # Color mapping by type
+    color_map = {
+        'root': '#E0E0E0',
+        'area': '#4472C4',      # Blue
+        'category': '#70AD47',   # Green
+        'attribute': '#FFC000',  # Yellow/Gold
+        'events': '#ED7D31'      # Orange
+    }
+    
+    # Size mapping by type
+    size_map = {
+        'root': 20,
+        'area': 30,
+        'category': 25,
+        'attribute': 20,
+        'events': 15
+    }
+    
+    # Build nodes
+    for node in graph_data['nodes']:
+        if node['id'] == 'root':
+            continue  # Skip root for cleaner visualization
+        
+        # Create node with proper formatting
+        node_color = node.get('color', color_map.get(node['type'], '#999999'))
+        node_size = size_map.get(node['type'], 20)
+        
+        # Build label with icon
+        icon = node.get('icon', '')
+        label = f"{icon} {node['label']}" if icon else node['label']
+        
+        # Build title (tooltip)
+        title = f"<b>{node['label']}</b><br>Type: {node['type'].title()}"
+        if node['type'] == 'events':
+            title += f"<br>Count: {node.get('count', 0)}"
+        if node.get('description'):
+            title += f"<br>{node['description']}"
+        
+        nodes_list.append(Node(
+            id=node['id'],
+            label=label,
+            size=node_size,
+            color=node_color,
+            title=title,
+            shape='dot'
+        ))
+    
+    # Build edges
+    for edge in graph_data['edges']:
+        # Skip edges from root
+        if edge['from'] == 'root':
+            edge_from = edge['to']
+            # Find parent from nodes
+            for node in graph_data['nodes']:
+                if node['id'] == edge_from:
+                    parent_id = node.get('parent', '')
+                    if parent_id and parent_id != 'root':
+                        edges_list.append(Edge(
+                            source=parent_id,
+                            target=edge_from,
+                            color='#CCCCCC'
+                        ))
+        else:
+            edges_list.append(Edge(
+                source=edge['from'],
+                target=edge['to'],
+                color='#CCCCCC'
+            ))
+    
+    # Configuration for interactive graph
+    config = Config(
+        width='100%',
+        height=800,
+        directed=True,
+        physics=True,
+        hierarchical=False,
+        nodeHighlightBehavior=True,
+        highlightColor="#F7A7A6",
+        collapsible=False,
+        node={
+            'labelProperty': 'label',
+            'renderLabel': True
+        },
+        link={'renderLabel': False}
+    )
+    
+    return nodes_list, edges_list, config
 
 
 # ============================================
@@ -359,7 +469,7 @@ def render_graph_viewer(client, user_id: str):
         # View type
         view_type = st.selectbox(
             "View Type",
-            ["Treemap", "Sunburst", "Network Graph (Coming Soon)"],
+            ["Treemap", "Sunburst", "Network Graph"],
             key="graph_view_type"
         )
     
@@ -387,8 +497,14 @@ def render_graph_viewer(client, user_id: str):
         fig = build_plotly_sunburst(graph_data)
         st.plotly_chart(fig, use_container_width=True)
     
-    else:
-        st.info("🚧 Network Graph view coming soon! This will show an Obsidian-style force-directed graph.")
+    elif view_type == "Network Graph":
+        # Build and render interactive network graph (Obsidian-style)
+        nodes_list, edges_list, config = build_network_graph(graph_data)
+        
+        st.markdown("**🕸️ Interactive Network Graph** - Drag nodes to rearrange, hover for details")
+        
+        # Render the graph
+        return_value = agraph(nodes=nodes_list, edges=edges_list, config=config)
     
     # Statistics
     st.markdown("---")
