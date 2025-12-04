@@ -1,4 +1,8 @@
+### Code Guidelines:
 
+- ✅ Uvijek provjeriti dependencies **prije** nego koristiš library
+- ✅ Uvijek updateirati Last Modified timestamp
+- ✅ Uvijek testirati sintaksu prije deploya
 ## Code Development Guidelines
 
 ### Code Style

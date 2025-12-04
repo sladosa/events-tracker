@@ -1,10 +1,10 @@
 """
-Events Tracker - Structure Graph Viewer Module
+Events Tracker - Structure Graph Viewer Module - ssl
 ===============================================
 Created: 2025-12-03 13:30 UTC
-Last Modified: 2025-12-04 09:35 UTC
+Last Modified: 2025-12-04 09:55 UTC
 Python: 3.11
-Version: 1.0.1 - Syntax fix + plotly dependency
+Version: 1.0.2 - Fixed Supabase .order() method call
 
 Description:
 Interactive hierarchical graph visualization of Areas → Categories → Attributes → Events
@@ -58,7 +58,7 @@ def load_graph_data(client, user_id: str, filter_area: Optional[str] = None) -> 
     areas = areas_query.order('sort_order').execute().data
     
     # Load Categories
-    categories = client.table('categories').select('*').eq('user_id', user_id).order('level', 'sort_order').execute().data
+    categories = client.table('categories').select('*').eq('user_id', user_id).order('sort_order').execute().data
     
     # Load Attributes
     attributes = client.table('attribute_definitions').select('*').eq('user_id', user_id).order('sort_order').execute().data
