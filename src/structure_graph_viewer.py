@@ -1,10 +1,10 @@
 """
-Events Tracker - Structure Graph Viewer Module - ssl
+Events Tracker - Structure Graph Viewer Module
 ===============================================
 Created: 2025-12-03 13:30 UTC
-Last Modified: 2025-12-03 13:30 UTC
+Last Modified: 2025-12-04 09:35 UTC
 Python: 3.11
-Version: 1.0.0 - Initial Implementation
+Version: 1.0.1 - Syntax fix + plotly dependency
 
 Description:
 Interactive hierarchical graph visualization of Areas → Categories → Attributes → Events

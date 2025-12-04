@@ -5,4 +5,5 @@ openpyxl==3.1.0
 python-dotenv==1.0.0
 pydantic==1.10.13
 numpy==1.24.0
+plotly==5.18.0
 streamlit-agraph==0.0.45
