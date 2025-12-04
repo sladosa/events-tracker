@@ -1,10 +1,10 @@
 """
-Events Tracker - Structure Graph Viewer Module - ssl
+Events Tracker - Structure Graph Viewer Module
 ===============================================
 Created: 2025-12-03 13:30 UTC
-Last Modified: 2025-12-04 09:55 UTC
+Last Modified: 2025-12-04 10:10 UTC
 Python: 3.11
-Version: 1.0.2 - Fixed Supabase .order() method call
+Version: 1.0.3 - Fixed parent-child hierarchy mapping
 
 Description:
 Interactive hierarchical graph visualization of Areas → Categories → Attributes → Events
@@ -25,6 +25,11 @@ Technical Implementation:
 - Treemap or Network Graph layout options
 - Dynamic data loading from Supabase
 - Session state for expand/collapse tracking
+
+Fix Log:
+- v1.0.3: Fixed parent-child mapping (ID → label conversion for Plotly)
+- v1.0.2: Fixed Supabase .order() method call
+- v1.0.1: Syntax fix + plotly dependency
 """
 
 import streamlit as st
@@ -80,20 +85,19 @@ def load_graph_data(client, user_id: str, filter_area: Optional[str] = None) -> 
         'size': 0
     })
     
-    # Area nodes
+    # Area nodes (top-level in hierarchy)
     for area in areas:
         nodes.append({
             'id': f"area_{area['id']}",
             'label': area['name'],
             'type': 'area',
-            'parent': 'root',
+            'parent': '',  # Empty string = top-level for Plotly
             'color': area.get('color', '#4472C4'),
             'icon': area.get('icon', '📁'),
             'description': area.get('description', ''),
             'size': 30
         })
-        edges.append({'from': 'root', 'to': f"area_{area['id']}"})
-    
+        edges.append({'from': 'root', 'to': f"area_{area['id']}"})  # Keep for potential future use    
     # Category nodes
     for category in categories:
         parent_id = f"area_{category['area_id']}" if category.get('parent_category_id') is None else f"cat_{category['parent_category_id']}"
@@ -166,6 +170,9 @@ def build_plotly_tree(graph_data: Dict) -> go.Figure:
     nodes = graph_data['nodes']
     edges = graph_data['edges']
     
+    # Build ID to label mapping
+    id_to_label = {node['id']: node['label'] for node in nodes}
+    
     # Build hierarchy for treemap
     labels = []
     parents = []
@@ -178,7 +185,13 @@ def build_plotly_tree(graph_data: Dict) -> go.Figure:
             continue  # Skip root
             
         labels.append(node['label'])
-        parents.append(node.get('parent', ''))
+        
+        # Convert parent ID to parent label (Plotly expects labels, not IDs)
+        parent_id = node.get('parent', '')
+        if parent_id and parent_id in id_to_label:
+            parents.append(id_to_label[parent_id])
+        else:
+            parents.append('')  # Top-level node
         
         # Size based on type
         if node['type'] == 'area':
@@ -248,6 +261,9 @@ def build_plotly_sunburst(graph_data: Dict) -> go.Figure:
     """
     nodes = graph_data['nodes']
     
+    # Build ID to label mapping
+    id_to_label = {node['id']: node['label'] for node in nodes}
+    
     labels = []
     parents = []
     values = []
@@ -259,7 +275,13 @@ def build_plotly_sunburst(graph_data: Dict) -> go.Figure:
             continue
             
         labels.append(node['label'])
-        parents.append(node.get('parent', ''))
+        
+        # Convert parent ID to parent label (Plotly expects labels, not IDs)
+        parent_id = node.get('parent', '')
+        if parent_id and parent_id in id_to_label:
+            parents.append(id_to_label[parent_id])
+        else:
+            parents.append('')  # Top-level node
         
         if node['type'] == 'area':
             values.append(100)
