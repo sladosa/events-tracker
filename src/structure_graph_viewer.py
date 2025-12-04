@@ -2,26 +2,27 @@
 Events Tracker - Structure Graph Viewer Module
 ===============================================
 Created: 2025-12-03 13:30 UTC
-Last Modified: 2025-12-04 10:30 UTC
+Last Modified: 2025-12-04 11:00 UTC
 Python: 3.11
-Version: 1.1.0 - Added Network Graph visualization
+Version: 1.2.0 - Added drill-down and proper Area filtering
 
 Description:
 Interactive hierarchical graph visualization of Areas → Categories → Attributes → Events
-Multiple visualization modes: Treemap, Sunburst, and Network Graph.
+Multiple visualization modes with drill-down capability for focused exploration.
 
 Features:
-- Interactive tree/network diagram
 - THREE visualization modes:
-  * Treemap: Rectangular hierarchical view
-  * Sunburst: Circular hierarchical view
-  * Network Graph: Obsidian-style force-directed graph (NEW!)
-- Click to expand/collapse branches
+  * Treemap: Rectangular hierarchical view with click-to-zoom
+  * Sunburst: Circular hierarchical view with click-to-focus
+  * Network Graph: Obsidian-style force-directed graph with drill-down
+- **NEW: Category Drill-Down** - Focus on specific category branch
+- Proper Area filtering (now works for Network Graph!)
+- Drag nodes to rearrange (Network Graph)
 - Zoom, pan, and hover tooltips
 - Color-coded by entity type
 - Shows relationships with connectors (lines)
-- Filters: Area, Category, show/hide Events
-- Drag nodes to rearrange (Network Graph)
+- Filters: Area, Category (drill-down), show/hide Events
+- Breadcrumb navigation when focused
 
 Dependencies: plotly, streamlit, pandas, streamlit-agraph
 
@@ -29,10 +30,11 @@ Technical Implementation:
 - Uses Plotly Graph Objects for Treemap/Sunburst
 - Uses streamlit-agraph for Network Graph
 - Force-directed layout with physics simulation
+- Hierarchical filtering with BFS traversal
 - Dynamic data loading from Supabase
-- Session state for expand/collapse tracking
 
 Version History:
+- v1.2.0: Added Category drill-down, fixed Area filtering for Network Graph
 - v1.1.0: Added Network Graph with streamlit-agraph
 - v1.0.3: Fixed parent-child hierarchy mapping
 - v1.0.2: Fixed Supabase .order() method call
@@ -52,7 +54,7 @@ from streamlit_agraph import agraph, Node, Edge, Config
 # DATA LOADING & TRANSFORMATION
 # ============================================
 
-def load_graph_data(client, user_id: str, filter_area: Optional[str] = None) -> Dict:
+def load_graph_data(client, user_id: str, filter_area: Optional[str] = None, filter_category: Optional[str] = None) -> Dict:
     """
     Load hierarchical structure data for graph visualization.
     
@@ -70,14 +72,31 @@ def load_graph_data(client, user_id: str, filter_area: Optional[str] = None) -> 
         areas_query = areas_query.eq('name', filter_area)
     areas = areas_query.order('sort_order').execute().data
     
-    # Load Categories
-    categories = client.table('categories').select('*').eq('user_id', user_id).order('sort_order').execute().data
+    # Get area IDs for filtering (if filter is applied)
+    area_ids = [area['id'] for area in areas] if areas else []
     
-    # Load Attributes
-    attributes = client.table('attribute_definitions').select('*').eq('user_id', user_id).order('sort_order').execute().data
+    # Load Categories (filter by area if needed)
+    categories_query = client.table('categories').select('*').eq('user_id', user_id)
+    if filter_area and area_ids:
+        # Filter categories that belong to selected areas
+        categories_query = categories_query.in_('area_id', area_ids)
+    categories = categories_query.order('sort_order').execute().data
     
-    # Load Events (count per category)
-    events = client.table('events').select('id, category_id').eq('user_id', user_id).execute().data
+    # Get category IDs for filtering attributes
+    category_ids = [cat['id'] for cat in categories] if categories else []
+    
+    # Load Attributes (filter by category if needed)
+    attributes_query = client.table('attribute_definitions').select('*').eq('user_id', user_id)
+    if filter_area and category_ids:
+        # Filter attributes that belong to selected categories
+        attributes_query = attributes_query.in_('category_id', category_ids)
+    attributes = attributes_query.order('sort_order').execute().data
+    
+    # Load Events (count per category, filter by categories if needed)
+    events_query = client.table('events').select('id, category_id').eq('user_id', user_id)
+    if filter_area and category_ids:
+        events_query = events_query.in_('category_id', category_ids)
+    events = events_query.execute().data
     
     # Build hierarchical structure
     nodes = []
@@ -162,6 +181,54 @@ def load_graph_data(client, user_id: str, filter_area: Optional[str] = None) -> 
     return {
         'nodes': nodes,
         'edges': edges
+    }
+
+
+def filter_graph_by_category(graph_data: Dict, category_name: str) -> Dict:
+    """
+    Filter graph data to show only a specific category and its descendants.
+    
+    Args:
+        graph_data: Full graph data
+        category_name: Name of category to focus on
+        
+    Returns:
+        Filtered graph data with only the category branch
+    """
+    # Find the category node
+    category_node = None
+    for node in graph_data['nodes']:
+        if node['type'] == 'category' and node['label'] == category_name:
+            category_node = node
+            break
+    
+    if not category_node:
+        return graph_data  # Category not found, return full graph
+    
+    # Build set of descendant IDs (BFS traversal)
+    descendants = {category_node['id']}
+    to_process = [category_node['id']]
+    
+    while to_process:
+        current_id = to_process.pop(0)
+        # Find all children of current node
+        for node in graph_data['nodes']:
+            if node.get('parent') == current_id and node['id'] not in descendants:
+                descendants.add(node['id'])
+                to_process.append(node['id'])
+    
+    # Also include the parent area of the category
+    parent_area_id = category_node.get('parent')
+    if parent_area_id:
+        descendants.add(parent_area_id)
+    
+    # Filter nodes and edges
+    filtered_nodes = [n for n in graph_data['nodes'] if n['id'] in descendants]
+    filtered_edges = [e for e in graph_data['edges'] if e['from'] in descendants and e['to'] in descendants]
+    
+    return {
+        'nodes': filtered_nodes,
+        'edges': filtered_edges
     }
 
 
@@ -457,7 +524,7 @@ def render_graph_viewer(client, user_id: str):
     """)
     
     # Filters and options
-    col1, col2, col3 = st.columns([2, 2, 1])
+    col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
     
     with col1:
         # Area filter
@@ -466,6 +533,22 @@ def render_graph_viewer(client, user_id: str):
         selected_area = st.selectbox("Filter by Area", area_options, key="graph_area_filter")
     
     with col2:
+        # Category drill-down (only if Area is selected)
+        if selected_area != "All Areas":
+            # Get categories for selected area
+            area_id_query = client.table('areas').select('id').eq('user_id', user_id).eq('name', selected_area).execute()
+            if area_id_query.data:
+                area_id = area_id_query.data[0]['id']
+                categories_response = client.table('categories').select('name').eq('user_id', user_id).eq('area_id', area_id).order('sort_order').execute()
+                category_options = ["All Categories"] + [c['name'] for c in categories_response.data]
+                selected_category = st.selectbox("Drill-down to Category", category_options, key="graph_category_filter")
+            else:
+                selected_category = "All Categories"
+        else:
+            selected_category = "All Categories"
+            st.selectbox("Drill-down to Category", ["Select Area first"], key="graph_category_disabled", disabled=True)
+    
+    with col3:
         # View type
         view_type = st.selectbox(
             "View Type",
@@ -473,7 +556,7 @@ def render_graph_viewer(client, user_id: str):
             key="graph_view_type"
         )
     
-    with col3:
+    with col4:
         # Show events toggle
         show_events = st.checkbox("Show Events", value=True, key="graph_show_events")
     
@@ -482,6 +565,10 @@ def render_graph_viewer(client, user_id: str):
     
     with st.spinner("Loading graph data..."):
         graph_data = load_graph_data(client, user_id, filter_area)
+        
+        # Apply category drill-down filter (for focused view)
+        if selected_category and selected_category != "All Categories":
+            graph_data = filter_graph_by_category(graph_data, selected_category)
         
         # Filter events if needed
         if not show_events:
@@ -498,6 +585,17 @@ def render_graph_viewer(client, user_id: str):
         st.plotly_chart(fig, use_container_width=True)
     
     elif view_type == "Network Graph":
+        # Show breadcrumb if drill-down is active
+        if selected_area != "All Areas" or (selected_category and selected_category != "All Categories"):
+            breadcrumb_parts = []
+            if selected_area != "All Areas":
+                breadcrumb_parts.append(f"📁 {selected_area}")
+            if selected_category and selected_category != "All Categories":
+                breadcrumb_parts.append(f"📂 {selected_category}")
+            
+            breadcrumb = " → ".join(breadcrumb_parts)
+            st.info(f"🔍 **Focused View:** {breadcrumb} | Select 'All Areas' / 'All Categories' to zoom out")
+        
         # Build and render interactive network graph (Obsidian-style)
         nodes_list, edges_list, config = build_network_graph(graph_data)
         
