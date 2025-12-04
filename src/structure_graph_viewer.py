@@ -300,7 +300,7 @@ def build_plotly_sunburst(graph_data: Dict) -> go.Figure:
         height=800,
         margin=dict(t=50, l=0, r=0, b=0),
         paper_bgcolor='#f8f9fa'
-    ))
+    )
     
     return fig
 
