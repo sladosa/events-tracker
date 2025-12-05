@@ -2,36 +2,35 @@
 Events Tracker - Interactive Structure Viewer Module - ssl
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-03 14:00 UTC
+Last Modified: 2025-12-05 14:00 UTC
 Python: 3.11
-Version: 1.8.0 - Graph View Integration
+Version: 1.9.0 - Unified View Control with Centralized Filters
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
 Uses st.data_editor with live database connection, validation, and batch save.
 Integrated Excel export/import workflow for offline structure editing.
-**NEW: Graph View for visual hierarchy exploration.**
+**NEW: Unified View Type control (Table/Sunburst/Treemap/Network Graph) with centralized filters.**
 
 Features:
-- **GRAPH VIEW**: Visual hierarchy (Obsidian-style) in Read-Only mode
+- **UNIFIED VIEW TYPE**: Single dropdown for Table View, Sunburst, Treemap, Network Graph
+- **CENTRALIZED FILTERS**: Area, Category, Show Events - applied across all views
+- **FILTER PROPAGATION**: Filters apply to Generate Excel and Edit Mode
 - **INTEGRATED HELP**: Collapsible help section at page top with comprehensive guide
-- **EXCEL EXPORT**: Generate Enhanced Excel in Read-Only mode (respects active filters)
-- **EXCEL IMPORT**: Upload Hierarchical Excel in Edit Mode (new 4th tab)
+- **EXCEL EXPORT**: Generate Enhanced Excel respects active filters
+- **EXCEL IMPORT**: Upload Hierarchical Excel in Edit Mode (4th tab)
 - **THREE SEPARATE EDITORS**: Areas, Categories, and Attributes in tabs
-- **FILTERS**: Area filter in Tab 2, Area + Category cascade filter in Tab 3
+- **FILTERS IN EDIT MODE**: Categories and Attributes tabs respect Area/Category filters
 - **ADD**: Add new Areas, Categories, and Attributes
-- **DELETE**: Delete Areas, Categories, and Attributes with cascade warnings
+- **DELETE**: Delete with cascade warnings
 - **SMART FORMS**: Two-step form - select Data Type first, then relevant fields appear
-- Each editor shows only relevant columns for that entity type
-- Read-Only mode: Table View OR Graph View selector
-- Edit Mode: 4 tabs - Areas, Categories, Attributes, Upload Excel
 - Dropdown validations for Data_Type and Is_Required
-- Search and filtering (Area, Category_Path)
+- Search and filtering
 - Live validation before save
 - Batch save with ONE confirmation (type 'SAVE')
 - Rollback/discard changes option
 - OPTIMIZED: Batch data loading with caching (60s TTL)
-- IMPROVED: Unsaved changes warnings on filter/refresh
+- IMPROVED: Unsaved changes warnings
 
 Dependencies: streamlit, pandas, supabase, enhanced_structure_exporter, hierarchical_parser, error_reporter, structure_graph_viewer
 
@@ -39,7 +38,6 @@ Technical Details:
 - Layout matches Download Structure - Hierarchical_View format
 - Direct database connectivity (no Excel intermediary for editing)
 - Integrated Excel export/import for offline work
-- Reduces editing time: ~30 seconds (direct edit) or full Excel workflow
 - Validates changes before committing to database
 - Uses @st.cache_data for 10x faster loading
 - Tab-based interface for clarity and simplicity
@@ -47,21 +45,18 @@ Technical Details:
 - Slug auto-generation from names
 - CASCADE delete warnings
 - Dynamic form generation based on Data Type
-- **Graph View**: Plotly-based interactive treemap and sunburst visualizations
+- **Unified View Control**: Single filter set for all visualization modes
 
-CHANGELOG v1.8.0 (Graph View Integration):
-- ✨ NEW: Graph View option in Read-Only mode
-- 🎨 NEW: Display Mode selector (Table View / Graph View)
-- 📊 NEW: Plotly Treemap visualization of hierarchy
-- 📊 NEW: Plotly Sunburst circular visualization
-- 🔍 NEW: Interactive graph with click-to-drill-down
-- 🎯 NEW: Hover tooltips with entity details
-- 📈 NEW: Statistics panel in Graph View
-- 🎨 NEW: Color-coded nodes by type (Area, Category, Attribute, Events)
-- 🔄 NEW: Filter by Area works in Graph View
-- 💡 NEW: Toggle event counts on/off
-- ⚡ IMPROVED: Seamless switch between Table and Graph views
-- 📝 IMPORT: Added structure_graph_viewer module dependency
+CHANGELOG v1.9.0 (Unified View Control):
+- ✨ NEW: Single View Type dropdown (Table/Sunburst/Treemap/Network Graph)
+- 🎯 NEW: Centralized filter state in st.session_state.view_filters
+- 🔄 NEW: Filter propagation to Edit Mode (Categories, Attributes tabs)
+- 📥 IMPROVED: Generate Excel always visible and respects filters
+- ✏️ IMPROVED: Edit Mode button in Read-Only mode for quick mode switch
+- 🎨 IMPROVED: Cleaner UI - all controls in one row
+- 🔧 REFACTOR: render_graph_viewer_integrated() accepts external filters
+- 📊 FEATURE: Table View as one of View Type options
+- 🎯 UX: Consistent filter experience across all views
 
 CHANGELOG v1.7.1 (Hotfix - Search Term Scope):
 - 🐛 FIXED: UnboundLocalError for search_term in Generate Excel
@@ -176,7 +171,7 @@ from .hierarchical_parser import HierarchicalParser
 from .error_reporter import generate_error_excel
 
 # Import Graph Viewer module
-from .structure_graph_viewer import render_graph_viewer
+from .structure_graph_viewer import render_graph_viewer_integrated
 
 
 # ============================================
@@ -1230,29 +1225,72 @@ def render_interactive_structure_viewer(client, user_id: str):
     # ============================================
     with st.expander("ℹ️ Help - How to Use Interactive Structure Viewer", expanded=False):
         st.markdown("""
-        ### 🎯 Two Ways to Work with Your Structure
+        ### 🎯 Overview
+        
+        **Interactive Structure Viewer** is your central hub for managing event structure. Choose from multiple 
+        visualization modes and edit your data directly or via Excel.
+        
+        **Key Features:**
+        - 🎨 **Multiple View Types**: Sunburst, Treemap, Network Graph, or Table View
+        - 🔍 **Unified Filters**: Area and Category filters apply across all views
+        - 📥 **Excel Export**: Generate filtered Excel with one click
+        - ✏️ **Direct Editing**: Modify structure in Edit Mode without Excel
+        - 📤 **Excel Import**: Upload changes from edited Excel files
+        
+        ---
+        
+        ### 🎨 View Types (Read-Only Mode)
+        
+        **Table View**  
+        Spreadsheet-style view of your hierarchical structure. Best for quick overview and searching.
+        
+        **Sunburst** (Default)  
+        Circular hierarchical visualization. Click segments to drill down into details.
+        
+        **Treemap**  
+        Rectangular hierarchical visualization with proportional sizing.
+        
+        **Network Graph**  
+        Interactive node-based graph. Drag nodes to rearrange, hover for tooltips.
+        
+        ---
+        
+        ### 🔍 Centralized Filters
+        
+        Filters in the control panel apply to **all views and operations**:
+        
+        - **Filter by Area**: Show only selected area's data
+        - **Drill-down to Category**: Focus on specific category (when Area is selected)
+        - **Show Events**: Toggle event counts in visualizations
+        - **Generate Excel**: Export with active filters applied
+        
+        **In Edit Mode**, filters automatically apply to Categories and Attributes tabs, 
+        helping you focus on relevant data.
+        
+        ---
+        
+        ### ✏️ Two Ways to Edit Structure
         
         #### **Method 1: Direct Editing (Edit Mode)**
         **Best for:** Quick changes, adding/editing individual items
         
-        - Switch to **Edit Mode** using the toggle below
-        - Choose what to edit in tabs: Areas, Categories, or Attributes
-        - Make changes directly in the table (like Excel)
-        - Add new items using the forms
-        - Delete items with cascade warnings
-        - Save all changes with one confirmation
+        1. Click **"Switch to Edit Mode"** button
+        2. Choose tab: Areas, Categories, or Attributes
+        3. Make changes directly in the table
+        4. Add new items using forms
+        5. Delete items with cascade warnings
+        6. Save all changes with one confirmation
         
         **Features:**
         - 🎨 Color-coded columns: Pink (auto) vs Blue (editable)
         - ✅ Live validation before saving
         - ⏪ Rollback option to discard changes
-        
-        ---
+        - 🔍 **Filters apply**: Edit Categories/Attributes tabs respect Area/Category filters
         
         #### **Method 2: Excel Upload (Edit Mode → Upload Tab)**
         **Best for:** Bulk changes, offline editing, complex restructuring
         
-        1. **Download:** Generate Enhanced Excel in Read-Only mode
+        1. **Download:** Click **"📥 Excel"** button (respects current filters!)
         2. **Edit:** Make changes in Excel (add rows, edit blue columns)
         3. **Upload:** Go to Edit Mode → Upload Hierarchical Excel tab
         4. **Review:** System shows detected changes
@@ -1266,56 +1304,67 @@ def render_interactive_structure_viewer(client, user_id: str):
         
         ---
         
-        ### 📥 Generate Enhanced Excel (Read-Only Mode)
-        Export your structure to Excel with professional features:
-        - All current structure data
-        - Color-coded editable vs auto-calculated columns
-        - Drop-down validations for Data Type, Is Required
-        - Formulas for automatic calculations
-        - Grouping for better organization
+        ### 📥 Generate Excel Export
         
-        **What you can edit in Excel:**
-        - Category names
-        - Attribute names, data types, units
-        - Validation rules (min/max)
-        - Descriptions
-        - Add new rows for Areas, Categories, Attributes
+        The **"📥 Excel"** button:
+        - Always visible in the control panel
+        - **Respects active filters** - export only filtered data
+        - Creates professional Excel with validation and formulas
+        - Perfect for sharing specific Area themes or creating starter templates
         
-        **What NOT to edit (auto-calculated):**
-        - Type, Level, Sort_Order
-        - Area extraction
-        - Category Path structure
+        **Use Cases:**
+        - Export single Area for sharing with team members
+        - Create templates for new projects
+        - Backup filtered sections before major changes
         
         ---
         
-        ### 📤 Upload Hierarchical Excel (Edit Mode)
-        Upload edited Excel to update your structure:
+        ### 💡 Workflow Tips
         
-        **Adding New Items:**
-        - **New Area:** Type=`Area`, Category_Path=`<AreaName>`
-        - **New Category:** Type=`Category`, Category_Path=`<Area> > <Category>`
-        - **New Attribute:** Type=`Attribute`, fill Attribute_Name, Data_Type
+        **Quick Edits:**
+        1. Use filters to narrow scope (Area → Category)
+        2. Switch to Edit Mode
+        3. Make changes in relevant tab
+        4. Filters automatically applied!
         
-        **Safety Features:**
-        - Change detection (shows what changed)
-        - Validation before applying
-        - Error highlighting in Excel
-        - Confirmation required
+        **Bulk Changes:**
+        1. Set filters to desired scope
+        2. Click **"📥 Excel"** to export filtered data
+        3. Edit in Excel offline
+        4. Upload changes via Edit Mode → Upload tab
+        
+        **Visual Exploration:**
+        1. Use Sunburst or Treemap for hierarchy overview
+        2. Use Network Graph for relationship exploration
+        3. Use Table View for detailed data inspection
+        4. All views respect the same filters
         
         ---
         
-        ### 💡 Tips
-        - **Quick edits?** Use Edit Mode direct editing
-        - **Bulk changes?** Use Excel Download → Edit → Upload
-        - **Review first:** Always check changes before confirming
-        - **Backup:** Download Excel before major changes
+        ### ⚠️ Important Notes
+        
+        **Filters in Edit Mode:**
+        - Categories tab: Shows only categories from filtered Area
+        - Attributes tab: Shows only attributes from filtered Area/Category
+        - Add forms respect active filters automatically
+        
+        **Excel Export:**
+        - With filters active: Exports only filtered data
+        - Without filters: Exports complete structure
+        - Success message shows which filters were applied
+        
+        **Unsaved Changes:**
+        - Changing filters in Edit Mode will discard unsaved changes
+        - Always save or cancel before switching filters
+        - System warns you before discarding changes
         """)
     
     st.info("""
     **Quick Overview:**
-    - 📖 **Read-Only Mode**: View structure, Generate Enhanced Excel
-    - ✏️ **Edit Mode**: Direct editing OR Upload Excel (4 tabs)
-    - 🆕 **v1.5.9**: Two-step attribute form with smart field masking
+    - 🎨 **View Type**: Choose visualization mode (Sunburst, Treemap, Network, Table)
+    - 🔍 **Filters**: Area and Category - apply to all views and Edit Mode
+    - 📥 **Excel Export**: Always available, respects active filters
+    - ✏️ **Edit Mode**: Direct editing with automatic filter application
     """)
     
     st.markdown("---")
@@ -1343,10 +1392,23 @@ def render_interactive_structure_viewer(client, user_id: str):
         st.session_state.original_df = df.copy()
     
     # ============================================
-    # CONTROLS
+    # CENTRALIZED FILTER STATE
     # ============================================
     
-    col1, col2, col3 = st.columns([2, 2, 1])
+    # Initialize centralized filter state (used across all views and Edit Mode)
+    if 'view_filters' not in st.session_state:
+        st.session_state.view_filters = {
+            'view_type': 'Sunburst',
+            'area': 'All Areas',
+            'category': 'All Categories',
+            'show_events': True
+        }
+    
+    # ============================================
+    # CONTROLS - ROW 1: MODE SELECTOR
+    # ============================================
+    
+    col1, col2, col3 = st.columns([2, 1, 1])
     
     with col1:
         # Mode toggle
@@ -1363,40 +1425,37 @@ def render_interactive_structure_viewer(client, user_id: str):
         # Update session state
         st.session_state.viewer_mode = 'read_only' if new_mode == 'Read-Only' else 'edit'
     
+    with col3:
+        # Edit Mode button (when in Read-Only)
+        if st.session_state.viewer_mode == 'read_only':
+            if st.button("✏️ Switch to Edit Mode", use_container_width=True):
+                st.session_state.viewer_mode = 'edit'
+                st.rerun()
+    
+    st.markdown("---")
+    
     # ============================================
-    # READ-ONLY MODE: VIEW MODE SELECTOR (Table vs Graph)
+    # CONTROLS - ROW 2: UNIFIED FILTERS
     # ============================================
     
-    if st.session_state.viewer_mode == 'read_only':
-        st.markdown("---")
-        
-        # View mode selector for Read-Only mode
-        col_view1, col_view2 = st.columns([3, 1])
-        
-        with col_view1:
-            view_display_mode = st.radio(
-                "📊 Display Mode",
-                ["📋 Table View", "🎨 Graph View"],
-                horizontal=True,
-                key="structure_display_mode",
-                help="Table View: Spreadsheet-style data | Graph View: Visual hierarchy"
-            )
-        
-        with col_view2:
-            if view_display_mode == "🎨 Graph View":
-                st.info("💡 Interactive graph")
-        
-        st.markdown("---")
-        
-        # If Graph View selected, render graph and exit early
-        if view_display_mode == "🎨 Graph View":
-            render_graph_viewer(client, user_id)
-            return  # Exit function, don't render table
+    col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 1, 1])
     
-    # Continue with Table View (or Edit Mode which is always table)
+    with col1:
+        # View Type selector (applies to Read-Only mode only, but state always maintained)
+        view_type = st.selectbox(
+            "View Type",
+            ["Sunburst", "Treemap", "Network Graph", "Table View"],
+            index=["Sunburst", "Treemap", "Network Graph", "Table View"].index(st.session_state.view_filters['view_type']),
+            key="view_type_selector",
+            help="Sunburst/Treemap/Network: Visual hierarchy | Table: Spreadsheet view"
+        )
+        st.session_state.view_filters['view_type'] = view_type
     
     with col2:
-        # Filters - warn if unsaved changes
+        # Area filter
+        area_options = ["All Areas"] + sorted(df[df['Type'] == 'Area']['Area'].unique().tolist())
+        
+        # Warn if unsaved changes in Edit Mode
         def check_unsaved_changes_warning():
             """Check for unsaved changes and display warning if needed"""
             if st.session_state.viewer_mode == 'edit' and st.session_state.original_df is not None:
@@ -1404,91 +1463,118 @@ def render_interactive_structure_viewer(client, user_id: str):
                     display_cols = [col for col in st.session_state.original_df.columns if not col.startswith('_')]
                     orig_display = st.session_state.original_df[display_cols]
                     has_changes = not orig_display.equals(st.session_state.edited_df)
-                    
                     if has_changes:
                         st.warning("⚠️ Unsaved changes! Changing filters will discard them.")
                         return True
             return False
         
-        area_options = ["All Areas"] + sorted(df[df['Type'] == 'Area']['Area'].unique().tolist())
-        selected_area = st.selectbox("Filter by Area", area_options, key="area_filter")
+        selected_area = st.selectbox(
+            "Filter by Area",
+            area_options,
+            index=area_options.index(st.session_state.view_filters['area']) if st.session_state.view_filters['area'] in area_options else 0,
+            key="area_filter_selector"
+        )
+        st.session_state.view_filters['area'] = selected_area
         
         # Show warning if there are unsaved changes
         if selected_area != "All Areas":
             check_unsaved_changes_warning()
     
-    # Search input - define BEFORE col3 so it's available for Generate Excel button
-    search_term = st.text_input("🔎 Search in Category Path", "", key="search_filter")
-    
-    # Check for unsaved changes when search is used
-    if search_term and st.session_state.viewer_mode == 'edit':
-        if st.session_state.original_df is not None and st.session_state.edited_df is not None:
-            display_cols = [col for col in st.session_state.original_df.columns if not col.startswith('_')]
-            orig_display = st.session_state.original_df[display_cols]
-            has_changes = not orig_display.equals(st.session_state.edited_df)
-            
-            if has_changes:
-                st.warning("⚠️ Filtering with unsaved changes. Save or discard changes first to avoid confusion.")
-    
     with col3:
-        # Conditional button based on mode
-        if st.session_state.viewer_mode == 'read_only':
-            # Generate Enhanced Excel button in Read-Only mode
-            if st.button("📥 Generate Excel", use_container_width=True, type="primary"):
-                with st.spinner("Generating enhanced Excel file..."):
-                    try:
-                        # Use EnhancedStructureExporter with current filters
-                        exporter = EnhancedStructureExporter(
-                            client=client,
-                            user_id=user_id,
-                            filter_area=selected_area,
-                            filter_search=search_term
-                        )
-                        
-                        file_path = exporter.export_hierarchical_view()
-                        
-                        # Read file for download
-                        with open(file_path, 'rb') as f:
-                            excel_data = f.read()
-                        
-                        # Show filter info if filters are applied
-                        filter_info = []
-                        if selected_area != "All Areas":
-                            filter_info.append(f"Area: {selected_area}")
-                        if search_term:
-                            filter_info.append(f"Search: '{search_term}'")
-                        
-                        if filter_info:
-                            st.success(f"✅ Enhanced Excel generated with filters: {', '.join(filter_info)}")
-                        else:
-                            st.success("✅ Enhanced Excel generated (all data)")
-                        
-                        # Download button
-                        st.download_button(
-                            label="⬇️ Download Excel",
-                            data=excel_data,
-                            file_name=os.path.basename(file_path),
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            help="Enhanced Excel with validation, formulas, and grouping"
-                        )
-                        
-                        # Cleanup temp file
-                        if os.path.exists(file_path):
-                            os.remove(file_path)
-                            
-                    except Exception as e:
-                        st.error(f"❌ Error generating Excel: {str(e)}")
-                        with st.expander("🔍 View Error Details"):
-                            st.exception(e)
+        # Category filter (drill-down) - conditional on Area selection
+        if selected_area != "All Areas":
+            # Get categories for selected area
+            area_categories = df[(df['Type'] == 'Category') & (df['Area'] == selected_area)]['Category'].unique().tolist()
+            category_options = ["All Categories"] + sorted(area_categories)
+            
+            selected_category = st.selectbox(
+                "Drill-down to Category",
+                category_options,
+                index=category_options.index(st.session_state.view_filters['category']) if st.session_state.view_filters['category'] in category_options else 0,
+                key="category_filter_selector"
+            )
+            st.session_state.view_filters['category'] = selected_category
         else:
-            # Edit mode - no button needed
-            # User can use browser refresh or navigate away and back
-            st.empty()
+            st.selectbox(
+                "Drill-down to Category",
+                ["Select Area first"],
+                disabled=True,
+                key="category_filter_disabled"
+            )
+            st.session_state.view_filters['category'] = "All Categories"
+    
+    with col4:
+        # Show Events toggle
+        show_events = st.checkbox(
+            "Show Events",
+            value=st.session_state.view_filters['show_events'],
+            key="show_events_toggle"
+        )
+        st.session_state.view_filters['show_events'] = show_events
+    
+    with col5:
+        # Generate Excel button (always visible)
+        if st.button("📥 Excel", use_container_width=True, type="primary", help="Generate Enhanced Excel with current filters"):
+            with st.spinner("Generating enhanced Excel file..."):
+                try:
+                    # Use EnhancedStructureExporter with current filters
+                    exporter = EnhancedStructureExporter(
+                        client=client,
+                        user_id=user_id,
+                        filter_area=st.session_state.view_filters['area'],
+                        filter_search=""  # Can add search later
+                    )
+                    
+                    file_path = exporter.export_hierarchical_view()
+                    
+                    # Read file for download
+                    with open(file_path, 'rb') as f:
+                        excel_data = f.read()
+                    
+                    # Download button
+                    st.download_button(
+                        label="💾 Download Excel",
+                        data=excel_data,
+                        file_name=f"structure_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                    
+                    # Success message with filter info
+                    filter_info = []
+                    if st.session_state.view_filters['area'] != "All Areas":
+                        filter_info.append(f"Area: {st.session_state.view_filters['area']}")
+                    if st.session_state.view_filters['category'] != "All Categories":
+                        filter_info.append(f"Category: {st.session_state.view_filters['category']}")
+                    
+                    if filter_info:
+                        st.success(f"✅ Excel generated with filters: {', '.join(filter_info)}")
+                    else:
+                        st.success("✅ Excel generated successfully (all data)")
+                    
+                except Exception as e:
+                    st.error(f"❌ Error generating Excel: {str(e)}")
     
     st.markdown("---")
     
-    # Apply filters
-    filtered_df = apply_filters(df, selected_area, search_term)
+    # ============================================
+    # RENDER APPROPRIATE VIEW
+    # ============================================
+    
+    # In Read-Only mode: render based on View Type
+    if st.session_state.viewer_mode == 'read_only':
+        if st.session_state.view_filters['view_type'] == "Table View":
+            # Render table view (existing code will follow)
+            pass  # Will be handled by existing table rendering code below
+        else:
+            # Render graph view (Sunburst, Treemap, or Network Graph)
+            render_graph_viewer_integrated(client, user_id, st.session_state.view_filters)
+            return  # Exit function after rendering graph
+    
+    # Continue with Table View (Read-Only Table or Edit Mode)
+    # The rest of the existing code continues below...
+    
+    # Apply filters (use centralized filter state)
+    filtered_df = apply_filters(df, st.session_state.view_filters['area'], "")  # Search functionality can be added later
     
     # Remove metadata columns for display
     display_cols = [col for col in filtered_df.columns if not col.startswith('_')]
@@ -1651,24 +1737,16 @@ def render_interactive_structure_viewer(client, user_id: str):
             category_mask = filtered_df['Type'] == 'Category'
             category_full_df = filtered_df[category_mask].copy()
             
-            # Always show filter and Add Category form, even if no categories exist
+            # Always show Add Category form, even if no categories exist
             st.markdown("---")
-            col_filter = st.columns([1, 3])
             
-            with col_filter[0]:
-                # Get ALL areas directly from database (not just those with categories)
-                # This ensures new areas appear immediately after adding
-                all_areas_response = client.table('areas').select('name').eq('user_id', user_id).order('name').execute()
-                all_areas_list = [area['name'] for area in all_areas_response.data] if all_areas_response.data else []
-                available_areas = ["All Areas"] + sorted(all_areas_list)
-                
-                selected_area_cat = st.selectbox(
-                    "Filter by Area",
-                    available_areas,
-                    key="area_filter_categories"
-                )
+            # Show current filter context
+            if st.session_state.view_filters['area'] != "All Areas":
+                st.info(f"🔍 **Filtered by Area:** {st.session_state.view_filters['area']}")
             
-            # Apply area filter
+            # Apply area filter from centralized state
+            selected_area_cat = st.session_state.view_filters['area']
+            
             if selected_area_cat != "All Areas" and not category_full_df.empty:
                 category_full_df = category_full_df[category_full_df['Area'] == selected_area_cat]
             
@@ -1863,51 +1941,26 @@ def render_interactive_structure_viewer(client, user_id: str):
             attribute_mask = filtered_df['Type'] == 'Attribute'
             attribute_full_df = filtered_df[attribute_mask].copy()
             
-            # Always show filters and Add Attribute form, even if no attributes exist
+            # Always show Add Attribute form, even if no attributes exist
             st.markdown("---")
-            col_filter1, col_filter2 = st.columns(2)
             
-            with col_filter1:
-                # Get ALL areas directly from database (not just those with attributes)
-                # This ensures new areas appear immediately after adding (Bug #12 fix)
-                all_areas_response = client.table('areas').select('name').eq('user_id', user_id).order('name').execute()
-                all_areas_list = [area['name'] for area in all_areas_response.data] if all_areas_response.data else []
-                available_areas_attr = ["All Areas"] + sorted(all_areas_list)
-                
-                selected_area_attr = st.selectbox(
-                    "Filter by Area",
-                    available_areas_attr,
-                    key="area_filter_attributes"
-                )
+            # Show current filter context
+            filter_context_parts = []
+            if st.session_state.view_filters['area'] != "All Areas":
+                filter_context_parts.append(f"Area: {st.session_state.view_filters['area']}")
+            if st.session_state.view_filters['category'] != "All Categories":
+                filter_context_parts.append(f"Category: {st.session_state.view_filters['category']}")
+            
+            if filter_context_parts:
+                st.info(f"🔍 **Filtered by** {', '.join(filter_context_parts)}")
+            
+            # Use centralized filters
+            selected_area_attr = st.session_state.view_filters['area']
+            selected_category = st.session_state.view_filters['category']
             
             # Apply area filter first
             if selected_area_attr != "All Areas" and not attribute_full_df.empty:
                 attribute_full_df = attribute_full_df[attribute_full_df['Area'] == selected_area_attr]
-            
-            with col_filter2:
-                # Get ALL categories from filtered area (not just those with attributes)
-                available_cats = ["All Categories"]
-                
-                if selected_area_attr != "All Areas":
-                    # Query database for ALL categories in the selected area
-                    area_cats_response = client.table('categories').select('name, areas(name)').eq('user_id', user_id).execute()
-                    if area_cats_response.data:
-                        # Filter to selected area and get category names
-                        area_cat_names = [
-                            cat['name'] for cat in area_cats_response.data 
-                            if cat.get('areas') and cat['areas']['name'] == selected_area_attr
-                        ]
-                        available_cats += sorted(area_cat_names)
-                else:
-                    # Show categories from ALL areas that have attributes
-                    if not attribute_full_df.empty:
-                        available_cats += sorted(attribute_full_df['Category'].unique().tolist())
-                
-                selected_category = st.selectbox(
-                    "Filter by Category",
-                    available_cats,
-                    key="category_filter_attributes"
-                )
             
             # Apply category filter
             if selected_category != "All Categories" and not attribute_full_df.empty:

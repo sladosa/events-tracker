@@ -2,27 +2,30 @@
 Events Tracker - Structure Graph Viewer Module
 ===============================================
 Created: 2025-12-03 13:30 UTC
-Last Modified: 2025-12-04 11:00 UTC
+Last Modified: 2025-12-05 14:00 UTC
 Python: 3.11
-Version: 1.2.0 - Added drill-down and proper Area filtering
+Version: 1.3.0 - Integrated mode with external filter control
 
 Description:
 Interactive hierarchical graph visualization of Areas → Categories → Attributes → Events
 Multiple visualization modes with drill-down capability for focused exploration.
+**NEW: Integrated mode for seamless filter control from parent module.**
 
 Features:
 - THREE visualization modes:
   * Treemap: Rectangular hierarchical view with click-to-zoom
   * Sunburst: Circular hierarchical view with click-to-focus
   * Network Graph: Obsidian-style force-directed graph with drill-down
-- **NEW: Category Drill-Down** - Focus on specific category branch
-- Proper Area filtering (now works for Network Graph!)
+- **NEW: render_graph_viewer_integrated()** - accepts external filters (no internal UI)
+- Category Drill-Down - Focus on specific category branch
+- Proper Area filtering (works for all graph types)
 - Drag nodes to rearrange (Network Graph)
 - Zoom, pan, and hover tooltips
 - Color-coded by entity type
 - Shows relationships with connectors (lines)
 - Filters: Area, Category (drill-down), show/hide Events
 - Breadcrumb navigation when focused
+- Statistics panel
 
 Dependencies: plotly, streamlit, pandas, streamlit-agraph
 
@@ -32,8 +35,10 @@ Technical Implementation:
 - Force-directed layout with physics simulation
 - Hierarchical filtering with BFS traversal
 - Dynamic data loading from Supabase
+- Dual-mode: Standalone (with UI) or Integrated (filter-less)
 
 Version History:
+- v1.3.0: Added render_graph_viewer_integrated() for parent module control
 - v1.2.0: Added Category drill-down, fixed Area filtering for Network Graph
 - v1.1.0: Added Network Graph with streamlit-agraph
 - v1.0.3: Fixed parent-child hierarchy mapping
@@ -504,9 +509,110 @@ def build_network_graph(graph_data: Dict) -> Tuple[List, List, Dict]:
     return nodes_list, edges_list, config
 
 
+def render_statistics(graph_data: Dict):
+    """
+    Render statistics panel showing counts by entity type.
+    
+    Args:
+        graph_data: Dictionary with nodes data
+    """
+    st.markdown("---")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    areas_count = len([n for n in graph_data['nodes'] if n['type'] == 'area'])
+    categories_count = len([n for n in graph_data['nodes'] if n['type'] == 'category'])
+    attributes_count = len([n for n in graph_data['nodes'] if n['type'] == 'attribute'])
+    events_count = sum(n.get('count', 0) for n in graph_data['nodes'] if n['type'] == 'events')
+    
+    with col1:
+        st.metric("📁 Areas", areas_count)
+    with col2:
+        st.metric("📂 Categories", categories_count)
+    with col3:
+        st.metric("🏷️ Attributes", attributes_count)
+    with col4:
+        st.metric("📅 Events", events_count)
+
+
 # ============================================
 # STREAMLIT UI COMPONENTS
 # ============================================
+
+def render_graph_viewer_integrated(client, user_id: str, filters: Dict):
+    """
+    Render graph viewer with EXTERNAL filter control (no internal filter UI).
+    Called from Interactive Structure Viewer with centralized filters.
+    
+    Args:
+        client: Supabase client
+        user_id: User UUID
+        filters: Dictionary with filter settings:
+            - view_type: 'Sunburst' | 'Treemap' | 'Network Graph'
+            - area: 'All Areas' | area name
+            - category: 'All Categories' | category name
+            - show_events: True | False
+    
+    Usage:
+        from structure_graph_viewer import render_graph_viewer_integrated
+        
+        filters = {
+            'view_type': 'Sunburst',
+            'area': 'Health',
+            'category': 'All Categories',
+            'show_events': True
+        }
+        render_graph_viewer_integrated(client, user_id, filters)
+    """
+    # Extract filters
+    view_type = filters.get('view_type', 'Sunburst')
+    selected_area = filters.get('area', 'All Areas')
+    selected_category = filters.get('category', 'All Categories')
+    show_events = filters.get('show_events', True)
+    
+    # Load data with area filter
+    filter_area = None if selected_area == "All Areas" else selected_area
+    
+    with st.spinner("Loading graph data..."):
+        graph_data = load_graph_data(client, user_id, filter_area)
+        
+        # Apply category drill-down filter
+        if selected_category and selected_category != "All Categories":
+            graph_data = filter_graph_by_category(graph_data, selected_category)
+        
+        # Filter events if needed
+        if not show_events:
+            graph_data['nodes'] = [n for n in graph_data['nodes'] if n['type'] != 'events']
+            graph_data['edges'] = [e for e in graph_data['edges'] if not e['to'].startswith('events_')]
+    
+    # Show breadcrumb if filters are active
+    if selected_area != "All Areas" or selected_category != "All Categories":
+        breadcrumb_parts = []
+        if selected_area != "All Areas":
+            breadcrumb_parts.append(f"📁 {selected_area}")
+        if selected_category != "All Categories":
+            breadcrumb_parts.append(f"📂 {selected_category}")
+        
+        breadcrumb = " → ".join(breadcrumb_parts)
+        st.info(f"🔍 **Focused View:** {breadcrumb}")
+    
+    # Render based on view type
+    if view_type == "Treemap":
+        fig = build_plotly_tree(graph_data)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    elif view_type == "Sunburst":
+        fig = build_plotly_sunburst(graph_data)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    elif view_type == "Network Graph":
+        # Build and render interactive network graph
+        nodes_list, edges_list, config = build_network_graph(graph_data)
+        st.markdown("**🕸️ Interactive Network Graph** - Drag nodes to rearrange, hover for details")
+        agraph(nodes=nodes_list, edges=edges_list, config=config)
+    
+    # Statistics
+    render_statistics(graph_data)
+
 
 def render_graph_viewer(client, user_id: str):
     """
@@ -605,22 +711,7 @@ def render_graph_viewer(client, user_id: str):
         return_value = agraph(nodes=nodes_list, edges=edges_list, config=config)
     
     # Statistics
-    st.markdown("---")
-    col1, col2, col3, col4 = st.columns(4)
-    
-    areas_count = len([n for n in graph_data['nodes'] if n['type'] == 'area'])
-    categories_count = len([n for n in graph_data['nodes'] if n['type'] == 'category'])
-    attributes_count = len([n for n in graph_data['nodes'] if n['type'] == 'attribute'])
-    events_count = sum(n.get('count', 0) for n in graph_data['nodes'] if n['type'] == 'events')
-    
-    with col1:
-        st.metric("📁 Areas", areas_count)
-    with col2:
-        st.metric("📂 Categories", categories_count)
-    with col3:
-        st.metric("🏷️ Attributes", attributes_count)
-    with col4:
-        st.metric("📅 Events", events_count)
+    render_statistics(graph_data)
 
 
 # ============================================
