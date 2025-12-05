@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module - ssl
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-05 15:00 UTC
+Last Modified: 2025-12-05 15:30 UTC
 Python: 3.11
-Version: 1.9.1 - Category Filtering (Bugfix)
+Version: 1.9.2 - State Sync Fix
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -45,15 +45,16 @@ Technical Details:
 - CASCADE delete warnings
 - Dynamic form generation based on Data Type
 - **Unified View Control**: Single filter set for all visualization modes
+- **State Sync**: on_change callbacks ensure reliable filter updates
 
-CHANGELOG v1.9.1 (Category Filtering Bugfix):
-- 🐛 FIXED: Category filter now works in Table View
-- 🐛 FIXED: Category filter now works in Excel Export
-- 🐛 FIXED: apply_filters() uses category drill-down instead of search
-- 🔧 IMPROVED: EnhancedStructureExporter now uses filter_category parameter
-- ✅ TESTED: All view types (Sunburst, Treemap, Network, Table) respect category filter
-- 📊 FEATURE: Category drill-down shows selected category + all children + attributes
-- 🎯 UX: Consistent filter behavior across ALL views and operations
+CHANGELOG v1.9.2 (State Sync Fix):
+- 🐛 FIXED: View Type selector now reliably changes on first click
+- 🐛 FIXED: Filter state sync issues with Streamlit rerun timing
+- 🔧 IMPROVED: Added on_change callbacks to all filter controls
+- 🔧 IMPROVED: Area change now auto-resets Category to "All Categories"
+- ⚡ PERFORMANCE: State updates happen BEFORE rerun (more reliable)
+- 🎯 UX: No more "double-click" required to change View Type
+- 📝 TECHNICAL: Callbacks execute before script rerun, ensuring state consistency
 
 CHANGELOG v1.7.1 (Hotfix - Search Term Scope):
 - 🐛 FIXED: UnboundLocalError for search_term in Generate Excel
@@ -1451,6 +1452,25 @@ def render_interactive_structure_viewer(client, user_id: str):
     # CONTROLS - ROW 2: UNIFIED FILTERS
     # ============================================
     
+    # Callback functions to ensure state sync (executed BEFORE rerun)
+    def on_view_type_change():
+        """Callback when View Type changes"""
+        st.session_state.view_filters['view_type'] = st.session_state.view_type_selector
+    
+    def on_area_change():
+        """Callback when Area filter changes"""
+        st.session_state.view_filters['area'] = st.session_state.area_filter_selector
+        # Reset category when area changes
+        st.session_state.view_filters['category'] = "All Categories"
+    
+    def on_category_change():
+        """Callback when Category filter changes"""
+        st.session_state.view_filters['category'] = st.session_state.category_filter_selector
+    
+    def on_show_events_change():
+        """Callback when Show Events checkbox changes"""
+        st.session_state.view_filters['show_events'] = st.session_state.show_events_toggle
+    
     col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 1, 1])
     
     with col1:
@@ -1460,9 +1480,9 @@ def render_interactive_structure_viewer(client, user_id: str):
             ["Sunburst", "Treemap", "Network Graph", "Table View"],
             index=["Sunburst", "Treemap", "Network Graph", "Table View"].index(st.session_state.view_filters['view_type']),
             key="view_type_selector",
-            help="Sunburst/Treemap/Network: Visual hierarchy | Table: Spreadsheet view"
+            help="Sunburst/Treemap/Network: Visual hierarchy | Table: Spreadsheet view",
+            on_change=on_view_type_change
         )
-        st.session_state.view_filters['view_type'] = view_type
     
     with col2:
         # Area filter
@@ -1485,28 +1505,28 @@ def render_interactive_structure_viewer(client, user_id: str):
             "Filter by Area",
             area_options,
             index=area_options.index(st.session_state.view_filters['area']) if st.session_state.view_filters['area'] in area_options else 0,
-            key="area_filter_selector"
+            key="area_filter_selector",
+            on_change=on_area_change
         )
-        st.session_state.view_filters['area'] = selected_area
         
         # Show warning if there are unsaved changes
-        if selected_area != "All Areas":
+        if st.session_state.view_filters['area'] != "All Areas":
             check_unsaved_changes_warning()
     
     with col3:
         # Category filter (drill-down) - conditional on Area selection
-        if selected_area != "All Areas":
+        if st.session_state.view_filters['area'] != "All Areas":
             # Get categories for selected area
-            area_categories = df[(df['Type'] == 'Category') & (df['Area'] == selected_area)]['Category'].unique().tolist()
+            area_categories = df[(df['Type'] == 'Category') & (df['Area'] == st.session_state.view_filters['area'])]['Category'].unique().tolist()
             category_options = ["All Categories"] + sorted(area_categories)
             
             selected_category = st.selectbox(
                 "Drill-down to Category",
                 category_options,
                 index=category_options.index(st.session_state.view_filters['category']) if st.session_state.view_filters['category'] in category_options else 0,
-                key="category_filter_selector"
+                key="category_filter_selector",
+                on_change=on_category_change
             )
-            st.session_state.view_filters['category'] = selected_category
         else:
             st.selectbox(
                 "Drill-down to Category",
@@ -1521,9 +1541,9 @@ def render_interactive_structure_viewer(client, user_id: str):
         show_events = st.checkbox(
             "Show Events",
             value=st.session_state.view_filters['show_events'],
-            key="show_events_toggle"
+            key="show_events_toggle",
+            on_change=on_show_events_change
         )
-        st.session_state.view_filters['show_events'] = show_events
     
     with col5:
         # Generate Excel button (always visible)
