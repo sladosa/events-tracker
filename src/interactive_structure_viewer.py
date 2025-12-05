@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module - ssl
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-05 15:30 UTC
+Last Modified: 2025-12-05 16:00 UTC
 Python: 3.11
-Version: 1.9.2 - State Sync Fix
+Version: 1.9.3 - Unsaved Changes UX Improvement
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -16,6 +16,7 @@ Features:
 - **UNIFIED VIEW TYPE**: Single dropdown for Table View, Sunburst, Treemap, Network Graph
 - **CENTRALIZED FILTERS**: Area, Category (drill-down), Show Events - applied across ALL views
 - **FILTER PROPAGATION**: Filters apply to Table View, Graph Views, Generate Excel, and Edit Mode
+- **UNSAVED CHANGES PROTECTION**: Filters disabled when unsaved changes detected
 - **INTEGRATED HELP**: Collapsible help section at page top with comprehensive guide
 - **EXCEL EXPORT**: Generate Enhanced Excel respects active Area AND Category filters
 - **EXCEL IMPORT**: Upload Hierarchical Excel in Edit Mode (4th tab)
@@ -29,7 +30,7 @@ Features:
 - Batch save with ONE confirmation (type 'SAVE')
 - Rollback/discard changes option
 - OPTIMIZED: Batch data loading with caching (60s TTL)
-- IMPROVED: Unsaved changes warnings
+- IMPROVED: Unsaved changes warnings with preview
 
 Dependencies: streamlit, pandas, supabase, enhanced_structure_exporter, hierarchical_parser, error_reporter, structure_graph_viewer
 
@@ -46,15 +47,16 @@ Technical Details:
 - Dynamic form generation based on Data Type
 - **Unified View Control**: Single filter set for all visualization modes
 - **State Sync**: on_change callbacks ensure reliable filter updates
+- **Data Loss Prevention**: Filters disabled when unsaved changes exist
 
-CHANGELOG v1.9.2 (State Sync Fix):
-- 🐛 FIXED: View Type selector now reliably changes on first click
-- 🐛 FIXED: Filter state sync issues with Streamlit rerun timing
-- 🔧 IMPROVED: Added on_change callbacks to all filter controls
-- 🔧 IMPROVED: Area change now auto-resets Category to "All Categories"
-- ⚡ PERFORMANCE: State updates happen BEFORE rerun (more reliable)
-- 🎯 UX: No more "double-click" required to change View Type
-- 📝 TECHNICAL: Callbacks execute before script rerun, ensuring state consistency
+CHANGELOG v1.9.3 (Unsaved Changes UX Improvement):
+- 🎯 UX: Prominent error banner shows number of unsaved changes
+- 👁️ NEW: Expandable preview of what changed (row, type, name, columns)
+- 🔒 FIXED: Filters now DISABLED when unsaved changes exist (prevents accidental data loss)
+- 🗑️ NEW: "Discard All Changes" button at the top (quick access)
+- 📝 IMPROVED: Clear instructions on how to save (scroll to Edit Mode section)
+- ⚠️ PREVENTED: Users can no longer accidentally change filters and lose edits
+- 🎨 UX: Visual hierarchy - Error → Preview → Instructions → Actions
 
 CHANGELOG v1.7.1 (Hotfix - Search Term Scope):
 - 🐛 FIXED: UnboundLocalError for search_term in Generate Excel
@@ -1449,6 +1451,102 @@ def render_interactive_structure_viewer(client, user_id: str):
     st.markdown("---")
     
     # ============================================
+    # UNSAVED CHANGES DETECTION & WARNING
+    # ============================================
+    
+    def has_unsaved_changes() -> Tuple[bool, int]:
+        """
+        Check if there are unsaved changes in Edit Mode.
+        
+        Returns:
+            Tuple of (has_changes, num_changed_rows)
+        """
+        if st.session_state.viewer_mode != 'edit':
+            return False, 0
+        
+        if st.session_state.original_df is None or st.session_state.edited_df is None:
+            return False, 0
+        
+        display_cols = [col for col in st.session_state.original_df.columns if not col.startswith('_')]
+        orig_display = st.session_state.original_df[display_cols]
+        
+        has_changes = not orig_display.equals(st.session_state.edited_df)
+        
+        if has_changes:
+            # Count changed rows
+            num_changed = 0
+            for idx in orig_display.index:
+                if idx in st.session_state.edited_df.index:
+                    orig_row = orig_display.loc[idx]
+                    edited_row = st.session_state.edited_df.loc[idx]
+                    if not orig_row.equals(edited_row):
+                        num_changed += 1
+            
+            # Also count new/deleted rows
+            num_changed += len(st.session_state.edited_df) - len(orig_display)
+            
+            return True, abs(num_changed)
+        
+        return False, 0
+    
+    # Check for unsaved changes
+    unsaved_changes, num_changes = has_unsaved_changes()
+    
+    # Show warning banner if there are unsaved changes
+    if unsaved_changes:
+        st.error(f"""
+        🚨 **You have {num_changes} unsaved change(s) in Edit Mode!**
+        
+        **Filters are DISABLED** to prevent accidental data loss.
+        """)
+        
+        # Show preview of changes in expander
+        with st.expander("👁️ **View what changed**", expanded=False):
+            if st.session_state.edited_df is not None and st.session_state.original_df is not None:
+                display_cols = [col for col in st.session_state.original_df.columns if not col.startswith('_')]
+                orig_display = st.session_state.original_df[display_cols]
+                
+                changed_rows = []
+                for idx in orig_display.index:
+                    if idx in st.session_state.edited_df.index:
+                        orig_row = orig_display.loc[idx]
+                        edited_row = st.session_state.edited_df.loc[idx]
+                        if not orig_row.equals(edited_row):
+                            # Find which columns changed
+                            changed_cols = [col for col in display_cols if orig_row[col] != edited_row[col]]
+                            changed_rows.append({
+                                'Row': idx + 1,
+                                'Type': orig_row.get('Type', 'N/A'),
+                                'Name': orig_row.get('Category', orig_row.get('Attribute_Name', 'N/A')),
+                                'Changed Columns': ', '.join(changed_cols)
+                            })
+                
+                if changed_rows:
+                    st.dataframe(changed_rows, use_container_width=True, hide_index=True)
+                    st.caption(f"Total: {len(changed_rows)} modified row(s)")
+                else:
+                    st.info("No specific row changes detected (might be new/deleted rows)")
+        
+        st.info("""
+        **What you need to do:**
+        
+        1. 🗑️ **Discard Changes** (button below) - Cancel all edits and re-enable filters
+        2. 💾 **Save Changes** - Scroll down to the Edit Mode section and use the Save button (requires typing 'SAVE' to confirm)
+        """)
+        
+        col_discard, col_spacer = st.columns([1, 3])
+        
+        with col_discard:
+            if st.button("🗑️ Discard All Changes", use_container_width=True, type="secondary", key="quick_discard_top"):
+                # Reset to original
+                st.session_state.edited_df = None
+                st.session_state.original_df = None
+                st.success("✅ Changes discarded! Filters are now enabled.")
+                st.rerun()
+        
+        st.markdown("---")
+    
+    # ============================================
     # CONTROLS - ROW 2: UNIFIED FILTERS
     # ============================================
     
@@ -1481,37 +1579,22 @@ def render_interactive_structure_viewer(client, user_id: str):
             index=["Sunburst", "Treemap", "Network Graph", "Table View"].index(st.session_state.view_filters['view_type']),
             key="view_type_selector",
             help="Sunburst/Treemap/Network: Visual hierarchy | Table: Spreadsheet view",
-            on_change=on_view_type_change
+            on_change=on_view_type_change,
+            disabled=unsaved_changes  # Disable if unsaved changes
         )
     
     with col2:
         # Area filter
         area_options = ["All Areas"] + sorted(df[df['Type'] == 'Area']['Area'].unique().tolist())
         
-        # Warn if unsaved changes in Edit Mode
-        def check_unsaved_changes_warning():
-            """Check for unsaved changes and display warning if needed"""
-            if st.session_state.viewer_mode == 'edit' and st.session_state.original_df is not None:
-                if st.session_state.edited_df is not None:
-                    display_cols = [col for col in st.session_state.original_df.columns if not col.startswith('_')]
-                    orig_display = st.session_state.original_df[display_cols]
-                    has_changes = not orig_display.equals(st.session_state.edited_df)
-                    if has_changes:
-                        st.warning("⚠️ Unsaved changes! Changing filters will discard them.")
-                        return True
-            return False
-        
         selected_area = st.selectbox(
             "Filter by Area",
             area_options,
             index=area_options.index(st.session_state.view_filters['area']) if st.session_state.view_filters['area'] in area_options else 0,
             key="area_filter_selector",
-            on_change=on_area_change
+            on_change=on_area_change,
+            disabled=unsaved_changes  # Disable if unsaved changes
         )
-        
-        # Show warning if there are unsaved changes
-        if st.session_state.view_filters['area'] != "All Areas":
-            check_unsaved_changes_warning()
     
     with col3:
         # Category filter (drill-down) - conditional on Area selection
@@ -1525,7 +1608,8 @@ def render_interactive_structure_viewer(client, user_id: str):
                 category_options,
                 index=category_options.index(st.session_state.view_filters['category']) if st.session_state.view_filters['category'] in category_options else 0,
                 key="category_filter_selector",
-                on_change=on_category_change
+                on_change=on_category_change,
+                disabled=unsaved_changes  # Disable if unsaved changes
             )
         else:
             st.selectbox(
@@ -1542,7 +1626,8 @@ def render_interactive_structure_viewer(client, user_id: str):
             "Show Events",
             value=st.session_state.view_filters['show_events'],
             key="show_events_toggle",
-            on_change=on_show_events_change
+            on_change=on_show_events_change,
+            disabled=unsaved_changes  # Disable if unsaved changes
         )
     
     with col5:
