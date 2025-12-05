@@ -2,22 +2,22 @@
 Events Tracker - Interactive Structure Viewer Module - ssl
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-05 14:00 UTC
+Last Modified: 2025-12-05 15:00 UTC
 Python: 3.11
-Version: 1.9.0 - Unified View Control with Centralized Filters
+Version: 1.9.1 - Category Filtering (Bugfix)
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
 Uses st.data_editor with live database connection, validation, and batch save.
 Integrated Excel export/import workflow for offline structure editing.
-**NEW: Unified View Type control (Table/Sunburst/Treemap/Network Graph) with centralized filters.**
+**Unified View Type control (Table/Sunburst/Treemap/Network Graph) with centralized filters.**
 
 Features:
 - **UNIFIED VIEW TYPE**: Single dropdown for Table View, Sunburst, Treemap, Network Graph
-- **CENTRALIZED FILTERS**: Area, Category, Show Events - applied across all views
-- **FILTER PROPAGATION**: Filters apply to Generate Excel and Edit Mode
+- **CENTRALIZED FILTERS**: Area, Category (drill-down), Show Events - applied across ALL views
+- **FILTER PROPAGATION**: Filters apply to Table View, Graph Views, Generate Excel, and Edit Mode
 - **INTEGRATED HELP**: Collapsible help section at page top with comprehensive guide
-- **EXCEL EXPORT**: Generate Enhanced Excel respects active filters
+- **EXCEL EXPORT**: Generate Enhanced Excel respects active Area AND Category filters
 - **EXCEL IMPORT**: Upload Hierarchical Excel in Edit Mode (4th tab)
 - **THREE SEPARATE EDITORS**: Areas, Categories, and Attributes in tabs
 - **FILTERS IN EDIT MODE**: Categories and Attributes tabs respect Area/Category filters
@@ -25,7 +25,6 @@ Features:
 - **DELETE**: Delete with cascade warnings
 - **SMART FORMS**: Two-step form - select Data Type first, then relevant fields appear
 - Dropdown validations for Data_Type and Is_Required
-- Search and filtering
 - Live validation before save
 - Batch save with ONE confirmation (type 'SAVE')
 - Rollback/discard changes option
@@ -47,16 +46,14 @@ Technical Details:
 - Dynamic form generation based on Data Type
 - **Unified View Control**: Single filter set for all visualization modes
 
-CHANGELOG v1.9.0 (Unified View Control):
-- ✨ NEW: Single View Type dropdown (Table/Sunburst/Treemap/Network Graph)
-- 🎯 NEW: Centralized filter state in st.session_state.view_filters
-- 🔄 NEW: Filter propagation to Edit Mode (Categories, Attributes tabs)
-- 📥 IMPROVED: Generate Excel always visible and respects filters
-- ✏️ IMPROVED: Edit Mode button in Read-Only mode for quick mode switch
-- 🎨 IMPROVED: Cleaner UI - all controls in one row
-- 🔧 REFACTOR: render_graph_viewer_integrated() accepts external filters
-- 📊 FEATURE: Table View as one of View Type options
-- 🎯 UX: Consistent filter experience across all views
+CHANGELOG v1.9.1 (Category Filtering Bugfix):
+- 🐛 FIXED: Category filter now works in Table View
+- 🐛 FIXED: Category filter now works in Excel Export
+- 🐛 FIXED: apply_filters() uses category drill-down instead of search
+- 🔧 IMPROVED: EnhancedStructureExporter now uses filter_category parameter
+- ✅ TESTED: All view types (Sunburst, Treemap, Network, Table) respect category filter
+- 📊 FEATURE: Category drill-down shows selected category + all children + attributes
+- 🎯 UX: Consistent filter behavior across ALL views and operations
 
 CHANGELOG v1.7.1 (Hotfix - Search Term Scope):
 - 🐛 FIXED: UnboundLocalError for search_term in Generate Excel
@@ -70,7 +67,7 @@ CHANGELOG v1.7.0 (Filtered Excel Export):
 - 🎯 FEATURE: Export filtered structure for sharing specific Area themes
 - 📦 USE CASE: Create starter templates for new users by exporting single Areas
 - 🔧 IMPROVED: Success message shows which filters were applied
-- 📝 TECHNICAL: EnhancedStructureExporter now accepts filter_area and filter_search params
+- 📝 TECHNICAL: EnhancedStructureExporter now accepts filter_area and filter_category params
 
 CHANGELOG v1.6.1 (Production Release):
 - 🗑️ REMOVED: Refresh button from Edit Mode (user feedback - not needed)
@@ -618,14 +615,14 @@ def _add_category_tree(
 # FILTERING
 # ============================================
 
-def apply_filters(df: pd.DataFrame, selected_area: str, search_term: str) -> pd.DataFrame:
+def apply_filters(df: pd.DataFrame, selected_area: str, selected_category: str = "All Categories") -> pd.DataFrame:
     """
-    Apply Area and search filters to dataframe.
+    Apply Area and Category filters to dataframe.
     
     Args:
         df: Original dataframe
         selected_area: Selected area name or "All Areas"
-        search_term: Search term for Category_Path
+        selected_category: Selected category name or "All Categories"
     
     Returns:
         Filtered dataframe
@@ -636,11 +633,27 @@ def apply_filters(df: pd.DataFrame, selected_area: str, search_term: str) -> pd.
     if selected_area != "All Areas":
         filtered = filtered[filtered['Area'] == selected_area]
     
-    # Filter by search term in Category_Path
-    if search_term:
-        filtered = filtered[
-            filtered['Category_Path'].str.contains(search_term, case=False, na=False)
-        ]
+    # Filter by Category (drill-down)
+    if selected_category != "All Categories":
+        # Filter to show:
+        # 1. The selected category itself
+        # 2. All its child categories (any level deep)
+        # 3. All attributes belonging to selected category and its children
+        
+        # Build category path pattern to match
+        # If category is "Automobili", match:
+        # - "Finance > Rashodi > Automobili"
+        # - "Finance > Rashodi > Automobili > Lacetti ZG7728EH"
+        # - etc.
+        
+        # First, get all rows that have this category in their Category_Path
+        mask = filtered['Category_Path'].str.contains(f"> {selected_category}", case=False, na=False, regex=False) | \
+               filtered['Category_Path'].str.endswith(selected_category, na=False)
+        
+        # Also include the Area row if it's shown (Type == 'Area')
+        area_mask = filtered['Type'] == 'Area'
+        
+        filtered = filtered[mask | area_mask]
     
     return filtered
 
@@ -1522,7 +1535,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                         client=client,
                         user_id=user_id,
                         filter_area=st.session_state.view_filters['area'],
-                        filter_search=""  # Can add search later
+                        filter_category=st.session_state.view_filters['category']
                     )
                     
                     file_path = exporter.export_hierarchical_view()
@@ -1574,7 +1587,11 @@ def render_interactive_structure_viewer(client, user_id: str):
     # The rest of the existing code continues below...
     
     # Apply filters (use centralized filter state)
-    filtered_df = apply_filters(df, st.session_state.view_filters['area'], "")  # Search functionality can be added later
+    filtered_df = apply_filters(
+        df, 
+        st.session_state.view_filters['area'],
+        st.session_state.view_filters['category']
+    )
     
     # Remove metadata columns for display
     display_cols = [col for col in filtered_df.columns if not col.startswith('_')]

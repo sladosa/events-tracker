@@ -33,7 +33,7 @@ class EnhancedStructureExporter:
     """
     
     def __init__(self, client, user_id: str, filter_area: Optional[str] = None, 
-                 filter_search: Optional[str] = None):
+                 filter_category: Optional[str] = None):
         """
         Initialize exporter.
         
@@ -41,12 +41,12 @@ class EnhancedStructureExporter:
             client: Supabase client instance
             user_id: Current user's UUID
             filter_area: Optional area filter (e.g., "Health" or "All Areas")
-            filter_search: Optional search term for Category_Path filtering
+            filter_category: Optional category filter for drill-down (e.g., "Sleep" or "All Categories")
         """
         self.client = client
         self.user_id = user_id
         self.filter_area = filter_area if filter_area != "All Areas" else None
-        self.filter_search = filter_search
+        self.filter_category = filter_category if filter_category != "All Categories" else None
         
         # Define colors
         self.PINK_FILL = PatternFill(start_color="FFE6F0", end_color="FFE6F0", fill_type="solid")
@@ -171,9 +171,19 @@ class EnhancedStructureExporter:
         # Create DataFrame
         df = pd.DataFrame(rows)
         
-        # Apply search filter if specified
-        if self.filter_search and not df.empty:
-            df = df[df['Category_Path'].str.contains(self.filter_search, case=False, na=False)]
+        # Apply category filter if specified (drill-down)
+        if self.filter_category and not df.empty:
+            # Filter to show:
+            # 1. The selected category itself
+            # 2. All its child categories (any level deep)
+            # 3. All attributes belonging to selected category and its children
+            mask = df['Category_Path'].str.contains(f"> {self.filter_category}", case=False, na=False, regex=False) | \
+                   df['Category_Path'].str.endswith(self.filter_category, na=False)
+            
+            # Also include the Area row if it's shown (Type == 'Area')
+            area_mask = df['Type'] == 'Area'
+            
+            df = df[mask | area_mask]
         
         return df
     
