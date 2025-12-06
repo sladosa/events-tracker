@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module - ssl
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-06 15:00 UTC
+Last Modified: 2025-12-06 16:00 UTC
 Python: 3.11
-Version: 1.9.10 - DELETE State Fix (Complete Smart Lock)
+Version: 1.9.11 - Add Operations Fix + UX Refinement (Complete)
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -48,6 +48,44 @@ Technical Details:
 - **Unified View Control**: Single filter set for all visualization modes
 - **State Sync**: on_change callbacks ensure reliable filter updates
 - **Data Loss Prevention**: Filters disabled when unsaved changes exist
+
+CHANGELOG v1.9.11 (Add Operations Fix + UX Refinement - Complete):
+- 🐛 FIXED: False positive after ADD operations (Bug #9 - CRITICAL)
+  - Problem: After adding Areas/Categories/Attributes, banner shows "X unsaved changes"
+  - User report: Added item but got false positive banner + disabled filters
+  - Root cause: Same as DELETE bug - incomplete state clearing
+  - ADD operations cleared only original_df, not edited_df or editing_active
+- ✅ SOLUTION: Clear ALL state after ADD
+  - Add Areas: Clear all state (original_df, edited_df, editing_active)
+  - Add Categories: Clear all state
+  - Add Attributes: Clear all state
+  - Consistent with DELETE fix from v1.9.10
+- 🎨 UX IMPROVEMENT: Removed redundant "Switch to Edit Mode" button
+  - User feedback: Confusing to have both Mode toggle AND button
+  - Solution: Keep only Mode toggle (radio buttons) for clarity
+  - Simpler, cleaner interface
+- 🔄 UX IMPROVEMENT: Discard button repositioned
+  - OLD: Top row (col2) + Banner = Inconsistent placement
+  - NEW: Each tab (Areas, Categories, Attributes) below tables
+  - Benefit: Universal exit button always accessible in context
+  - Position: Below Add forms, above tab boundary
+  - Behavior: Disabled when no changes, enabled when changes exist
+  - Upload Excel tab: NO Discard (separate logic as requested)
+- 🎯 SIMPLIFIED: Row 1 layout
+  - Removed empty col2 and col3
+  - Clean single-column Mode toggle
+  - Less visual clutter
+- 💬 BEHAVIOR: Complete state management
+  - ADD operations: Clear all state, unlock filters immediately
+  - DELETE operations: Clear all state (from v1.9.10)
+  - SAVE operations: Clear all state (existing)
+  - DISCARD operations: Clear all state, always available per-tab
+- 🎯 IMPACT: Perfect UX + Complete functionality
+  - No false positives after ANY operation ✅
+  - Discard always accessible where needed ✅
+  - No redundant buttons ✅
+  - Intuitive, clean interface ✅
+  - Smart Lock system COMPLETE ✅
 
 CHANGELOG v1.9.10 (DELETE State Fix - Complete Smart Lock):
 - 🐛 FIXED: False positive "unsaved changes" after DELETE operations (Bug #8 - CRITICAL)
@@ -1585,57 +1623,19 @@ def render_interactive_structure_viewer(client, user_id: str):
     # CONTROLS - ROW 1: MODE SELECTOR
     # ============================================
     
-    col1, col2, col3 = st.columns([2, 1, 1])
+    # Mode toggle (simplified layout - no extra columns needed)
+    mode_options = ['Read-Only', 'Edit Mode']
+    current_mode_idx = 0 if st.session_state.viewer_mode == 'read_only' else 1
     
-    with col1:
-        # Mode toggle
-        mode_options = ['Read-Only', 'Edit Mode']
-        current_mode_idx = 0 if st.session_state.viewer_mode == 'read_only' else 1
-        
-        new_mode = st.radio(
-            "Mode",
-            mode_options,
-            index=current_mode_idx,
-            horizontal=True
-        )
-        
-        # Update session state
-        st.session_state.viewer_mode = 'read_only' if new_mode == 'Read-Only' else 'edit'
+    new_mode = st.radio(
+        "Mode",
+        mode_options,
+        index=current_mode_idx,
+        horizontal=True
+    )
     
-    with col2:
-        # Discard button (visible in Edit Mode only)
-        if st.session_state.viewer_mode == 'edit':
-            # Check if there are unsaved changes to determine button state
-            has_changes = (
-                st.session_state.get('edited_df') is not None and 
-                st.session_state.get('original_df') is not None
-            )
-            
-            discard_help = "Clear all unsaved changes" if has_changes else "No changes to discard"
-            
-            if st.button(
-                "🗑️ Discard Changes", 
-                use_container_width=True,
-                type="secondary",
-                disabled=not has_changes,
-                help=discard_help,
-                key="discard_button_main"
-            ):
-                # CRITICAL: Unlock filters after discard
-                st.session_state.editing_active = False
-                
-                # Reset to original
-                st.session_state.edited_df = None
-                st.session_state.original_df = None
-                st.success("✅ Changes discarded! Filters are now enabled.")
-                st.rerun()
-    
-    with col3:
-        # Edit Mode button (when in Read-Only)
-        if st.session_state.viewer_mode == 'read_only':
-            if st.button("✏️ Switch to Edit Mode", use_container_width=True):
-                st.session_state.viewer_mode = 'edit'
-                st.rerun()
+    # Update session state
+    st.session_state.viewer_mode = 'read_only' if new_mode == 'Read-Only' else 'edit'
     
     st.markdown("---")
     
@@ -1797,19 +1797,6 @@ def render_interactive_structure_viewer(client, user_id: str):
         
         💡 *Tip: After you save, the banner will disappear and filters will be re-enabled automatically.*
         """)
-        
-        col_discard, col_spacer = st.columns([2, 2])
-        
-        with col_discard:
-            if st.button("🗑️ Discard All Changes", use_container_width=True, type="secondary", key="quick_discard_top"):
-                # CRITICAL: Unlock filters after discard
-                st.session_state.editing_active = False
-                
-                # Reset to original
-                st.session_state.edited_df = None
-                st.session_state.original_df = None
-                st.success("✅ Changes discarded! Filters are now enabled.")
-                st.rerun()
         
         st.markdown("---")
     
@@ -2157,13 +2144,44 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.success(msg)
                                         # Increment counter to create NEW form (prevents double submit)
                                         st.session_state.area_form_counter += 1
-                                        # Clear cache
+                                        # CRITICAL: Clear ALL detection state after ADD
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
+                                        st.session_state.edited_df = None
+                                        st.session_state.editing_active = False
                                         # Rerun to refresh
                                         st.rerun()
                                     else:
                                         st.error(msg)
+                
+                # ============================================
+                # DISCARD BUTTON - Universal Exit from Edit Mode
+                # ============================================
+                st.markdown("---")
+                
+                # Check if there are any unsaved changes
+                has_changes = (
+                    st.session_state.get('edited_df') is not None and 
+                    st.session_state.get('original_df') is not None
+                )
+                
+                discard_help = "Clear all unsaved changes and unlock filters" if has_changes else "No changes to discard"
+                
+                if st.button(
+                    "🗑️ Discard All Changes",
+                    use_container_width=False,
+                    type="secondary",
+                    disabled=not has_changes,
+                    help=discard_help,
+                    key="discard_button_areas"
+                ):
+                    # CRITICAL: Unlock filters after discard
+                    st.session_state.editing_active = False
+                    # Reset to original
+                    st.session_state.edited_df = None
+                    st.session_state.original_df = None
+                    st.success("✅ Changes discarded! Filters are now enabled.")
+                    st.rerun()
         
         # ============================================
         # TAB 2: EDIT CATEGORIES
@@ -2370,13 +2388,44 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.success(msg)
                                     # Increment counter to create NEW form (prevents double submit)
                                     st.session_state.category_form_counter += 1
-                                    # Clear cache and reload data
+                                    # CRITICAL: Clear ALL detection state after ADD
                                     st.cache_data.clear()
                                     st.session_state.original_df = None
+                                    st.session_state.edited_df = None
+                                    st.session_state.editing_active = False
                                     # IMPORTANT: rerun to refresh everything and clear form
                                     st.rerun()
                                 else:
                                     st.error(msg)
+                
+                # ============================================
+                # DISCARD BUTTON - Universal Exit from Edit Mode
+                # ============================================
+                st.markdown("---")
+                
+                # Check if there are any unsaved changes
+                has_changes = (
+                    st.session_state.get('edited_df') is not None and 
+                    st.session_state.get('original_df') is not None
+                )
+                
+                discard_help = "Clear all unsaved changes and unlock filters" if has_changes else "No changes to discard"
+                
+                if st.button(
+                    "🗑️ Discard All Changes",
+                    use_container_width=False,
+                    type="secondary",
+                    disabled=not has_changes,
+                    help=discard_help,
+                    key="discard_button_categories"
+                ):
+                    # CRITICAL: Unlock filters after discard
+                    st.session_state.editing_active = False
+                    # Reset to original
+                    st.session_state.edited_df = None
+                    st.session_state.original_df = None
+                    st.success("✅ Changes discarded! Filters are now enabled.")
+                    st.rerun()
         
         # ============================================
         # TAB 3: EDIT ATTRIBUTES
@@ -2741,13 +2790,44 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.success(msg)
                                     # Increment counter to create NEW form (prevents double submit)
                                     st.session_state.attribute_form_counter += 1
-                                    # Clear cache
+                                    # CRITICAL: Clear ALL detection state after ADD
                                     st.cache_data.clear()
                                     st.session_state.original_df = None
+                                    st.session_state.edited_df = None
+                                    st.session_state.editing_active = False
                                     # Rerun
                                     st.rerun()
                                 else:
                                     st.error(msg)
+                
+                # ============================================
+                # DISCARD BUTTON - Universal Exit from Edit Mode
+                # ============================================
+                st.markdown("---")
+                
+                # Check if there are any unsaved changes
+                has_changes = (
+                    st.session_state.get('edited_df') is not None and 
+                    st.session_state.get('original_df') is not None
+                )
+                
+                discard_help = "Clear all unsaved changes and unlock filters" if has_changes else "No changes to discard"
+                
+                if st.button(
+                    "🗑️ Discard All Changes",
+                    use_container_width=False,
+                    type="secondary",
+                    disabled=not has_changes,
+                    help=discard_help,
+                    key="discard_button_attributes"
+                ):
+                    # CRITICAL: Unlock filters after discard
+                    st.session_state.editing_active = False
+                    # Reset to original
+                    st.session_state.edited_df = None
+                    st.session_state.original_df = None
+                    st.success("✅ Changes discarded! Filters are now enabled.")
+                    st.rerun()
         
         # ============================================
         # TAB 4: UPLOAD HIERARCHICAL EXCEL
