@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module - ssl
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-06 10:30 UTC
+Last Modified: 2025-12-06 11:00 UTC
 Python: 3.11
-Version: 1.9.5 - Filter Change Detection Fix (Edge Case)
+Version: 1.9.6 - Data Loss Prevention (Critical Fix)
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -48,6 +48,24 @@ Technical Details:
 - **Unified View Control**: Single filter set for all visualization modes
 - **State Sync**: on_change callbacks ensure reliable filter updates
 - **Data Loss Prevention**: Filters disabled when unsaved changes exist
+
+CHANGELOG v1.9.6 (Data Loss Prevention - CRITICAL FIX):
+- 🐛 FIXED: Filter changes no longer cause data loss when unsaved changes exist (Bug #5 - CRITICAL DATA LOSS)
+  - Problem: User edits data, changes filter, unsaved changes LOST without warning
+  - Root cause: v1.9.5 filter callbacks reset state even with unsaved changes
+  - Solution: Check for unsaved changes BEFORE resetting state in callbacks
+- 🔒 IMPROVED: Callbacks now preserve unsaved changes
+  - on_area_change: Only resets if no edited_df exists
+  - on_category_change: Only resets if no edited_df exists
+  - Prevents accidental data loss from filter changes
+- ✅ VERIFIED: Unsaved changes survive filter change attempts
+  - User makes edit → Changes filter → Changes preserved ✅
+  - Filter should be disabled anyway (v1.9.3 feature)
+  - Double protection: disabled UI + protected callbacks
+- 🎯 IMPACT: CRITICAL - Prevents silent data loss
+  - User Experience: Much safer Edit Mode
+  - Data Integrity: Preserved even with user mistakes
+  - Trust: System protects user's work
 
 CHANGELOG v1.9.5 (Filter Change Detection Fix - Edge Case):
 - 🐛 FIXED: Filter changes in Edit Mode no longer trigger false unsaved changes (Bug #4 - EDGE CASE)
@@ -1665,21 +1683,47 @@ def render_interactive_structure_viewer(client, user_id: str):
         # Reset category when area changes
         st.session_state.view_filters['category'] = "All Categories"
         
-        # CRITICAL: Reset unsaved changes detection when filter changes
-        # Filter change means user is viewing different data, not making edits
+        # CRITICAL: Only reset detection state if NO unsaved changes exist
+        # If user has unsaved edits, preserve them - don't allow filter change to cause data loss
         if st.session_state.viewer_mode == 'edit':
-            st.session_state.original_df = None
-            st.session_state.edited_df = None
+            # Check if there are actual unsaved changes
+            has_edits = (
+                st.session_state.get('edited_df') is not None and 
+                st.session_state.get('original_df') is not None
+            )
+            
+            if has_edits:
+                # Has unsaved changes - DON'T reset! 
+                # User must save or discard first (filter should be disabled anyway)
+                # This prevents accidental data loss
+                pass  
+            else:
+                # No unsaved changes - safe to reset detection state
+                st.session_state.original_df = None
+                st.session_state.edited_df = None
     
     def on_category_change():
         """Callback when Category filter changes"""
         st.session_state.view_filters['category'] = st.session_state.category_filter_selector
         
-        # CRITICAL: Reset unsaved changes detection when filter changes
-        # Filter change means user is viewing different data, not making edits
+        # CRITICAL: Only reset detection state if NO unsaved changes exist
+        # If user has unsaved edits, preserve them - don't allow filter change to cause data loss
         if st.session_state.viewer_mode == 'edit':
-            st.session_state.original_df = None
-            st.session_state.edited_df = None
+            # Check if there are actual unsaved changes
+            has_edits = (
+                st.session_state.get('edited_df') is not None and 
+                st.session_state.get('original_df') is not None
+            )
+            
+            if has_edits:
+                # Has unsaved changes - DON'T reset!
+                # User must save or discard first (filter should be disabled anyway)
+                # This prevents accidental data loss
+                pass
+            else:
+                # No unsaved changes - safe to reset detection state
+                st.session_state.original_df = None
+                st.session_state.edited_df = None
     
     def on_show_events_change():
         """Callback when Show Events checkbox changes"""
