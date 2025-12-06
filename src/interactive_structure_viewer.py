@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module - ssl
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-06 09:00 UTC
+Last Modified: 2025-12-06 10:30 UTC
 Python: 3.11
-Version: 1.9.4 - Critical Bugfixes (False Positive Detection + Filter Issues)
+Version: 1.9.5 - Filter Change Detection Fix (Edge Case)
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -48,6 +48,24 @@ Technical Details:
 - **Unified View Control**: Single filter set for all visualization modes
 - **State Sync**: on_change callbacks ensure reliable filter updates
 - **Data Loss Prevention**: Filters disabled when unsaved changes exist
+
+CHANGELOG v1.9.5 (Filter Change Detection Fix - Edge Case):
+- 🐛 FIXED: Filter changes in Edit Mode no longer trigger false unsaved changes (Bug #4 - EDGE CASE)
+  - Problem: Changing Area/Category filter triggered "0 unsaved changes" banner
+  - Root cause: Filter change caused DataFrame reset but detection still compared old references
+  - Solution: Reset original_df/edited_df on filter change (on_area_change, on_category_change)
+- 🐛 FIXED: "0 unsaved changes" banner no longer appears (improved detection logic)
+  - If num_changes = 0, return False (not unsaved_changes)
+  - Prevents false positives from minor DataFrame differences (index order, etc.)
+- 🎨 IMPROVED: Edit Mode interface hidden while banner is active
+  - User must resolve changes (save/discard) before accessing edit tabs
+  - Cleaner UX - no confusing "disabled" sections while changes pending
+  - Added st.stop() to prevent rendering edit interface
+- 📝 IMPROVED: Better warning message when edit interface is hidden
+  - Clear instructions: Discard or Save
+  - Tip: Interface will appear after changes resolved
+- ✅ TESTED: Filter changes in Edit Mode work smoothly without false alarms
+- 🎯 IMPACT: Edge case fixed - Edit Mode now works correctly with filters
 
 CHANGELOG v1.9.4 (Critical Bugfixes - False Positive Detection):
 - 🐛 FIXED: False positive unsaved changes detection (Bug #1 - BLOCKER)
@@ -1533,6 +1551,11 @@ def render_interactive_structure_viewer(client, user_id: str):
             if new_rows > 0:
                 num_changed += new_rows
             
+            # CRITICAL: If no actual changes detected, return False
+            # This prevents false positives from minor DataFrame differences (index order, etc.)
+            if num_changed == 0:
+                return False, 0
+            
             return True, abs(num_changed)
         
         return False, 0
@@ -1641,10 +1664,22 @@ def render_interactive_structure_viewer(client, user_id: str):
         st.session_state.view_filters['area'] = st.session_state.area_filter_selector
         # Reset category when area changes
         st.session_state.view_filters['category'] = "All Categories"
+        
+        # CRITICAL: Reset unsaved changes detection when filter changes
+        # Filter change means user is viewing different data, not making edits
+        if st.session_state.viewer_mode == 'edit':
+            st.session_state.original_df = None
+            st.session_state.edited_df = None
     
     def on_category_change():
         """Callback when Category filter changes"""
         st.session_state.view_filters['category'] = st.session_state.category_filter_selector
+        
+        # CRITICAL: Reset unsaved changes detection when filter changes
+        # Filter change means user is viewing different data, not making edits
+        if st.session_state.viewer_mode == 'edit':
+            st.session_state.original_df = None
+            st.session_state.edited_df = None
     
     def on_show_events_change():
         """Callback when Show Events checkbox changes"""
@@ -1810,6 +1845,20 @@ def render_interactive_structure_viewer(client, user_id: str):
     
     else:
         # Edit mode - use tabbed interface with 3 editors
+        # CRITICAL: Only show edit interface if no unsaved changes
+        # If there are unsaved changes, user must resolve them first (save or discard)
+        if unsaved_changes:
+            st.warning("""
+            ⚠️ **Edit interface is hidden while there are unsaved changes.**
+            
+            Please use one of the options above:
+            - **Discard Changes** to cancel edits and continue working
+            - **Save Changes** by scrolling to the Edit Mode section above the filters
+            
+            💡 Once changes are resolved, the edit interface will appear here.
+            """)
+            st.stop()  # Stop rendering - don't show edit tabs while unsaved changes exist
+        
         st.markdown("### ✏️ Structure (Edit Mode) - Choose What to Edit")
         
         # Create tabs for different entity types
