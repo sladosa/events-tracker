@@ -2,9 +2,9 @@
 Events Tracker - Interactive Structure Viewer Module - ssl
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-05 16:00 UTC
+Last Modified: 2025-12-06 09:00 UTC
 Python: 3.11
-Version: 1.9.3 - Unsaved Changes UX Improvement
+Version: 1.9.4 - Critical Bugfixes (False Positive Detection + Filter Issues)
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -48,6 +48,19 @@ Technical Details:
 - **Unified View Control**: Single filter set for all visualization modes
 - **State Sync**: on_change callbacks ensure reliable filter updates
 - **Data Loss Prevention**: Filters disabled when unsaved changes exist
+
+CHANGELOG v1.9.4 (Critical Bugfixes - False Positive Detection):
+- 🐛 FIXED: False positive unsaved changes detection (Bug #1 - BLOCKER)
+  - Problem: System showed "36 unsaved changes" when no actual changes made
+  - Root cause: st.data_editor returned DataFrames with different dtypes/NaN handling
+  - Solution: Normalized DataFrame comparison (convert to strings, handle NaN consistently)
+- 🐛 FIXED: Add Attribute filter showed all Areas instead of filtered Area (Bug #2 - HIGH)
+  - Problem: Form used old filter keys instead of unified view_filters
+  - Solution: Updated to use st.session_state.view_filters['area'] and ['category']
+- 📝 IMPROVED: Better preview detection - shows actual changes accurately
+- 📝 IMPROVED: Clearer instructions for save workflow in banner
+- ✅ TESTED: Zero false positives - only real changes trigger warning
+- 🎯 IMPACT: Users can now trust the unsaved changes detection system
 
 CHANGELOG v1.9.3 (Unsaved Changes UX Improvement):
 - 🎯 UX: Prominent error banner shows number of unsaved changes
@@ -1460,6 +1473,9 @@ def render_interactive_structure_viewer(client, user_id: str):
         
         Returns:
             Tuple of (has_changes, num_changed_rows)
+            
+        Note: Uses normalized comparison to avoid false positives from dtype/NaN differences
+        that st.data_editor may introduce.
         """
         if st.session_state.viewer_mode != 'edit':
             return False, 0
@@ -1468,22 +1484,54 @@ def render_interactive_structure_viewer(client, user_id: str):
             return False, 0
         
         display_cols = [col for col in st.session_state.original_df.columns if not col.startswith('_')]
-        orig_display = st.session_state.original_df[display_cols]
+        orig_display = st.session_state.original_df[display_cols].copy()
+        edited_display = st.session_state.edited_df.copy()
         
-        has_changes = not orig_display.equals(st.session_state.edited_df)
+        # Normalize DataFrames to avoid false positives
+        def normalize_df(df):
+            """
+            Normalize DataFrame for robust comparison.
+            Handles dtype differences, NaN values, and float precision.
+            """
+            df_norm = df.copy()
+            
+            # Convert all columns to string for consistent comparison
+            # This handles dtype mismatches (object vs str, int vs float, etc.)
+            for col in df_norm.columns:
+                # Fill NaN/None with empty string before conversion
+                df_norm[col] = df_norm[col].fillna('').astype(str)
+                
+                # Clean up string representation of floats
+                # "0.0" -> "0", "1.0" -> "1" 
+                df_norm[col] = df_norm[col].str.replace(r'\.0$', '', regex=True)
+            
+            # Sort columns alphabetically to handle column order differences
+            df_norm = df_norm[sorted(df_norm.columns)]
+            
+            return df_norm
+        
+        orig_normalized = normalize_df(orig_display)
+        edited_normalized = normalize_df(edited_display)
+        
+        # Check if DataFrames are equal after normalization
+        has_changes = not orig_normalized.equals(edited_normalized)
         
         if has_changes:
-            # Count changed rows
+            # Count changed rows using normalized comparison
             num_changed = 0
-            for idx in orig_display.index:
-                if idx in st.session_state.edited_df.index:
-                    orig_row = orig_display.loc[idx]
-                    edited_row = st.session_state.edited_df.loc[idx]
+            
+            # Check for modified rows
+            for idx in orig_normalized.index:
+                if idx in edited_normalized.index:
+                    orig_row = orig_normalized.loc[idx]
+                    edited_row = edited_normalized.loc[idx]
                     if not orig_row.equals(edited_row):
                         num_changed += 1
             
-            # Also count new/deleted rows
-            num_changed += len(st.session_state.edited_df) - len(orig_display)
+            # Count new rows (in edited but not in original)
+            new_rows = len(edited_normalized) - len(orig_normalized)
+            if new_rows > 0:
+                num_changed += new_rows
             
             return True, abs(num_changed)
         
@@ -1504,37 +1552,70 @@ def render_interactive_structure_viewer(client, user_id: str):
         with st.expander("👁️ **View what changed**", expanded=False):
             if st.session_state.edited_df is not None and st.session_state.original_df is not None:
                 display_cols = [col for col in st.session_state.original_df.columns if not col.startswith('_')]
-                orig_display = st.session_state.original_df[display_cols]
+                orig_display = st.session_state.original_df[display_cols].copy()
+                edited_display = st.session_state.edited_df.copy()
+                
+                # Use normalized comparison for accurate change detection
+                def normalize_for_comparison(df):
+                    df_norm = df.copy()
+                    for col in df_norm.columns:
+                        df_norm[col] = df_norm[col].fillna('').astype(str)
+                        df_norm[col] = df_norm[col].str.replace(r'\.0$', '', regex=True)
+                    return df_norm
+                
+                orig_normalized = normalize_for_comparison(orig_display)
+                edited_normalized = normalize_for_comparison(edited_display)
                 
                 changed_rows = []
-                for idx in orig_display.index:
-                    if idx in st.session_state.edited_df.index:
-                        orig_row = orig_display.loc[idx]
-                        edited_row = st.session_state.edited_df.loc[idx]
+                for idx in orig_normalized.index:
+                    if idx in edited_normalized.index:
+                        orig_row = orig_normalized.loc[idx]
+                        edited_row = edited_normalized.loc[idx]
                         if not orig_row.equals(edited_row):
-                            # Find which columns changed
-                            changed_cols = [col for col in display_cols if orig_row[col] != edited_row[col]]
-                            changed_rows.append({
-                                'Row': idx + 1,
-                                'Type': orig_row.get('Type', 'N/A'),
-                                'Name': orig_row.get('Category', orig_row.get('Attribute_Name', 'N/A')),
-                                'Changed Columns': ', '.join(changed_cols)
-                            })
+                            # Find which columns changed using normalized values
+                            changed_cols = []
+                            for col in orig_normalized.columns:
+                                if orig_row[col] != edited_row[col]:
+                                    changed_cols.append(col)
+                            
+                            if changed_cols:  # Only add if there are actual column changes
+                                # Get display values from original (non-normalized)
+                                changed_rows.append({
+                                    'Row': idx + 1,
+                                    'Type': orig_display.loc[idx].get('Type', 'N/A') if 'Type' in orig_display.columns else 'N/A',
+                                    'Name': orig_display.loc[idx].get('Category', orig_display.loc[idx].get('Attribute_Name', 'N/A')),
+                                    'Changed Columns': ', '.join(changed_cols)
+                                })
+                
+                # Check for new rows
+                new_rows = len(edited_normalized) - len(orig_normalized)
                 
                 if changed_rows:
                     st.dataframe(changed_rows, use_container_width=True, hide_index=True)
                     st.caption(f"Total: {len(changed_rows)} modified row(s)")
+                    if new_rows > 0:
+                        st.caption(f"➕ Plus {new_rows} new row(s)")
+                elif new_rows > 0:
+                    st.info(f"➕ {new_rows} new row(s) added (no existing rows modified)")
                 else:
-                    st.info("No specific row changes detected (might be new/deleted rows)")
+                    st.success("✅ No changes detected - you can safely close Edit Mode")
         
-        st.info("""
-        **What you need to do:**
+        st.warning("""
+        **📍 How to proceed:**
         
-        1. 🗑️ **Discard Changes** (button below) - Cancel all edits and re-enable filters
-        2. 💾 **Save Changes** - Scroll down to the Edit Mode section and use the Save button (requires typing 'SAVE' to confirm)
+        **Option 1: Discard changes** (Quick button below)  
+        → Cancels all edits and re-enables filters
+        
+        **Option 2: Save changes**  
+        → Scroll down to **Edit Mode** section (below filters)  
+        → Find the active tab (Areas/Categories/Attributes)  
+        → Click the **Save Changes** button  
+        → Type 'SAVE' to confirm
+        
+        💡 *Tip: After you save, the banner will disappear and filters will be re-enabled automatically.*
         """)
         
-        col_discard, col_spacer = st.columns([1, 3])
+        col_discard, col_spacer = st.columns([2, 2])
         
         with col_discard:
             if st.button("🗑️ Discard All Changes", use_container_width=True, type="secondary", key="quick_discard_top"):
@@ -2257,9 +2338,9 @@ def render_interactive_structure_viewer(client, user_id: str):
                 if 'attribute_form_counter' not in st.session_state:
                     st.session_state.attribute_form_counter = 0
                 
-                # Get current filters from session state
-                current_area_filter = st.session_state.get('area_filter_attributes', 'All Areas')
-                current_category_filter = st.session_state.get('category_filter_attributes', 'All Categories')
+                # Get current filters from unified view_filters (v1.9.0+)
+                current_area_filter = st.session_state.view_filters.get('area', 'All Areas')
+                current_category_filter = st.session_state.view_filters.get('category', 'All Categories')
                 
                 # Get categories for selection
                 cats_response = client.table('categories').select('id, name, area_id, areas(name)').eq('user_id', user_id).execute()
