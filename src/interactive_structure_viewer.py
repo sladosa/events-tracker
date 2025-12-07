@@ -104,9 +104,13 @@ def get_next_sort_order(client, table: str, user_id: str, parent_id: Optional[st
         query = client.table(table).select('sort_order').eq('user_id', user_id)
         
         if parent_id:
-            query = query.eq('parent_id', parent_id)
+            # Categories table uses parent_category_id, others use parent_id
+            parent_col = 'parent_category_id' if table == 'categories' else 'parent_id'
+            query = query.eq(parent_col, parent_id)
         else:
-            query = query.is_('parent_id', 'null')
+            # Categories table uses parent_category_id, others use parent_id
+            parent_col = 'parent_category_id' if table == 'categories' else 'parent_id'
+            query = query.is_(parent_col, 'null')
         
         result = query.order('sort_order', desc=True).limit(1).execute()
         
@@ -129,7 +133,7 @@ def load_all_structure_data(_client, user_id: str) -> Tuple[List[Dict], List[Dic
         areas_response = _client.table('areas')\
             .select('*')\
             .eq('user_id', user_id)\
-            .order('display_order')\
+            .order('sort_order')\
             .execute()
         areas = areas_response.data
 
@@ -137,7 +141,7 @@ def load_all_structure_data(_client, user_id: str) -> Tuple[List[Dict], List[Dic
         categories_response = _client.table('categories')\
             .select('*')\
             .eq('user_id', user_id)\
-            .order('display_order')\
+            .order('sort_order')\
             .execute()
         categories = categories_response.data
 
@@ -168,7 +172,7 @@ def load_structure_as_dataframe(client, user_id: str) -> pd.DataFrame:
         categories_by_id = {cat['id']: cat for cat in categories}
         categories_by_parent = {}
         for cat in categories:
-            parent_id = cat.get('parent_id')
+            parent_id = cat.get('parent_category_id')
             if parent_id not in categories_by_parent:
                 categories_by_parent[parent_id] = []
             categories_by_parent[parent_id].append(cat)
@@ -191,7 +195,7 @@ def load_structure_as_dataframe(client, user_id: str) -> pd.DataFrame:
             rows.append({
                 'Type': 'Area',
                 'Level': 0,
-                'Sort_Order': area['display_order'],
+                'Sort_Order': area['sort_order'],
                 'Area': area_name,
                 'Category_Path': area_name,
                 'Category': '',
@@ -211,7 +215,7 @@ def load_structure_as_dataframe(client, user_id: str) -> pd.DataFrame:
             # Add root categories for this area
             root_categories = categories_by_parent.get(None, [])
             root_categories = [c for c in root_categories if c['area_id'] == area_id]
-            root_categories.sort(key=lambda x: x['display_order'])
+            root_categories.sort(key=lambda x: x['sort_order'])
             
             for cat in root_categories:
                 _add_category_tree(
@@ -248,7 +252,7 @@ def _add_category_tree(
     rows.append({
         'Type': 'Category',
         'Level': cat_level,
-        'Sort_Order': category['display_order'],
+        'Sort_Order': category['sort_order'],
         'Area': area_name,
         'Category_Path': cat_path,
         'Category': cat_name,
@@ -303,7 +307,7 @@ def _add_category_tree(
     
     # Recursively add child categories
     child_categories = categories_by_parent.get(cat_id, [])
-    child_categories.sort(key=lambda x: x['display_order'])
+    child_categories.sort(key=lambda x: x['sort_order'])
     
     for child_cat in child_categories:
         _add_category_tree(
@@ -341,7 +345,7 @@ def add_new_area(client, user_id: str, name: str, description: str = "") -> Tupl
     """Add new area."""
     try:
         slug = generate_slug(name)
-        display_order = get_next_sort_order(client, 'areas', user_id)
+        sort_order = get_next_sort_order(client, 'areas', user_id)
         
         new_area = {
             'id': str(uuid.uuid4()),
@@ -349,8 +353,7 @@ def add_new_area(client, user_id: str, name: str, description: str = "") -> Tupl
             'name': name,
             'slug': slug,
             'description': description,
-            'display_order': display_order,
-            'is_filterable': True
+            'sort_order': sort_order
         }
         
         client.table('areas').insert(new_area).execute()
@@ -377,19 +380,18 @@ def add_new_category(
         else:
             level = 1
         
-        display_order = get_next_sort_order(client, 'categories', user_id, parent_id)
+        sort_order = get_next_sort_order(client, 'categories', user_id, parent_id)
         
         new_category = {
             'id': str(uuid.uuid4()),
             'user_id': user_id,
             'area_id': area_id,
-            'parent_id': parent_id,
+            'parent_category_id': parent_id,
             'name': name,
             'slug': slug,
             'description': description,
             'level': level,
-            'display_order': display_order,
-            'is_filterable': True
+            'sort_order': sort_order
         }
         
         client.table('categories').insert(new_category).execute()
@@ -413,36 +415,36 @@ def insert_category_between(
         insert_after_category_id: Category UUID to insert after (None = insert at start)
     """
     try:
-        # Get parent_id from insert_after category
+        # Get parent_category_id from insert_after category
         parent_id = None
         if insert_after_category_id:
             cat_after = client.table('categories')\
-                .select('parent_id, display_order')\
+                .select('parent_category_id, sort_order')\
                 .eq('id', insert_after_category_id)\
                 .single().execute()
-            parent_id = cat_after.data['parent_id']
-            insert_order = cat_after.data['display_order']
+            parent_id = cat_after.data['parent_category_id']
+            insert_order = cat_after.data['sort_order']
         else:
             insert_order = 0
         
         # Get all categories that need re-ordering
         categories_to_reorder = client.table('categories')\
-            .select('id, display_order')\
+            .select('id, sort_order, parent_category_id')\
             .eq('area_id', area_id)\
             .eq('user_id', user_id)\
-            .gte('display_order', insert_order + 1)\
-            .order('display_order')\
+            .gte('sort_order', insert_order + 1)\
+            .order('sort_order')\
             .execute()
         
         if parent_id:
-            categories_to_reorder = [c for c in categories_to_reorder.data if c.get('parent_id') == parent_id]
+            categories_to_reorder = [c for c in categories_to_reorder.data if c.get('parent_category_id') == parent_id]
         else:
-            categories_to_reorder = [c for c in categories_to_reorder.data if c.get('parent_id') is None]
+            categories_to_reorder = [c for c in categories_to_reorder.data if c.get('parent_category_id') is None]
         
         # Re-order (increment by 1)
         for cat in categories_to_reorder:
             client.table('categories')\
-                .update({'display_order': cat['display_order'] + 1})\
+                .update({'sort_order': cat['sort_order'] + 1})\
                 .eq('id', cat['id'])\
                 .eq('user_id', user_id)\
                 .execute()
@@ -459,13 +461,12 @@ def insert_category_between(
             'id': str(uuid.uuid4()),
             'user_id': user_id,
             'area_id': area_id,
-            'parent_id': parent_id,
+            'parent_category_id': parent_id,
             'name': name,
             'slug': slug,
             'description': description,
             'level': level,
-            'display_order': insert_order + 1,
-            'is_filterable': True
+            'sort_order': insert_order + 1
         }
         
         client.table('categories').insert(new_category).execute()
@@ -506,7 +507,6 @@ def add_new_attribute(
             'is_required': is_required,
             'default_value': default_value if default_value else None,
             'validation_rules': validation_rules if validation_rules else None,
-            'description': description,
             'sort_order': sort_order
         }
         
@@ -531,10 +531,8 @@ def check_area_has_dependencies(client, area_id: str, user_id: str) -> Tuple[boo
         if cats.data:
             return True, "Area has categories"
         
-        # Check events
-        events = client.table('events').select('id').eq('area_id', area_id).eq('user_id', user_id).limit(1).execute()
-        if events.data:
-            return True, "Area has events"
+        # Note: Events are linked via categories, not directly to areas
+        # If area has no categories, it has no events
         
         return False, ""
     except:
@@ -550,7 +548,7 @@ def check_category_has_dependencies(client, category_id: str, user_id: str) -> T
             return True, "Category has attributes"
         
         # Check child categories
-        children = client.table('categories').select('id').eq('parent_id', category_id).eq('user_id', user_id).limit(1).execute()
+        children = client.table('categories').select('id').eq('parent_category_id', category_id).eq('user_id', user_id).limit(1).execute()
         if children.data:
             return True, "Category has child categories"
         
