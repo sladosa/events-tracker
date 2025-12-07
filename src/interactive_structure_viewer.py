@@ -612,7 +612,7 @@ def delete_attribute(client, user_id: str, attribute_id: str) -> Tuple[bool, str
 # MAIN VIEWER FUNCTION
 # ============================================
 
-def interactive_structure_viewer(client, user_id: str):
+def render_interactive_structure_viewer(client, user_id: str):
     """
     Main interactive structure viewer with State Machine.
     
