@@ -4,7 +4,7 @@ Events Tracker - Interactive Structure Viewer Module
 Created: 2025-11-25 10:00 UTC
 Last Modified: 2025-12-08 09:00 UTC
 Python: 3.11
-Version: 1.10.0 - HYBRID Approach (State Machine + Bug Fixes + New Features)
+Version: 1.10.3 - HYBRID Approach (State Machine + Bug Fixes + New Features)
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -13,13 +13,13 @@ Integrated Excel export/import workflow for offline structure editing.
 **MINIMAL State Machine integration for improved reliability.**
 **Unified View Type control (Table/Sunburst/Treemap/Network Graph) with centralized filters.**
 
-âœ¨ NEW IN v1.10.0:
-- ðŸŽ¯ State Machine Integration (minimal, for critical paths only)
-- ðŸ› Bug Fix #1: Discard button now in unsaved changes banner
-- ðŸ› Bug Fix #2: Forms properly reset after ADD operations
-- ðŸ› Bug Fix #3: Discard works for filled forms
-- ðŸ†• Insert Between: Smart category insertion between existing ones
-- ðŸ†• Remove Between: Smart category removal with child promotion
+✨ NEW IN v1.10.0:
+- 🎯 State Machine Integration (minimal, for critical paths only)
+- 🐛 Bug Fix #1: Discard button now in unsaved changes banner
+- 🐛 Bug Fix #2: Forms properly reset after ADD operations
+- 🐛 Bug Fix #3: Discard works for filled forms
+- 🆕 Insert Between: Smart category insertion between existing ones
+- 🆕 Remove Between: Smart category removal with child promotion
 
 Features:
 - **STATE MACHINE**: Minimal integration for critical state management
@@ -63,244 +63,244 @@ Technical Details:
 - **Data Loss Prevention**: Filters disabled when unsaved changes exist
 
 CHANGELOG v1.9.11 (Add Operations Fix + UX Refinement - Complete):
-- ðŸ› FIXED: False positive after ADD operations (Bug #9 - CRITICAL)
+- 🐛 FIXED: False positive after ADD operations (Bug #9 - CRITICAL)
   - Problem: After adding Areas/Categories/Attributes, banner shows "X unsaved changes"
   - User report: Added item but got false positive banner + disabled filters
   - Root cause: Same as DELETE bug - incomplete state clearing
   - ADD operations cleared only original_df, not edited_df or editing_active
-- âœ… SOLUTION: Clear ALL state after ADD
+- ✅ SOLUTION: Clear ALL state after ADD
   - Add Areas: Clear all state (original_df, edited_df, editing_active)
   - Add Categories: Clear all state
   - Add Attributes: Clear all state
   - Consistent with DELETE fix from v1.9.10
-- ðŸŽ¨ UX IMPROVEMENT: Removed redundant "Switch to Edit Mode" button
+- 🎨 UX IMPROVEMENT: Removed redundant "Switch to Edit Mode" button
   - User feedback: Confusing to have both Mode toggle AND button
   - Solution: Keep only Mode toggle (radio buttons) for clarity
   - Simpler, cleaner interface
-- ðŸ”„ UX IMPROVEMENT: Discard button repositioned
+- 🔄 UX IMPROVEMENT: Discard button repositioned
   - OLD: Top row (col2) + Banner = Inconsistent placement
   - NEW: Each tab (Areas, Categories, Attributes) below tables
   - Benefit: Universal exit button always accessible in context
   - Position: Below Add forms, above tab boundary
   - Behavior: Disabled when no changes, enabled when changes exist
   - Upload Excel tab: NO Discard (separate logic as requested)
-- ðŸŽ¯ SIMPLIFIED: Row 1 layout
+- 🎯 SIMPLIFIED: Row 1 layout
   - Removed empty col2 and col3
   - Clean single-column Mode toggle
   - Less visual clutter
-- ðŸ’¬ BEHAVIOR: Complete state management
+- 💬 BEHAVIOR: Complete state management
   - ADD operations: Clear all state, unlock filters immediately
   - DELETE operations: Clear all state (from v1.9.10)
   - SAVE operations: Clear all state (existing)
   - DISCARD operations: Clear all state, always available per-tab
-- ðŸŽ¯ IMPACT: Perfect UX + Complete functionality
-  - No false positives after ANY operation âœ…
-  - Discard always accessible where needed âœ…
-  - No redundant buttons âœ…
-  - Intuitive, clean interface âœ…
-  - Smart Lock system COMPLETE âœ…
+- 🎯 IMPACT: Perfect UX + Complete functionality
+  - No false positives after ANY operation ✅
+  - Discard always accessible where needed ✅
+  - No redundant buttons ✅
+  - Intuitive, clean interface ✅
+  - Smart Lock system COMPLETE ✅
 
 CHANGELOG v1.9.10 (DELETE State Fix - Complete Smart Lock):
-- ðŸ› FIXED: False positive "unsaved changes" after DELETE operations (Bug #8 - CRITICAL)
+- 🐛 FIXED: False positive "unsaved changes" after DELETE operations (Bug #8 - CRITICAL)
   - Problem: After deleting Areas/Categories/Attributes, banner shows "X unsaved changes"
   - User report: Deleted attribute but got "1 unsaved change" + disabled filters
   - Root cause: DELETE operations cleared only original_df, not edited_df or editing_active
-  - Detection saw difference between states â†’ false positive
+  - Detection saw difference between states → false positive
   - Filters stayed locked, confusing UX
-- âœ… SOLUTION: Clear ALL state after DELETE
-  - Clear original_df âœ…
-  - Clear edited_df âœ… (NEW!)
-  - Clear editing_active flag âœ… (NEW!)
+- ✅ SOLUTION: Clear ALL state after DELETE
+  - Clear original_df ✅
+  - Clear edited_df ✅ (NEW!)
+  - Clear editing_active flag ✅ (NEW!)
   - Unlock filters immediately after DELETE
-- ðŸŽ¯ FIXED: All DELETE operations
+- 🎯 FIXED: All DELETE operations
   - Delete Areas: Clear all state
   - Delete Categories: Clear all state  
   - Delete Attributes: Clear all state
   - Consistent behavior across all delete operations
-- ðŸ’¬ BEHAVIOR: Clean state after DELETE
-  - Delete operation succeeds â†’ Success message âœ…
-  - All detection state cleared â†’ No false positives âœ…
-  - Filters unlocked â†’ Can browse immediately âœ…
-  - Rerun â†’ Fresh clean state âœ…
-- ðŸŽ¯ IMPACT: CRITICAL - Completes Smart Lock system
-  - DELETE operations now work correctly âœ…
-  - No false positives after any operation âœ…
-  - Filters behave predictably âœ…
-  - User confusion eliminated âœ…
+- 💬 BEHAVIOR: Clean state after DELETE
+  - Delete operation succeeds → Success message ✅
+  - All detection state cleared → No false positives ✅
+  - Filters unlocked → Can browse immediately ✅
+  - Rerun → Fresh clean state ✅
+- 🎯 IMPACT: CRITICAL - Completes Smart Lock system
+  - DELETE operations now work correctly ✅
+  - No false positives after any operation ✅
+  - Filters behave predictably ✅
+  - User confusion eliminated ✅
 
 CHANGELOG v1.9.9 (Smart Lock - FINAL Solution):
-- ðŸŽ¯ IMPLEMENTED: Smart filter locking based on data_editor rendering
+- 🎯 IMPLEMENTED: Smart filter locking based on data_editor rendering
   - Problem: v1.9.8 didn't detect when user actually started editing
   - User feedback: Filters should lock when editing starts, not just in Edit Mode
   - Solution: Set editing_active=True when data_editor renders
   - Clear editing_active=False on Save/Discard actions
-- ðŸ”’ BEHAVIOR: Filters lock automatically when data editor opens
-  - Edit Mode â†’ Filters enabled (can browse and filter) âœ…
-  - Open data editor (Areas/Categories/Attributes) â†’ Filters LOCK ðŸ”’
-  - User edits data â†’ Filters stay locked
-  - Save or Discard â†’ Filters UNLOCK âœ…
-  - Natural workflow: browse â†’ edit â†’ save/discard â†’ browse again
-- âœ… IMPROVED: Smart detection instead of complex logic
+- 🔒 BEHAVIOR: Filters lock automatically when data editor opens
+  - Edit Mode → Filters enabled (can browse and filter) ✅
+  - Open data editor (Areas/Categories/Attributes) → Filters LOCK 🔒
+  - User edits data → Filters stay locked
+  - Save or Discard → Filters UNLOCK ✅
+  - Natural workflow: browse → edit → save/discard → browse again
+- ✅ IMPROVED: Smart detection instead of complex logic
   - editing_active flag set when data_editor() is called
   - Flag cleared on Save/Discard button clicks
   - No delay, no false positives, no complex comparison
   - Simple, reliable, bulletproof
-- ðŸ’¬ UPDATED: Clear feedback messages
+- 💬 UPDATED: Clear feedback messages
   - "Filters are enabled. When you open a data editor..."
   - "Finish editing to use filters (Save or Discard)"
   - User always understands current state
-- ðŸŽ¯ IMPACT: FINAL - Perfect balance of flexibility and safety
-  - Can use filters to navigate before editing âœ…
-  - Filters lock as soon as editing starts âœ…
-  - No data loss possible âœ…
-  - Intuitive workflow âœ…
-  - Zero edge cases âœ…
+- 🎯 IMPACT: FINAL - Perfect balance of flexibility and safety
+  - Can use filters to navigate before editing ✅
+  - Filters lock as soon as editing starts ✅
+  - No data loss possible ✅
+  - Intuitive workflow ✅
+  - Zero edge cases ✅
 
 CHANGELOG v1.9.8 (Clean UX Fix - Final Data Loss Prevention):
-- ðŸŽ¨ IMPROVED: Clean UX without Streamlit warnings (Bug #7 - UX)
+- 🎨 IMPROVED: Clean UX without Streamlit warnings (Bug #7 - UX)
   - Problem: v1.9.7 revert strategy caused Streamlit warning about Session State API
   - User feedback: Confusing yellow warning message, filters not usable in Edit Mode
   - Solution: Remove revert strategy, rely on simple disabled=True
   - Result: Clean UI, no warnings, simple and clear behavior
-- ðŸ”˜ ADDED: Permanent "Discard Changes" button in Edit Mode
+- 🔘 ADDED: Permanent "Discard Changes" button in Edit Mode
   - Always visible in col2 (next to mode toggle)
   - Disabled when no changes (grey out)
   - Enabled when changes exist (clear and accessible)
   - User can always easily abandon unwanted edits
-- ðŸ’¬ IMPROVED: Clear feedback messages
+- 💬 IMPROVED: Clear feedback messages
   - Dynamic help tooltips: "Save or discard changes to use filters"
   - Info box in Edit Mode: "Filters are enabled..." when no changes
   - Improved error banner: Clear explanation of why filters disabled
   - User always knows why filters disabled and how to re-enable
-- ðŸŽ¯ SIMPLIFIED: Callback logic
+- 🎯 SIMPLIFIED: Callback logic
   - Removed complex revert strategy (caused warnings)
   - Simple: disabled=unsaved_changes
   - Callbacks just update state normally
   - Disabled parameter prevents callback execution
-- âœ… VERIFIED: Complete data loss prevention with clean UX
+- ✅ VERIFIED: Complete data loss prevention with clean UX
   - Filters truly disabled when unsaved changes
   - No Streamlit warnings
   - Clear user feedback
   - Easy access to Discard button
-  - Natural workflow: edit â†’ filter blocked â†’ save/discard â†’ filter enabled
-- ðŸŽ¯ IMPACT: CRITICAL - Complete fix with excellent UX
+  - Natural workflow: edit → filter blocked → save/discard → filter enabled
+- 🎯 IMPACT: CRITICAL - Complete fix with excellent UX
   - No data loss possible
   - No confusing warnings
   - Clear and intuitive interface
   - User satisfaction high
 
 CHANGELOG v1.9.7 (Filter Revert Fix - Data Loss Prevention v2):
-- ðŸ› FIXED: Filter callbacks now REVERT to old value when unsaved changes exist (Bug #6 - CRITICAL)
+- 🐛 FIXED: Filter callbacks now REVERT to old value when unsaved changes exist (Bug #6 - CRITICAL)
   - Problem: v1.9.6 didn't prevent filter change, only avoided reset
   - Root cause: Disabled widgets still trigger on_change callbacks in Streamlit
-  - User could change filter despite disabled state â†’ data lost
+  - User could change filter despite disabled state → data lost
   - Solution: REVERT filter selector to previous value in callback if unsaved changes
-- ðŸ”’ IMPROVED: True filter blocking with value reversion
+- 🔒 IMPROVED: True filter blocking with value reversion
   - on_area_change: Reverts area_filter_selector if has_edits
   - on_category_change: Reverts category_filter_selector if has_edits
   - Filter change completely blocked - no state change occurs
-- âœ… VERIFIED: Unsaved changes survive ALL filter change attempts
-  - User makes edit â†’ Tries to change filter â†’ Filter stays same âœ…
-  - Unsaved changes preserved â†’ Banner remains â†’ Data safe âœ…
-  - Even if disabled UI fails, callback protection works âœ…
-- ðŸŽ¯ IMPACT: CRITICAL - Complete data loss prevention
+- ✅ VERIFIED: Unsaved changes survive ALL filter change attempts
+  - User makes edit → Tries to change filter → Filter stays same ✅
+  - Unsaved changes preserved → Banner remains → Data safe ✅
+  - Even if disabled UI fails, callback protection works ✅
+- 🎯 IMPACT: CRITICAL - Complete data loss prevention
   - Triple protection: Disabled UI + Callback revert + State preservation
   - No possible way to lose data through filter changes
   - Bulletproof Edit Mode safety
 
 CHANGELOG v1.9.6 (Data Loss Prevention - CRITICAL FIX):
-- ðŸ› FIXED: Filter changes no longer cause data loss when unsaved changes exist (Bug #5 - CRITICAL DATA LOSS)
+- 🐛 FIXED: Filter changes no longer cause data loss when unsaved changes exist (Bug #5 - CRITICAL DATA LOSS)
   - Problem: User edits data, changes filter, unsaved changes LOST without warning
   - Root cause: v1.9.5 filter callbacks reset state even with unsaved changes
   - Solution: Check for unsaved changes BEFORE resetting state in callbacks
-- ðŸ”’ IMPROVED: Callbacks now preserve unsaved changes
+- 🔒 IMPROVED: Callbacks now preserve unsaved changes
   - on_area_change: Only resets if no edited_df exists
   - on_category_change: Only resets if no edited_df exists
   - Prevents accidental data loss from filter changes
-- âœ… VERIFIED: Unsaved changes survive filter change attempts
-  - User makes edit â†’ Changes filter â†’ Changes preserved âœ…
+- ✅ VERIFIED: Unsaved changes survive filter change attempts
+  - User makes edit → Changes filter → Changes preserved ✅
   - Filter should be disabled anyway (v1.9.3 feature)
   - Double protection: disabled UI + protected callbacks
-- ðŸŽ¯ IMPACT: CRITICAL - Prevents silent data loss
+- 🎯 IMPACT: CRITICAL - Prevents silent data loss
   - User Experience: Much safer Edit Mode
   - Data Integrity: Preserved even with user mistakes
   - Trust: System protects user's work
 
 CHANGELOG v1.9.5 (Filter Change Detection Fix - Edge Case):
-- ðŸ› FIXED: Filter changes in Edit Mode no longer trigger false unsaved changes (Bug #4 - EDGE CASE)
+- 🐛 FIXED: Filter changes in Edit Mode no longer trigger false unsaved changes (Bug #4 - EDGE CASE)
   - Problem: Changing Area/Category filter triggered "0 unsaved changes" banner
   - Root cause: Filter change caused DataFrame reset but detection still compared old references
   - Solution: Reset original_df/edited_df on filter change (on_area_change, on_category_change)
-- ðŸ› FIXED: "0 unsaved changes" banner no longer appears (improved detection logic)
+- 🐛 FIXED: "0 unsaved changes" banner no longer appears (improved detection logic)
   - If num_changes = 0, return False (not unsaved_changes)
   - Prevents false positives from minor DataFrame differences (index order, etc.)
-- ðŸŽ¨ IMPROVED: Edit Mode interface hidden while banner is active
+- 🎨 IMPROVED: Edit Mode interface hidden while banner is active
   - User must resolve changes (save/discard) before accessing edit tabs
   - Cleaner UX - no confusing "disabled" sections while changes pending
   - Added st.stop() to prevent rendering edit interface
-- ðŸ“ IMPROVED: Better warning message when edit interface is hidden
+- 📝 IMPROVED: Better warning message when edit interface is hidden
   - Clear instructions: Discard or Save
   - Tip: Interface will appear after changes resolved
-- âœ… TESTED: Filter changes in Edit Mode work smoothly without false alarms
-- ðŸŽ¯ IMPACT: Edge case fixed - Edit Mode now works correctly with filters
+- ✅ TESTED: Filter changes in Edit Mode work smoothly without false alarms
+- 🎯 IMPACT: Edge case fixed - Edit Mode now works correctly with filters
 
 CHANGELOG v1.9.4 (Critical Bugfixes - False Positive Detection):
-- ðŸ› FIXED: False positive unsaved changes detection (Bug #1 - BLOCKER)
+- 🐛 FIXED: False positive unsaved changes detection (Bug #1 - BLOCKER)
   - Problem: System showed "36 unsaved changes" when no actual changes made
   - Root cause: st.data_editor returned DataFrames with different dtypes/NaN handling
   - Solution: Normalized DataFrame comparison (convert to strings, handle NaN consistently)
-- ðŸ› FIXED: Add Attribute filter showed all Areas instead of filtered Area (Bug #2 - HIGH)
+- 🐛 FIXED: Add Attribute filter showed all Areas instead of filtered Area (Bug #2 - HIGH)
   - Problem: Form used old filter keys instead of unified view_filters
   - Solution: Updated to use st.session_state.view_filters['area'] and ['category']
-- ðŸ“ IMPROVED: Better preview detection - shows actual changes accurately
-- ðŸ“ IMPROVED: Clearer instructions for save workflow in banner
-- âœ… TESTED: Zero false positives - only real changes trigger warning
-- ðŸŽ¯ IMPACT: Users can now trust the unsaved changes detection system
+- 📝 IMPROVED: Better preview detection - shows actual changes accurately
+- 📝 IMPROVED: Clearer instructions for save workflow in banner
+- ✅ TESTED: Zero false positives - only real changes trigger warning
+- 🎯 IMPACT: Users can now trust the unsaved changes detection system
 
 CHANGELOG v1.9.3 (Unsaved Changes UX Improvement):
-- ðŸŽ¯ UX: Prominent error banner shows number of unsaved changes
-- ðŸ‘ï¸ NEW: Expandable preview of what changed (row, type, name, columns)
-- ðŸ”’ FIXED: Filters now DISABLED when unsaved changes exist (prevents accidental data loss)
-- ðŸ—‘ï¸ NEW: "Discard All Changes" button at the top (quick access)
-- ðŸ“ IMPROVED: Clear instructions on how to save (scroll to Edit Mode section)
-- âš ï¸ PREVENTED: Users can no longer accidentally change filters and lose edits
-- ðŸŽ¨ UX: Visual hierarchy - Error â†’ Preview â†’ Instructions â†’ Actions
+- 🎯 UX: Prominent error banner shows number of unsaved changes
+- 👁️ NEW: Expandable preview of what changed (row, type, name, columns)
+- 🔒 FIXED: Filters now DISABLED when unsaved changes exist (prevents accidental data loss)
+- 🗑️ NEW: "Discard All Changes" button at the top (quick access)
+- 📝 IMPROVED: Clear instructions on how to save (scroll to Edit Mode section)
+- ⚠️ PREVENTED: Users can no longer accidentally change filters and lose edits
+- 🎨 UX: Visual hierarchy - Error → Preview → Instructions → Actions
 
 CHANGELOG v1.7.1 (Hotfix - Search Term Scope):
-- ðŸ› FIXED: UnboundLocalError for search_term in Generate Excel
-- ðŸ”§ MOVED: search_term definition before col3 (Generate Excel button)
-- âœ… TESTED: Filtered Excel export now works correctly
-- ðŸ“ ISSUE: search_term was referenced before assignment (line 1373 before 1417)
-- ðŸŽ¯ FIX: Moved search input widget before button to ensure scope availability
+- 🐛 FIXED: UnboundLocalError for search_term in Generate Excel
+- 🔧 MOVED: search_term definition before col3 (Generate Excel button)
+- ✅ TESTED: Filtered Excel export now works correctly
+- 📝 ISSUE: search_term was referenced before assignment (line 1373 before 1417)
+- 🎯 FIX: Moved search input widget before button to ensure scope availability
 
 CHANGELOG v1.7.0 (Filtered Excel Export):
-- âœ¨ NEW: Generate Excel respects active filters (Area + Search)
-- ðŸŽ¯ FEATURE: Export filtered structure for sharing specific Area themes
-- ðŸ“¦ USE CASE: Create starter templates for new users by exporting single Areas
-- ðŸ”§ IMPROVED: Success message shows which filters were applied
-- ðŸ“ TECHNICAL: EnhancedStructureExporter now accepts filter_area and filter_category params
+- ✨ NEW: Generate Excel respects active filters (Area + Search)
+- 🎯 FEATURE: Export filtered structure for sharing specific Area themes
+- 📦 USE CASE: Create starter templates for new users by exporting single Areas
+- 🔧 IMPROVED: Success message shows which filters were applied
+- 📝 TECHNICAL: EnhancedStructureExporter now accepts filter_area and filter_category params
 
 CHANGELOG v1.6.1 (Production Release):
-- ðŸ—‘ï¸ REMOVED: Refresh button from Edit Mode (user feedback - not needed)
-- ðŸŽ¯ CLEAN: Edit Mode col3 now empty (intentional - refresh via browser or navigation)
-- ðŸ“ NOTE: Read-Only mode keeps Generate Excel button (primary action)
+- 🗑️ REMOVED: Refresh button from Edit Mode (user feedback - not needed)
+- 🎯 CLEAN: Edit Mode col3 now empty (intentional - refresh via browser or navigation)
+- 📝 NOTE: Read-Only mode keeps Generate Excel button (primary action)
 
 CHANGELOG v1.6.0:
-- âœ¨ NEW: Collapsible Help section at page top with comprehensive guide
-- âœ¨ NEW: Generate Enhanced Excel button in Read-Only mode (replaces Refresh)
-- âœ¨ NEW: Upload Hierarchical Excel tab in Edit Mode (4th tab)
-- ðŸ”§ IMPROVED: Complete Excel workflow integrated into single page
-- ðŸ”§ IMPROVED: Better UX with contextual buttons (Excel export only in Read-Only)
-- ðŸ“š DOCUMENTATION: Detailed help for both direct editing and Excel workflows
-- ðŸŽ¯ GOAL: Single hub for all structure management operations
-- âš¡ IMPORTS: Added enhanced_structure_exporter, hierarchical_parser, error_reporter
+- ✨ NEW: Collapsible Help section at page top with comprehensive guide
+- ✨ NEW: Generate Enhanced Excel button in Read-Only mode (replaces Refresh)
+- ✨ NEW: Upload Hierarchical Excel tab in Edit Mode (4th tab)
+- 🔧 IMPROVED: Complete Excel workflow integrated into single page
+- 🔧 IMPROVED: Better UX with contextual buttons (Excel export only in Read-Only)
+- 📚 DOCUMENTATION: Detailed help for both direct editing and Excel workflows
+- 🎯 GOAL: Single hub for all structure management operations
+- ⚡ IMPORTS: Added enhanced_structure_exporter, hierarchical_parser, error_reporter
 
 CHANGELOG v1.5.9:
-- âœ… MAJOR FIX: Two-step form approach - select Data Type OUTSIDE form first
-- ðŸŽ¯ SOLUTION: Data Type selector triggers form re-render with relevant fields
-- âœ¨ NEW UX: Step 1: Select Data Type â†’ Step 2: Fill relevant fields
-- ðŸ”§ FIXED: Fields now actually hide/show when Data Type changes (user feedback!)
-- ðŸ’¡ IMPROVED: Helper text shows which fields are hidden and why
+- ✅ MAJOR FIX: Two-step form approach - select Data Type OUTSIDE form first
+- 🎯 SOLUTION: Data Type selector triggers form re-render with relevant fields
+- ✨ NEW UX: Step 1: Select Data Type → Step 2: Fill relevant fields
+- 🔧 FIXED: Fields now actually hide/show when Data Type changes (user feedback!)
+- 💡 IMPROVED: Helper text shows which fields are hidden and why
 - Field visibility rules (unchanged):
   - Unit: ONLY 'number' type
   - Default Value: All EXCEPT 'link' and 'image'
@@ -308,59 +308,59 @@ CHANGELOG v1.5.9:
 - Technical: Data Type selectbox outside st.form() allows dynamic field rendering
 
 CHANGELOG v1.5.8:
-- ðŸ› FIXED: Reverted to show/hide approach instead of disabled fields
-- ðŸ”§ IMPROVED: Unit field now shows ONLY for 'number' type (user feedback)
-- ðŸ”§ IMPROVED: Default Value hidden for 'link' and 'image' types
-- ðŸ”§ IMPROVED: Validation Min/Max show only for 'number' and 'datetime' types
-- ðŸ’¡ IMPROVED: Helper caption shows which fields are hidden and why
+- 🐛 FIXED: Reverted to show/hide approach instead of disabled fields
+- 🔧 IMPROVED: Unit field now shows ONLY for 'number' type (user feedback)
+- 🔧 IMPROVED: Default Value hidden for 'link' and 'image' types
+- 🔧 IMPROVED: Validation Min/Max show only for 'number' and 'datetime' types
+- 💡 IMPROVED: Helper caption shows which fields are hidden and why
 - Field visibility rules:
   - Unit: ONLY 'number' type
   - Default Value: All EXCEPT 'link' and 'image'
   - Validation Min/Max: ONLY 'number' and 'datetime'
-- âš ï¸ NOTE: Table editing still allows all columns - validation needed (future fix)
+- ⚠️ NOTE: Table editing still allows all columns - validation needed (future fix)
 
 CHANGELOG v1.5.7:
-- ðŸ› FIXED: Smart field masking now works correctly - uses DISABLED fields instead of hiding
-- ðŸ”§ IMPROVED: Non-applicable fields shown as disabled (greyed out) with help text
-- ðŸ”§ IMPROVED: Added caption explaining disabled field behavior
-- âœ… VERIFIED: Disabled fields don't allow input and pass empty values to database
+- 🐛 FIXED: Smart field masking now works correctly - uses DISABLED fields instead of hiding
+- 🔧 IMPROVED: Non-applicable fields shown as disabled (greyed out) with help text
+- 🔧 IMPROVED: Added caption explaining disabled field behavior
+- ✅ VERIFIED: Disabled fields don't allow input and pass empty values to database
 - Field behavior by Data Type:
-  - 'link' & 'image': Unit, Default Value, Validation Min/Max â†’ DISABLED
-  - 'text' & 'boolean': Validation Min/Max â†’ DISABLED
-  - 'number' & 'datetime': All fields â†’ ENABLED
+  - 'link' & 'image': Unit, Default Value, Validation Min/Max → DISABLED
+  - 'text' & 'boolean': Validation Min/Max → DISABLED
+  - 'number' & 'datetime': All fields → ENABLED
 
 CHANGELOG v1.5.6:
-- ðŸ› FIXED: Add Attribute form now always visible, even when no attributes exist (Bug #11 - CRITICAL)
-- ðŸ› FIXED: Filter by Area in Edit Attributes now queries database directly (Bug #12)
-- âœ¨ NEW FEATURE: Smart field masking based on Data Type
+- 🐛 FIXED: Add Attribute form now always visible, even when no attributes exist (Bug #11 - CRITICAL)
+- 🐛 FIXED: Filter by Area in Edit Attributes now queries database directly (Bug #12)
+- ✨ NEW FEATURE: Smart field masking based on Data Type
   - 'link' and 'image' types: Hide Unit, Default Value, Validation fields
   - 'text' and 'boolean' types: Hide Validation Min/Max
   - 'number' and 'datetime' types: Show all fields
-- ðŸ”§ IMPROVED: Better UX with info messages for hidden fields
-- ðŸ”§ IMPROVED: Consistent behavior across all tabs (forms always accessible)
+- 🔧 IMPROVED: Better UX with info messages for hidden fields
+- 🔧 IMPROVED: Consistent behavior across all tabs (forms always accessible)
 
 CHANGELOG v1.5.5:
-- ðŸ› FIXED: Add Category form now always visible, even when no categories exist (Bug #8)
-- ðŸ› FIXED: Filter by Category in Edit Attributes shows ALL categories from filtered Area (Bug #9)
-- âœ… VERIFIED: Add Attribute respects filters correctly (Bug #10 was already fixed in v1.5.4)
-- ðŸ”§ IMPROVED: Better info messages when no categories/attributes found
-- ðŸ”§ IMPROVED: Add Category accessible even with empty filtered areas
+- 🐛 FIXED: Add Category form now always visible, even when no categories exist (Bug #8)
+- 🐛 FIXED: Filter by Category in Edit Attributes shows ALL categories from filtered Area (Bug #9)
+- ✅ VERIFIED: Add Attribute respects filters correctly (Bug #10 was already fixed in v1.5.4)
+- 🔧 IMPROVED: Better info messages when no categories/attributes found
+- 🔧 IMPROVED: Add Category accessible even with empty filtered areas
 
 CHANGELOG v1.5.4:
-- ðŸ› FIXED: Filter by Area dropdown in Edit Categories now queries database directly (Bug #6)
-- ðŸ› FIXED: Add Attribute form respects Area and Category filters (Bug #7)
-- ðŸ”§ IMPROVED: Add Attribute shows filter context with info box
-- ðŸ”§ IMPROVED: Category selection locked when single option available
+- 🐛 FIXED: Filter by Area dropdown in Edit Categories now queries database directly (Bug #6)
+- 🐛 FIXED: Add Attribute form respects Area and Category filters (Bug #7)
+- 🔧 IMPROVED: Add Attribute shows filter context with info box
+- 🔧 IMPROVED: Category selection locked when single option available
 
 CHANGELOG v1.5.3:
-- ðŸ› CRITICAL FIX: Form double submit prevention with unique keys
-- ðŸ› FIXED: Add Area form now uses unique key per submit (Bug #3)
-- ðŸ› FIXED: Add Category form now uses unique key per submit (Bug #4 - prevents duplicate inserts)
-- ðŸ› FIXED: Add Attribute form now uses unique key per submit
-- ðŸ› FIXED: Form fields clear properly after successful add (Bug #5)
-- ðŸ”§ IMPROVED: Form counter in session state increments after success
-- ðŸ”§ IMPROVED: Each form gets fresh state after rerun
-- âœ¨ NEW: Form submission counters (area_form_counter, category_form_counter, attribute_form_counter)
+- 🐛 CRITICAL FIX: Form double submit prevention with unique keys
+- 🐛 FIXED: Add Area form now uses unique key per submit (Bug #3)
+- 🐛 FIXED: Add Category form now uses unique key per submit (Bug #4 - prevents duplicate inserts)
+- 🐛 FIXED: Add Attribute form now uses unique key per submit
+- 🐛 FIXED: Form fields clear properly after successful add (Bug #5)
+- 🔧 IMPROVED: Form counter in session state increments after success
+- 🔧 IMPROVED: Each form gets fresh state after rerun
+- ✨ NEW: Form submission counters (area_form_counter, category_form_counter, attribute_form_counter)
 """
 
 import streamlit as st
@@ -502,7 +502,7 @@ def check_area_has_dependencies(client, area_id: str, user_id: str) -> Tuple[boo
             num_events = 0
         
         if num_categories > 0 or num_events > 0:
-            msg = f"âš ï¸ **WARNING:** This area has {num_categories} categories"
+            msg = f"⚠️ **WARNING:** This area has {num_categories} categories"
             if num_events > 0:
                 msg += f" and {num_events} events"
             msg += ". Deleting it will CASCADE DELETE all of them!"
@@ -540,7 +540,7 @@ def check_category_has_dependencies(client, category_id: str, user_id: str) -> T
         num_children = len(child_result.data) if child_result.data else 0
         
         if num_attributes > 0 or num_events > 0 or num_children > 0:
-            msg = f"âš ï¸ **WARNING:** This category has"
+            msg = f"⚠️ **WARNING:** This category has"
             parts = []
             if num_children > 0:
                 parts.append(f"{num_children} child categories")
@@ -607,7 +607,7 @@ def load_all_structure_data(_client, user_id: str) -> Tuple[List[Dict], List[Dic
         return areas, categories, attributes
     
     except Exception as e:
-        st.error(f"âŒ Error loading structure data: {str(e)}")
+        st.error(f"❌ Error loading structure data: {str(e)}")
         return [], [], []
 
 
@@ -632,7 +632,7 @@ def load_structure_as_dataframe(client, user_id: str) -> pd.DataFrame:
         areas, categories, attributes = load_all_structure_data(client, user_id)
         
         if not areas:
-            st.warning("âš ï¸ No areas found. Please upload a template first.")
+            st.warning("⚠️ No areas found. Please upload a template first.")
             return pd.DataFrame()
         
         # Build lookup maps for O(1) access
@@ -715,7 +715,7 @@ def load_structure_as_dataframe(client, user_id: str) -> pd.DataFrame:
         return pd.DataFrame(rows)
     
     except Exception as e:
-        st.error(f"âŒ Error loading structure: {str(e)}")
+        st.error(f"❌ Error loading structure: {str(e)}")
         return pd.DataFrame()
 
 
@@ -1132,7 +1132,7 @@ def add_new_area(client, user_id: str, name: str, description: str = "") -> Tupl
         # Check if area with this name already exists (BEFORE generating UUID)
         existing = client.table('areas').select('id').eq('user_id', user_id).eq('name', name).execute()
         if existing.data and len(existing.data) > 0:
-            return False, f"âŒ Area '{name}' already exists! Please choose a different name or delete the existing area first."
+            return False, f"❌ Area '{name}' already exists! Please choose a different name or delete the existing area first."
         
         # Generate UUID and slug
         new_id = str(uuid.uuid4())
@@ -1159,19 +1159,19 @@ def add_new_area(client, user_id: str, name: str, description: str = "") -> Tupl
         
         # Verify insert was successful
         if result.data and len(result.data) > 0:
-            return True, f"âœ… Successfully added area: {name}"
+            return True, f"✅ Successfully added area: {name}"
         else:
-            return False, f"âŒ Failed to add area: {name}"
+            return False, f"❌ Failed to add area: {name}"
     
     except Exception as e:
         error_msg = str(e)
         # Handle duplicate key constraint
         if '23505' in error_msg or 'duplicate' in error_msg.lower():
-            return False, f"âŒ Area '{name}' already exists! Please choose a different name."
+            return False, f"❌ Area '{name}' already exists! Please choose a different name."
         # Handle unique constraint
         if 'unique constraint' in error_msg.lower():
-            return False, f"âŒ Area '{name}' already exists (unique constraint violation)."
-        return False, f"âŒ Error adding area: {error_msg}"
+            return False, f"❌ Area '{name}' already exists (unique constraint violation)."
+        return False, f"❌ Error adding area: {error_msg}"
 
 
 def add_new_category(
@@ -1202,12 +1202,12 @@ def add_new_category(
             # For root categories: check unique constraint (name + area_id + parent=NULL)
             existing = client.table('categories').select('id').eq('user_id', user_id).eq('area_id', area_id).eq('name', name).is_('parent_category_id', 'null').execute()
             if existing.data and len(existing.data) > 0:
-                return False, f"âŒ Root category '{name}' already exists in this area! Please choose a different name."
+                return False, f"❌ Root category '{name}' already exists in this area! Please choose a different name."
         else:
             # For child categories: check if name exists under same parent
             existing = client.table('categories').select('id').eq('user_id', user_id).eq('parent_category_id', parent_category_id).eq('name', name).execute()
             if existing.data and len(existing.data) > 0:
-                return False, f"âŒ Category '{name}' already exists under this parent! Please choose a different name."
+                return False, f"❌ Category '{name}' already exists under this parent! Please choose a different name."
         
         # Generate UUID and slug
         new_id = str(uuid.uuid4())
@@ -1220,7 +1220,7 @@ def add_new_category(
             if parent.data and len(parent.data) > 0:
                 level = parent.data[0]['level'] + 1
             else:
-                return False, "âŒ Parent category not found"
+                return False, "❌ Parent category not found"
         else:
             level = 1  # Root category
         
@@ -1251,19 +1251,19 @@ def add_new_category(
         # Verify insert was successful
         if result.data and len(result.data) > 0:
             parent_info = " (root category)" if not parent_category_id else ""
-            return True, f"âœ… Successfully added category: {name}{parent_info}"
+            return True, f"✅ Successfully added category: {name}{parent_info}"
         else:
-            return False, f"âŒ Failed to add category: {name}"
+            return False, f"❌ Failed to add category: {name}"
     
     except Exception as e:
         error_msg = str(e)
         # Handle duplicate key constraints
         if '23505' in error_msg or 'duplicate' in error_msg.lower() or 'unique constraint' in error_msg.lower():
             if 'idx_categories_root_unique' in error_msg:
-                return False, f"âŒ Root category '{name}' already exists in this area!"
+                return False, f"❌ Root category '{name}' already exists in this area!"
             else:
-                return False, f"âŒ Category '{name}' already exists!"
-        return False, f"âŒ Error adding category: {error_msg}"
+                return False, f"❌ Category '{name}' already exists!"
+        return False, f"❌ Error adding category: {error_msg}"
 
 
 def insert_category_between(
@@ -1304,7 +1304,7 @@ def insert_category_between(
                 .single().execute()
             
             if not cat_after.data:
-                return False, "âŒ Reference category not found"
+                return False, "❌ Reference category not found"
             
             parent_id = cat_after.data['parent_category_id']
             insert_order = cat_after.data['sort_order']
@@ -1368,12 +1368,12 @@ def insert_category_between(
         if result.data and len(result.data) > 0:
             # Clear cache
             load_structure_as_dataframe.clear()
-            return True, f"âœ… Category '{name}' inserted successfully!"
+            return True, f"✅ Category '{name}' inserted successfully!"
         else:
-            return False, f"âŒ Failed to insert category"
+            return False, f"❌ Failed to insert category"
         
     except Exception as e:
-        return False, f"âŒ Error inserting category: {str(e)}"
+        return False, f"❌ Error inserting category: {str(e)}"
 
 
 def remove_category_between(
@@ -1410,7 +1410,7 @@ def remove_category_between(
             .single().execute()
         
         if not category.data:
-            return False, "âŒ Category not found"
+            return False, "❌ Category not found"
         
         cat_name = category.data['name']
         parent_id = category.data['parent_category_id']
@@ -1458,14 +1458,14 @@ def remove_category_between(
         # Clear cache
         load_structure_as_dataframe.clear()
         
-        msg = f"âœ… Removed '{cat_name}'"
+        msg = f"✅ Removed '{cat_name}'"
         if len(children.data) > 0:
             msg += f" and promoted {len(children.data)} child categories"
         
         return True, msg
         
     except Exception as e:
-        return False, f"âŒ Error: {str(e)}"
+        return False, f"❌ Error: {str(e)}"
 
 
 def add_new_attribute(
@@ -1541,10 +1541,10 @@ def add_new_attribute(
         # Insert
         client.table('attribute_definitions').insert(attribute_data).execute()
         
-        return True, f"âœ… Successfully added attribute: {name}"
+        return True, f"✅ Successfully added attribute: {name}"
     
     except Exception as e:
-        return False, f"âŒ Error adding attribute: {str(e)}"
+        return False, f"❌ Error adding attribute: {str(e)}"
 
 
 # ============================================
@@ -1576,10 +1576,10 @@ def delete_area(client, user_id: str, area_id: str) -> Tuple[bool, str]:
         # Finally delete the area
         client.table('areas').delete().eq('id', area_id).eq('user_id', user_id).execute()
         
-        return True, "âœ… Successfully deleted area and all its categories/attributes"
+        return True, "✅ Successfully deleted area and all its categories/attributes"
     
     except Exception as e:
-        return False, f"âŒ Error deleting area: {str(e)}"
+        return False, f"❌ Error deleting area: {str(e)}"
 
 
 def delete_category(client, user_id: str, category_id: str) -> Tuple[bool, str]:
@@ -1607,10 +1607,10 @@ def delete_category(client, user_id: str, category_id: str) -> Tuple[bool, str]:
         # Delete the category
         client.table('categories').delete().eq('id', category_id).eq('user_id', user_id).execute()
         
-        return True, "âœ… Successfully deleted category and all its attributes"
+        return True, "✅ Successfully deleted category and all its attributes"
     
     except Exception as e:
-        return False, f"âŒ Error deleting category: {str(e)}"
+        return False, f"❌ Error deleting category: {str(e)}"
 
 
 def delete_attribute(client, user_id: str, attribute_id: str) -> Tuple[bool, str]:
@@ -1629,10 +1629,10 @@ def delete_attribute(client, user_id: str, attribute_id: str) -> Tuple[bool, str
         # Delete the attribute
         client.table('attribute_definitions').delete().eq('id', attribute_id).eq('user_id', user_id).execute()
         
-        return True, "âœ… Successfully deleted attribute"
+        return True, "✅ Successfully deleted attribute"
     
     except Exception as e:
-        return False, f"âŒ Error deleting attribute: {str(e)}"
+        return False, f"❌ Error deleting attribute: {str(e)}"
 
 
 # ============================================
@@ -1647,28 +1647,28 @@ def render_interactive_structure_viewer(client, user_id: str):
         client: Supabase client instance
         user_id: Current user's UUID
     """
-    st.title("ðŸ“‹ Interactive Structure Viewer")
+    st.title("📋 Interactive Structure Viewer")
     
     # ============================================
     # COLLAPSIBLE HELP SECTION
     # ============================================
-    with st.expander("â„¹ï¸ Help - How to Use Interactive Structure Viewer", expanded=False):
+    with st.expander("ℹ️ Help - How to Use Interactive Structure Viewer", expanded=False):
         st.markdown("""
-        ### ðŸŽ¯ Overview
+        ### 🎯 Overview
         
         **Interactive Structure Viewer** is your central hub for managing event structure. Choose from multiple 
         visualization modes and edit your data directly or via Excel.
         
         **Key Features:**
-        - ðŸŽ¨ **Multiple View Types**: Sunburst, Treemap, Network Graph, or Table View
-        - ðŸ” **Unified Filters**: Area and Category filters apply across all views
-        - ðŸ“¥ **Excel Export**: Generate filtered Excel with one click
-        - âœï¸ **Direct Editing**: Modify structure in Edit Mode without Excel
-        - ðŸ“¤ **Excel Import**: Upload changes from edited Excel files
+        - 🎨 **Multiple View Types**: Sunburst, Treemap, Network Graph, or Table View
+        - 🔍 **Unified Filters**: Area and Category filters apply across all views
+        - 📥 **Excel Export**: Generate filtered Excel with one click
+        - ✏️ **Direct Editing**: Modify structure in Edit Mode without Excel
+        - 📤 **Excel Import**: Upload changes from edited Excel files
         
         ---
         
-        ### ðŸŽ¨ View Types (Read-Only Mode)
+        ### 🎨 View Types (Read-Only Mode)
         
         **Table View**  
         Spreadsheet-style view of your hierarchical structure. Best for quick overview and searching.
@@ -1684,7 +1684,7 @@ def render_interactive_structure_viewer(client, user_id: str):
         
         ---
         
-        ### ðŸ” Centralized Filters
+        ### 🔍 Centralized Filters
         
         Filters in the control panel apply to **all views and operations**:
         
@@ -1698,7 +1698,7 @@ def render_interactive_structure_viewer(client, user_id: str):
         
         ---
         
-        ### âœï¸ Two Ways to Edit Structure
+        ### ✏️ Two Ways to Edit Structure
         
         #### **Method 1: Direct Editing (Edit Mode)**
         **Best for:** Quick changes, adding/editing individual items
@@ -1711,31 +1711,31 @@ def render_interactive_structure_viewer(client, user_id: str):
         6. Save all changes with one confirmation
         
         **Features:**
-        - ðŸŽ¨ Color-coded columns: Pink (auto) vs Blue (editable)
-        - âœ… Live validation before saving
-        - âª Rollback option to discard changes
-        - ðŸ” **Filters apply**: Edit Categories/Attributes tabs respect Area/Category filters
+        - 🎨 Color-coded columns: Pink (auto) vs Blue (editable)
+        - ✅ Live validation before saving
+        - ⏪ Rollback option to discard changes
+        - 🔍 **Filters apply**: Edit Categories/Attributes tabs respect Area/Category filters
         
-        #### **Method 2: Excel Upload (Edit Mode â†’ Upload Tab)**
+        #### **Method 2: Excel Upload (Edit Mode → Upload Tab)**
         **Best for:** Bulk changes, offline editing, complex restructuring
         
-        1. **Download:** Click **"ðŸ“¥ Excel"** button (respects current filters!)
+        1. **Download:** Click **"📥 Excel"** button (respects current filters!)
         2. **Edit:** Make changes in Excel (add rows, edit blue columns)
-        3. **Upload:** Go to Edit Mode â†’ Upload Hierarchical Excel tab
+        3. **Upload:** Go to Edit Mode → Upload Hierarchical Excel tab
         4. **Review:** System shows detected changes
         5. **Confirm:** Apply changes to database
         
         **Excel Features:**
-        - ðŸ“¥ Drop-down validations
-        - ðŸ”¢ Auto-formulas for Level, Area, Sort_Order
-        - ðŸ“Š Row/Column grouping
-        - ðŸŽ¨ Color coding (Pink = auto, Blue = editable)
+        - 📥 Drop-down validations
+        - 🔢 Auto-formulas for Level, Area, Sort_Order
+        - 📊 Row/Column grouping
+        - 🎨 Color coding (Pink = auto, Blue = editable)
         
         ---
         
-        ### ðŸ“¥ Generate Excel Export
+        ### 📥 Generate Excel Export
         
-        The **"ðŸ“¥ Excel"** button:
+        The **"📥 Excel"** button:
         - Always visible in the control panel
         - **Respects active filters** - export only filtered data
         - Creates professional Excel with validation and formulas
@@ -1748,19 +1748,19 @@ def render_interactive_structure_viewer(client, user_id: str):
         
         ---
         
-        ### ðŸ’¡ Workflow Tips
+        ### 💡 Workflow Tips
         
         **Quick Edits:**
-        1. Use filters to narrow scope (Area â†’ Category)
+        1. Use filters to narrow scope (Area → Category)
         2. Switch to Edit Mode
         3. Make changes in relevant tab
         4. Filters automatically applied!
         
         **Bulk Changes:**
         1. Set filters to desired scope
-        2. Click **"ðŸ“¥ Excel"** to export filtered data
+        2. Click **"📥 Excel"** to export filtered data
         3. Edit in Excel offline
-        4. Upload changes via Edit Mode â†’ Upload tab
+        4. Upload changes via Edit Mode → Upload tab
         
         **Visual Exploration:**
         1. Use Sunburst or Treemap for hierarchy overview
@@ -1770,7 +1770,7 @@ def render_interactive_structure_viewer(client, user_id: str):
         
         ---
         
-        ### âš ï¸ Important Notes
+        ### ⚠️ Important Notes
         
         **Filters in Edit Mode:**
         - Categories tab: Shows only categories from filtered Area
@@ -1790,10 +1790,10 @@ def render_interactive_structure_viewer(client, user_id: str):
     
     st.info("""
     **Quick Overview:**
-    - ðŸŽ¨ **View Type**: Choose visualization mode (Sunburst, Treemap, Network, Table)
-    - ðŸ” **Filters**: Area and Category - apply to all views and Edit Mode
-    - ðŸ“¥ **Excel Export**: Always available, respects active filters
-    - âœï¸ **Edit Mode**: Direct editing with automatic filter application
+    - 🎨 **View Type**: Choose visualization mode (Sunburst, Treemap, Network, Table)
+    - 🔍 **Filters**: Area and Category - apply to all views and Edit Mode
+    - 📥 **Excel Export**: Always available, respects active filters
+    - ✏️ **Edit Mode**: Direct editing with automatic filter application
     """)
     
     st.markdown("---")
@@ -1821,7 +1821,7 @@ def render_interactive_structure_viewer(client, user_id: str):
         df = load_structure_as_dataframe(client, user_id)
     
     if df.empty:
-        st.warning("âš ï¸ No structure defined yet. Please upload a template first.")
+        st.warning("⚠️ No structure defined yet. Please upload a template first.")
         return
     
     # Store original dataframe
@@ -1944,13 +1944,13 @@ def render_interactive_structure_viewer(client, user_id: str):
         if not can_switch:
             # Block the switch - show error and keep current mode
             st.error(f"""
-            ðŸš¨ **Cannot switch to {new_mode} mode!**
+            🚨 **Cannot switch to {new_mode} mode!**
             
             {reason}
             
             **Please:**
-            - ðŸ’¾ **Save your changes** (scroll down to Edit section), OR
-            - ðŸ—‘ï¸ **Discard your changes** (click Discard button below)
+            - 💾 **Save your changes** (scroll down to Edit section), OR
+            - 🗑️ **Discard your changes** (click Discard button below)
             
             Then you can switch modes.
             """)
@@ -2071,15 +2071,15 @@ def render_interactive_structure_viewer(client, user_id: str):
     # Show warning banner if there are unsaved changes
     if unsaved_changes:
         st.error(f"""
-        ðŸš¨ **You have {num_changes} unsaved change(s) in Edit Mode!**
+        🚨 **You have {num_changes} unsaved change(s) in Edit Mode!**
         
-        **âš ï¸ Filters are temporarily DISABLED** to prevent accidental data loss.
+        **⚠️ Filters are temporarily DISABLED** to prevent accidental data loss.
         
         To use filters again, you must either **SAVE** or **DISCARD** your changes first.
         """)
         
         # Show preview of changes in expander
-        with st.expander("ðŸ‘ï¸ **View what changed**", expanded=False):
+        with st.expander("👁️ **View what changed**", expanded=False):
             if st.session_state.edited_df is not None and st.session_state.original_df is not None:
                 display_cols = [col for col in st.session_state.original_df.columns if not col.startswith('_')]
                 orig_display = st.session_state.original_df[display_cols].copy()
@@ -2124,39 +2124,39 @@ def render_interactive_structure_viewer(client, user_id: str):
                     st.dataframe(changed_rows, use_container_width=True, hide_index=True)
                     st.caption(f"Total: {len(changed_rows)} modified row(s)")
                     if new_rows > 0:
-                        st.caption(f"âž• Plus {new_rows} new row(s)")
+                        st.caption(f"➕ Plus {new_rows} new row(s)")
                 elif new_rows > 0:
-                    st.info(f"âž• {new_rows} new row(s) added (no existing rows modified)")
+                    st.info(f"➕ {new_rows} new row(s) added (no existing rows modified)")
                 else:
-                    st.success("âœ… No changes detected - you can safely close Edit Mode")
+                    st.success("✅ No changes detected - you can safely close Edit Mode")
         
         st.warning("""
-        **ðŸ“ How to proceed:**
+        **📍 How to proceed:**
         
         **Option 1: Discard changes** (Quick button below)  
-        â†’ Cancels all edits and re-enables filters
+        → Cancels all edits and re-enables filters
         
         **Option 2: Save changes**  
-        â†’ Scroll down to **Edit Mode** section (below filters)  
-        â†’ Find the active tab (Areas/Categories/Attributes)  
-        â†’ Click the **Save Changes** button  
-        â†’ Type 'SAVE' to confirm
+        → Scroll down to **Edit Mode** section (below filters)  
+        → Find the active tab (Areas/Categories/Attributes)  
+        → Click the **Save Changes** button  
+        → Type 'SAVE' to confirm
         
-        ðŸ’¡ *Tip: After you save, the banner will disappear and filters will be re-enabled automatically.*
+        💡 *Tip: After you save, the banner will disappear and filters will be re-enabled automatically.*
         """)
         
         # BUG FIX #1: Discard button in banner (v1.10.0 / v1.10.2 - removed Save)
         col1, col2 = st.columns([4, 1])
         with col1:
-            st.info("ðŸ’¡ **Quick action:** Use the Discard button â†’ to cancel all changes")
+            st.info("💡 **Quick action:** Use the Discard button → to cancel all changes")
         with col2:
-            if st.button("ðŸ—‘ï¸ Discard", type="secondary", help="Discard all changes", use_container_width=True):
+            if st.button("🗑️ Discard", type="secondary", help="Discard all changes", use_container_width=True):
                 # Clear all state
                 st.session_state.original_df = None
                 st.session_state.edited_df = None
                 # v1.10.1: State Machine handles state cleanup
                 state_mgr.discard_changes()
-                st.success("âœ… Changes discarded! Filters re-enabled.")
+                st.success("✅ Changes discarded! Filters re-enabled.")
                 st.rerun()
         
         st.markdown("---")
@@ -2167,7 +2167,7 @@ def render_interactive_structure_viewer(client, user_id: str):
     
     # Show friendly info in Edit Mode about filter behavior (v1.10.1 - using State Machine)
     if st.session_state.viewer_mode == 'edit' and state_mgr.state.is_editing:
-        st.info("â„¹ï¸ **Filters are enabled.** When you make changes in Edit Mode, filters will lock until you save or discard.")
+        st.info("ℹ️ **Filters are enabled.** When you make changes in Edit Mode, filters will lock until you save or discard.")
     
     # Callback functions to ensure state sync (executed BEFORE rerun)
     def on_view_type_change():
@@ -2281,7 +2281,7 @@ def render_interactive_structure_viewer(client, user_id: str):
     
     with col5:
         # Generate Excel button (always visible)
-        if st.button("ðŸ“¥ Excel", use_container_width=True, type="primary", help="Generate Enhanced Excel with current filters"):
+        if st.button("📥 Excel", use_container_width=True, type="primary", help="Generate Enhanced Excel with current filters"):
             with st.spinner("Generating enhanced Excel file..."):
                 try:
                     # Use EnhancedStructureExporter with current filters
@@ -2300,7 +2300,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                     
                     # Download button
                     st.download_button(
-                        label="ðŸ’¾ Download Excel",
+                        label="💾 Download Excel",
                         data=excel_data,
                         file_name=f"structure_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -2314,12 +2314,12 @@ def render_interactive_structure_viewer(client, user_id: str):
                         filter_info.append(f"Category: {st.session_state.view_filters['category']}")
                     
                     if filter_info:
-                        st.success(f"âœ… Excel generated with filters: {', '.join(filter_info)}")
+                        st.success(f"✅ Excel generated with filters: {', '.join(filter_info)}")
                     else:
-                        st.success("âœ… Excel generated successfully (all data)")
+                        st.success("✅ Excel generated successfully (all data)")
                     
                 except Exception as e:
-                    st.error(f"âŒ Error generating Excel: {str(e)}")
+                    st.error(f"❌ Error generating Excel: {str(e)}")
     
     st.markdown("---")
     
@@ -2357,7 +2357,7 @@ def render_interactive_structure_viewer(client, user_id: str):
     
     if st.session_state.viewer_mode == 'read_only':
         # Read-only mode - display as table
-        st.markdown("### ðŸ“Š Structure (Read-Only)")
+        st.markdown("### 📊 Structure (Read-Only)")
         st.markdown("_Switch to Edit Mode to make changes_")
         
         # Style the dataframe
@@ -2382,31 +2382,31 @@ def render_interactive_structure_viewer(client, user_id: str):
         # If there are unsaved changes, user must resolve them first (save or discard)
         if unsaved_changes:
             st.warning("""
-            âš ï¸ **Edit interface is hidden while there are unsaved changes.**
+            ⚠️ **Edit interface is hidden while there are unsaved changes.**
             
             Please use one of the options above:
             - **Discard Changes** to cancel edits and continue working
             - **Save Changes** by scrolling to the Edit Mode section above the filters
             
-            ðŸ’¡ Once changes are resolved, the edit interface will appear here.
+            💡 Once changes are resolved, the edit interface will appear here.
             """)
             st.stop()  # Stop rendering - don't show edit tabs while unsaved changes exist
         
-        st.markdown("### âœï¸ Structure (Edit Mode) - Choose What to Edit")
+        st.markdown("### ✏️ Structure (Edit Mode) - Choose What to Edit")
         
         # Create tabs for different entity types
         tab1, tab2, tab3, tab4 = st.tabs([
-            "ðŸ“¦ Edit Areas", 
-            "ðŸ“ Edit Categories", 
-            "ðŸ·ï¸ Edit Attributes",
-            "ðŸ“¤ Upload Hierarchical Excel"
+            "📦 Edit Areas", 
+            "📁 Edit Categories", 
+            "🏷️ Edit Attributes",
+            "📤 Upload Hierarchical Excel"
         ])
         
         # ============================================
         # TAB 1: EDIT AREAS
         # ============================================
         with tab1:
-            st.markdown("#### ðŸ“¦ Edit Areas")
+            st.markdown("#### 📦 Edit Areas")
             st.info("Edit area names and descriptions. Add new areas or delete existing ones.")
             
             # Filter to show ONLY Area rows - USE filtered_df (has metadata)
@@ -2414,7 +2414,7 @@ def render_interactive_structure_viewer(client, user_id: str):
             area_full_df = filtered_df[area_mask].copy()
             
             if area_full_df.empty:
-                st.warning("âš ï¸ No areas found.")
+                st.warning("⚠️ No areas found.")
             else:
                 st.markdown(f"**Viewing {len(area_full_df)} areas**")
                 
@@ -2423,11 +2423,11 @@ def render_interactive_structure_viewer(client, user_id: str):
                 area_display = area_full_df[area_cols].copy()
                 
                 # Add checkbox column for deletion
-                area_display.insert(0, 'ðŸ—‘ï¸', False)
+                area_display.insert(0, '🗑️', False)
                 
                 # Configure columns for Area editing
                 area_column_config = {
-                    'ðŸ—‘ï¸': st.column_config.CheckboxColumn('Delete?', help="Check to mark for deletion"),
+                    '🗑️': st.column_config.CheckboxColumn('Delete?', help="Check to mark for deletion"),
                     'Type': st.column_config.TextColumn('Type', disabled=True, help="Row type (locked)"),
                     'Sort_Order': st.column_config.NumberColumn('Sort_Order', disabled=True, help="Display order (locked)"),
                     'Area': st.column_config.TextColumn('Area', help="Area name - editable", disabled=False),
@@ -2448,10 +2448,10 @@ def render_interactive_structure_viewer(client, user_id: str):
                 )
                 
                 # Check if any areas are marked for deletion
-                areas_to_delete = edited_area_df[edited_area_df['ðŸ—‘ï¸'] == True]
+                areas_to_delete = edited_area_df[edited_area_df['🗑️'] == True]
                 
                 if not areas_to_delete.empty:
-                    st.error(f"âš ï¸ **{len(areas_to_delete)} area(s) marked for deletion!**")
+                    st.error(f"⚠️ **{len(areas_to_delete)} area(s) marked for deletion!**")
                     
                     # Show warnings for each area
                     for idx in areas_to_delete.index:
@@ -2464,7 +2464,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                     with col1:
                         del_confirm = st.text_input("Type 'DELETE' to confirm deletion", key="delete_area_confirm")
                     with col2:
-                        if st.button("âŒ Delete Marked", key="delete_areas_btn", disabled=(del_confirm != "DELETE")):
+                        if st.button("❌ Delete Marked", key="delete_areas_btn", disabled=(del_confirm != "DELETE")):
                             with st.spinner("Deleting areas..."):
                                 deleted_count = 0
                                 for idx in areas_to_delete.index:
@@ -2476,7 +2476,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.error(msg)
                                 
                                 if deleted_count > 0:
-                                    st.success(f"âœ… Deleted {deleted_count} area(s)")
+                                    st.success(f"✅ Deleted {deleted_count} area(s)")
                                     # CRITICAL: Clear ALL detection state after DELETE
                                     st.cache_data.clear()
                                     st.session_state.original_df = None
@@ -2487,7 +2487,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                 st.markdown("---")
                 
                 # Add new area form
-                with st.expander("âž• Add New Area", expanded=False):
+                with st.expander("➕ Add New Area", expanded=False):
                     # Initialize form submission counter in session state
                     if 'area_form_counter' not in st.session_state:
                         st.session_state.area_form_counter = 0
@@ -2497,11 +2497,11 @@ def render_interactive_structure_viewer(client, user_id: str):
                         new_area_name = st.text_input("Area Name *", placeholder="e.g., Fitness, Nutrition, Health")
                         new_area_desc = st.text_area("Description", placeholder="Optional description...")
                         
-                        submitted = st.form_submit_button("âž• Add Area", use_container_width=True)
+                        submitted = st.form_submit_button("➕ Add Area", use_container_width=True)
                         
                         if submitted:
                             if not new_area_name:
-                                st.error("âŒ Area name is required!")
+                                st.error("❌ Area name is required!")
                             else:
                                 with st.spinner("Adding area..."):
                                     success, msg = add_new_area(client, user_id, new_area_name, new_area_desc)
@@ -2522,7 +2522,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.error(msg)
                     
                     # BUG FIX #3: Discard button for form (v1.10.0)
-                    if st.button("ðŸ—‘ï¸ Clear Form", key="discard_area_form", help="Close form and clear inputs"):
+                    if st.button("🗑️ Clear Form", key="discard_area_form", help="Close form and clear inputs"):
                         st.session_state.area_form_counter += 1
                         st.rerun()
                 
@@ -2540,7 +2540,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                 discard_help = "Clear all unsaved changes and unlock filters" if has_changes else "No changes to discard"
                 
                 if st.button(
-                    "ðŸ—‘ï¸ Discard All Changes",
+                    "🗑️ Discard All Changes",
                     use_container_width=False,
                     type="secondary",
                     disabled=not has_changes,
@@ -2552,14 +2552,14 @@ def render_interactive_structure_viewer(client, user_id: str):
                     # Reset to original
                     st.session_state.edited_df = None
                     st.session_state.original_df = None
-                    st.success("âœ… Changes discarded! Filters are now enabled.")
+                    st.success("✅ Changes discarded! Filters are now enabled.")
                     st.rerun()
         
         # ============================================
         # TAB 2: EDIT CATEGORIES
         # ============================================
         with tab2:
-            st.markdown("#### ðŸ“ Edit Categories")
+            st.markdown("#### 📁 Edit Categories")
             st.info("Edit category names and descriptions. Add new categories or delete existing ones.")
             
             # Filter to show ONLY Category rows - USE filtered_df (has metadata)
@@ -2571,7 +2571,7 @@ def render_interactive_structure_viewer(client, user_id: str):
             
             # Show current filter context
             if st.session_state.view_filters['area'] != "All Areas":
-                st.info(f"ðŸ” **Filtered by Area:** {st.session_state.view_filters['area']}")
+                st.info(f"🔍 **Filtered by Area:** {st.session_state.view_filters['area']}")
             
             # Apply area filter from centralized state
             selected_area_cat = st.session_state.view_filters['area']
@@ -2582,9 +2582,9 @@ def render_interactive_structure_viewer(client, user_id: str):
             # Show categories if they exist
             if category_full_df.empty:
                 if selected_area_cat != "All Areas":
-                    st.info(f"â„¹ï¸ No categories found for Area: {selected_area_cat}. Add your first category below.")
+                    st.info(f"ℹ️ No categories found for Area: {selected_area_cat}. Add your first category below.")
                 else:
-                    st.info("â„¹ï¸ No categories found. Add your first category below.")
+                    st.info("ℹ️ No categories found. Add your first category below.")
             else:
                     st.markdown(f"**Viewing {len(category_full_df)} categories**")
                     
@@ -2593,11 +2593,11 @@ def render_interactive_structure_viewer(client, user_id: str):
                     cat_display = category_full_df[cat_cols].copy()
                     
                     # Add checkbox column for deletion
-                    cat_display.insert(0, 'ðŸ—‘ï¸', False)
+                    cat_display.insert(0, '🗑️', False)
                     
                     # Configure columns for Category editing
                     cat_column_config = {
-                        'ðŸ—‘ï¸': st.column_config.CheckboxColumn('Delete?', help="Check to mark for deletion"),
+                        '🗑️': st.column_config.CheckboxColumn('Delete?', help="Check to mark for deletion"),
                         'Type': st.column_config.TextColumn('Type', disabled=True),
                         'Level': st.column_config.NumberColumn('Level', disabled=True),
                         'Sort_Order': st.column_config.NumberColumn('Sort_Order', disabled=True),
@@ -2621,10 +2621,10 @@ def render_interactive_structure_viewer(client, user_id: str):
                     )
                     
                     # Check if any categories are marked for deletion
-                    cats_to_delete = edited_cat_df[edited_cat_df['ðŸ—‘ï¸'] == True]
+                    cats_to_delete = edited_cat_df[edited_cat_df['🗑️'] == True]
                     
                     if not cats_to_delete.empty:
-                        st.error(f"âš ï¸ **{len(cats_to_delete)} category(ies) marked for deletion!**")
+                        st.error(f"⚠️ **{len(cats_to_delete)} category(ies) marked for deletion!**")
                         
                         # Show warnings for each category
                         for idx in cats_to_delete.index:
@@ -2637,7 +2637,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                         with col1:
                             del_confirm = st.text_input("Type 'DELETE' to confirm deletion", key="delete_cat_confirm")
                         with col2:
-                            if st.button("âŒ Delete Marked", key="delete_cats_btn", disabled=(del_confirm != "DELETE")):
+                            if st.button("❌ Delete Marked", key="delete_cats_btn", disabled=(del_confirm != "DELETE")):
                                 with st.spinner("Deleting categories..."):
                                     deleted_count = 0
                                     for idx in cats_to_delete.index:
@@ -2649,7 +2649,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                             st.error(msg)
                                     
                                     if deleted_count > 0:
-                                        st.success(f"âœ… Deleted {deleted_count} category(ies)")
+                                        st.success(f"✅ Deleted {deleted_count} category(ies)")
                                         # CRITICAL: Clear ALL detection state after DELETE
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
@@ -2658,18 +2658,18 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.rerun()
                     
                     # Check for edit changes (non-delete)
-                    edited_cat_df_no_del = edited_cat_df.drop(columns=['ðŸ—‘ï¸'])
-                    cat_display_no_del = cat_display.drop(columns=['ðŸ—‘ï¸'])
+                    edited_cat_df_no_del = edited_cat_df.drop(columns=['🗑️'])
+                    cat_display_no_del = cat_display.drop(columns=['🗑️'])
                     has_cat_changes = not cat_display_no_del.equals(edited_cat_df_no_del)
                     
                     if has_cat_changes:
-                        st.warning("âš ï¸ You have unsaved edit changes")
+                        st.warning("⚠️ You have unsaved edit changes")
                         
                         col1, col2 = st.columns([3, 1])
                         with col1:
                             confirm = st.text_input("Type 'SAVE' to confirm", key="save_cat_confirm")
                         with col2:
-                            if st.button("ðŸ’¾ Save Changes", key="save_categories", disabled=(confirm != "SAVE")):
+                            if st.button("💾 Save Changes", key="save_categories", disabled=(confirm != "SAVE")):
                                 with st.spinner("Saving category changes..."):
                                     # CRITICAL: Unlock filters after save
                                     # v1.10.1: Removed editing_active flag (State Machine manages state)
@@ -2680,30 +2680,30 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     )
                                     
                                     if success:
-                                        st.success(f"âœ… Successfully updated {stats['categories']} categories!")
+                                        st.success(f"✅ Successfully updated {stats['categories']} categories!")
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
                                         st.session_state.edited_df = None
                                         st.balloons()
                                         st.rerun()
                                     else:
-                                        st.error(f"âŒ Failed to save changes. {stats['errors']} errors occurred.")
+                                        st.error(f"❌ Failed to save changes. {stats['errors']} errors occurred.")
                         
                         # v1.10.3: Add Discard button below Save
                         st.markdown("---")
-                        if st.button("ðŸ—‘ï¸ Discard Changes", key="discard_category_changes", type="secondary", use_container_width=True):
+                        if st.button("🗑️ Discard Changes", key="discard_category_changes", type="secondary", use_container_width=True):
                             # Clear all state
                             st.session_state.original_df = None
                             st.session_state.edited_df = None
                             state_mgr.discard_changes()
-                            st.success("âœ… Changes discarded! Filters re-enabled.")
+                            st.success("✅ Changes discarded! Filters re-enabled.")
                             st.rerun()
             
             # Add Category form - ALWAYS visible, regardless of whether categories exist
             st.markdown("---")
             
             # Add new category form
-            with st.expander("âž• Add New Category", expanded=False):
+            with st.expander("➕ Add New Category", expanded=False):
                 # Initialize form submission counter in session state
                 if 'category_form_counter' not in st.session_state:
                     st.session_state.category_form_counter = 0
@@ -2716,7 +2716,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                 with st.form(f"add_category_form_{st.session_state.category_form_counter}"):
                     # If Area filter is active, pre-populate and disable Area selection
                     if selected_area_cat != "All Areas":
-                        st.info(f"â„¹ï¸ Adding category to filtered area: **{selected_area_cat}**")
+                        st.info(f"ℹ️ Adding category to filtered area: **{selected_area_cat}**")
                         # Display as disabled text input (can't change)
                         st.text_input("Select Area *", value=selected_area_cat, disabled=True)
                         new_cat_area = selected_area_cat
@@ -2738,18 +2738,18 @@ def render_interactive_structure_viewer(client, user_id: str):
                         if len(parent_options) > 1:
                             new_cat_parent = st.selectbox("Parent Category", parent_options, help=f"Select parent category from '{new_cat_area}' area")
                         else:
-                            st.info(f"â„¹ï¸ No existing categories in '{new_cat_area}' - this will be a root category")
+                            st.info(f"ℹ️ No existing categories in '{new_cat_area}' - this will be a root category")
                             new_cat_parent = "None (Root Category)"
                     else:
                         new_cat_parent = "None (Root Category)"
                     
-                    submitted = st.form_submit_button("âž• Add Category", use_container_width=True)
+                    submitted = st.form_submit_button("➕ Add Category", use_container_width=True)
                     
                     if submitted:
                         if not new_cat_name:
-                            st.error("âŒ Category name is required!")
+                            st.error("❌ Category name is required!")
                         elif not new_cat_area:
-                            st.error("âŒ Please select an area!")
+                            st.error("❌ Please select an area!")
                         else:
                             # Resolve parent_id
                             if new_cat_parent == "None (Root Category)":
@@ -2758,7 +2758,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                 parent_id = parent_cats_dict.get(new_cat_parent)
                                 # Verify parent_id is valid
                                 if not parent_id:
-                                    st.error(f"âŒ Parent category '{new_cat_parent}' not found in dropdown data!")
+                                    st.error(f"❌ Parent category '{new_cat_parent}' not found in dropdown data!")
                                     st.stop()
                             
                             with st.spinner("Adding category..."):
@@ -2783,21 +2783,21 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.error(msg)
                 
                 # BUG FIX #3: Discard button for form (v1.10.0)
-                if st.button("ðŸ—‘ï¸ Clear Form", key="discard_category_form", help="Close form and clear inputs"):
+                if st.button("🗑️ Clear Form", key="discard_category_form", help="Close form and clear inputs"):
                     st.session_state.category_form_counter += 1
                     st.rerun()
                 
             st.markdown("---")
             
             # NEW FEATURE v1.10.0: Insert Category Between
-            with st.expander("ðŸ“Œ Insert Category Between", expanded=False):
-                st.info("ðŸ’¡ Insert a new category between existing ones without disrupting data")
+            with st.expander("📌 Insert Category Between", expanded=False):
+                st.info("💡 Insert a new category between existing ones without disrupting data")
                 
                 # Get categories in filtered area
                 categories_in_area_df = filtered_df[filtered_df['Type'] == 'Category'].copy()
                 
                 if categories_in_area_df.empty:
-                    st.warning("âš ï¸ No categories in current filter. Use 'Add New Category' instead.")
+                    st.warning("⚠️ No categories in current filter. Use 'Add New Category' instead.")
                 else:
                     # Initialize form counter
                     if 'insert_between_counter' not in st.session_state:
@@ -2815,11 +2815,11 @@ def render_interactive_structure_viewer(client, user_id: str):
                         name = st.text_input("New Category Name *", placeholder="e.g., Intermediate Training", max_chars=100)
                         description = st.text_area("Description (optional)", placeholder="Optional description...", max_chars=500)
                         
-                        submitted = st.form_submit_button("ðŸ“Œ Insert Category", use_container_width=True)
+                        submitted = st.form_submit_button("📌 Insert Category", use_container_width=True)
                         
                         if submitted:
                             if not name:
-                                st.error("âŒ Category name is required")
+                                st.error("❌ Category name is required")
                             else:
                                 # Determine insert_after_id and area_id
                                 if insert_after == 'At Beginning':
@@ -2832,7 +2832,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         insert_after_id = cat_row.iloc[0]['_category_id']
                                         area_id = cat_row.iloc[0]['_area_id']
                                     else:
-                                        st.error("âŒ Selected category not found")
+                                        st.error("❌ Selected category not found")
                                         st.stop()
                                 
                                 # Call insert function
@@ -2856,22 +2856,22 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.error(msg)
                     
                     # Clear Form button
-                    if st.button("ðŸ—‘ï¸ Clear Form", key="discard_insert_form", help="Close form and clear inputs"):
+                    if st.button("🗑️ Clear Form", key="discard_insert_form", help="Close form and clear inputs"):
                         st.session_state.insert_between_counter += 1
                         st.rerun()
                 
             st.markdown("---")
             
             # NEW FEATURE v1.10.0: Remove Category Between
-            with st.expander("ðŸ—‘ï¸ Remove Category Between", expanded=False):
-                st.warning("âš ï¸ **Remove Between** deletes the category but **promotes its children** up one level")
-                st.info("ðŸ’¡ Use this to remove a middle layer without losing child categories")
+            with st.expander("🗑️ Remove Category Between", expanded=False):
+                st.warning("⚠️ **Remove Between** deletes the category but **promotes its children** up one level")
+                st.info("💡 Use this to remove a middle layer without losing child categories")
                 
                 # Get categories in filtered area
                 categories_in_area_df = filtered_df[filtered_df['Type'] == 'Category'].copy()
                 
                 if categories_in_area_df.empty:
-                    st.warning("âš ï¸ No categories in current filter.")
+                    st.warning("⚠️ No categories in current filter.")
                 else:
                     # Let user select which category to remove
                     category_to_remove = st.selectbox(
@@ -2917,30 +2917,30 @@ def render_interactive_structure_viewer(client, user_id: str):
                                 col1, col2, col3 = st.columns(3)
                                 with col1:
                                     if children_count > 0:
-                                        st.success(f"âœ… **{children_count}** child categories will be **promoted**")
+                                        st.success(f"✅ **{children_count}** child categories will be **promoted**")
                                     else:
-                                        st.info("â„¹ï¸ No child categories")
+                                        st.info("ℹ️ No child categories")
                                 with col2:
                                     if attrs_count > 0:
-                                        st.error(f"âŒ **{attrs_count}** attributes will be **deleted**")
+                                        st.error(f"❌ **{attrs_count}** attributes will be **deleted**")
                                     else:
-                                        st.success("âœ… No attributes")
+                                        st.success("✅ No attributes")
                                 with col3:
                                     if events_count > 0:
-                                        st.error(f"âŒ **{events_count}** events will be **deleted**")
+                                        st.error(f"❌ **{events_count}** events will be **deleted**")
                                     else:
-                                        st.success("âœ… No events")
+                                        st.success("✅ No events")
                                 
                                 # Confirmation section
                                 st.markdown("---")
                                 st.warning(f"""
-                                **âš ï¸ Confirm Remove Between:**
+                                **⚠️ Confirm Remove Between:**
                                 
                                 You are about to:
-                                - âŒ Delete category: **{category_to_remove}**
-                                - âŒ Delete {attrs_count} attributes
-                                - âŒ Delete {events_count} events
-                                - âœ… Promote {children_count} child categories
+                                - ❌ Delete category: **{category_to_remove}**
+                                - ❌ Delete {attrs_count} attributes
+                                - ❌ Delete {events_count} events
+                                - ✅ Promote {children_count} child categories
                                 
                                 Type **"REMOVE"** to confirm:
                                 """)
@@ -2953,7 +2953,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         placeholder="Type REMOVE"
                                     )
                                 with col2:
-                                    if st.button("ðŸ—‘ï¸ Remove", type="primary", disabled=(confirmation != "REMOVE")):
+                                    if st.button("🗑️ Remove", type="primary", disabled=(confirmation != "REMOVE")):
                                         with st.spinner(f"Removing '{category_to_remove}'..."):
                                             success, msg = remove_category_between(client, user_id, category_id)
                                             if success:
@@ -2971,7 +2971,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                                 st.error(msg)
                             
                             except Exception as e:
-                                st.error(f"âŒ Error getting dependencies: {str(e)}")
+                                st.error(f"❌ Error getting dependencies: {str(e)}")
                 
                 # ============================================
                 # DISCARD BUTTON - Universal Exit from Edit Mode
@@ -2987,7 +2987,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                 discard_help = "Clear all unsaved changes and unlock filters" if has_changes else "No changes to discard"
                 
                 if st.button(
-                    "ðŸ—‘ï¸ Discard All Changes",
+                    "🗑️ Discard All Changes",
                     use_container_width=False,
                     type="secondary",
                     disabled=not has_changes,
@@ -2999,14 +2999,14 @@ def render_interactive_structure_viewer(client, user_id: str):
                     # Reset to original
                     st.session_state.edited_df = None
                     st.session_state.original_df = None
-                    st.success("âœ… Changes discarded! Filters are now enabled.")
+                    st.success("✅ Changes discarded! Filters are now enabled.")
                     st.rerun()
         
         # ============================================
         # TAB 3: EDIT ATTRIBUTES
         # ============================================
         with tab3:
-            st.markdown("#### ðŸ·ï¸ Edit Attributes")
+            st.markdown("#### 🏷️ Edit Attributes")
             st.info("Edit attribute definitions. Add new attributes or delete existing ones.")
             
             # Filter to show ONLY Attribute rows - USE filtered_df (has metadata)
@@ -3024,7 +3024,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                 filter_context_parts.append(f"Category: {st.session_state.view_filters['category']}")
             
             if filter_context_parts:
-                st.info(f"ðŸ” **Filtered by** {', '.join(filter_context_parts)}")
+                st.info(f"🔍 **Filtered by** {', '.join(filter_context_parts)}")
             
             # Use centralized filters
             selected_area_attr = st.session_state.view_filters['area']
@@ -3041,9 +3041,9 @@ def render_interactive_structure_viewer(client, user_id: str):
             # Show attributes if they exist
             if attribute_full_df.empty:
                 if selected_area_attr != "All Areas" or selected_category != "All Categories":
-                    st.info(f"â„¹ï¸ No attributes found for the selected filters. Add your first attribute below.")
+                    st.info(f"ℹ️ No attributes found for the selected filters. Add your first attribute below.")
                 else:
-                    st.info("â„¹ï¸ No attributes found. Add your first attribute below.")
+                    st.info("ℹ️ No attributes found. Add your first attribute below.")
             else:
                     st.markdown(f"**Viewing {len(attribute_full_df)} attributes**")
                     
@@ -3055,11 +3055,11 @@ def render_interactive_structure_viewer(client, user_id: str):
                     attr_display = attribute_full_df[attr_cols].copy()
                     
                     # Add checkbox column for deletion
-                    attr_display.insert(0, 'ðŸ—‘ï¸', False)
+                    attr_display.insert(0, '🗑️', False)
                     
                     # Configure columns for Attribute editing
                     attr_column_config = {
-                        'ðŸ—‘ï¸': st.column_config.CheckboxColumn('Delete?', help="Check to mark for deletion"),
+                        '🗑️': st.column_config.CheckboxColumn('Delete?', help="Check to mark for deletion"),
                         'Type': st.column_config.TextColumn('Type', disabled=True),
                         'Level': st.column_config.NumberColumn('Level', disabled=True),
                         'Sort_Order': st.column_config.NumberColumn('Sort_Order', disabled=True),
@@ -3090,16 +3090,16 @@ def render_interactive_structure_viewer(client, user_id: str):
                     )
                     
                     # Check if any attributes are marked for deletion
-                    attrs_to_delete = edited_attr_df[edited_attr_df['ðŸ—‘ï¸'] == True]
+                    attrs_to_delete = edited_attr_df[edited_attr_df['🗑️'] == True]
                     
                     if not attrs_to_delete.empty:
-                        st.error(f"âš ï¸ **{len(attrs_to_delete)} attribute(s) marked for deletion!**")
+                        st.error(f"⚠️ **{len(attrs_to_delete)} attribute(s) marked for deletion!**")
                         
                         col1, col2 = st.columns([3, 1])
                         with col1:
                             del_confirm = st.text_input("Type 'DELETE' to confirm deletion", key="delete_attr_confirm")
                         with col2:
-                            if st.button("âŒ Delete Marked", key="delete_attrs_btn", disabled=(del_confirm != "DELETE")):
+                            if st.button("❌ Delete Marked", key="delete_attrs_btn", disabled=(del_confirm != "DELETE")):
                                 with st.spinner("Deleting attributes..."):
                                     deleted_count = 0
                                     for idx in attrs_to_delete.index:
@@ -3111,7 +3111,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                             st.error(msg)
                                     
                                     if deleted_count > 0:
-                                        st.success(f"âœ… Deleted {deleted_count} attribute(s)")
+                                        st.success(f"✅ Deleted {deleted_count} attribute(s)")
                                         # CRITICAL: Clear ALL detection state after DELETE
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
@@ -3120,27 +3120,27 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.rerun()
                     
                     # Store edited dataframe
-                    st.session_state.edited_df = edited_attr_df.drop(columns=['ðŸ—‘ï¸'])
+                    st.session_state.edited_df = edited_attr_df.drop(columns=['🗑️'])
                     
                     # Check for edit changes (non-delete)
-                    edited_attr_df_no_del = edited_attr_df.drop(columns=['ðŸ—‘ï¸'])
-                    attr_display_no_del = attr_display.drop(columns=['ðŸ—‘ï¸'])
+                    edited_attr_df_no_del = edited_attr_df.drop(columns=['🗑️'])
+                    attr_display_no_del = attr_display.drop(columns=['🗑️'])
                     has_attr_changes = not attr_display_no_del.equals(edited_attr_df_no_del)
                     
                     if not has_attr_changes:
-                        st.info("â„¹ï¸ No edit changes detected")
+                        st.info("ℹ️ No edit changes detected")
                     else:
-                        st.warning("âš ï¸ **You have unsaved edit changes**")
+                        st.warning("⚠️ **You have unsaved edit changes**")
                         
                         # Validate changes
                         is_valid, errors = validate_changes(edited_attr_df_no_del)
                         
                         if not is_valid:
-                            st.error("âŒ **Validation Errors:**")
+                            st.error("❌ **Validation Errors:**")
                             for error in errors:
-                                st.error(f"  â€¢ {error}")
+                                st.error(f"  • {error}")
                         else:
-                            st.success("âœ… All changes are valid")
+                            st.success("✅ All changes are valid")
                         
                         # Save controls
                         col1, col2, col3 = st.columns([2, 1, 1])
@@ -3152,7 +3152,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                             )
                         
                         with col2:
-                            if st.button("ðŸ’¾ Save Changes", disabled=not is_valid, use_container_width=True, key="save_attributes"):
+                            if st.button("💾 Save Changes", disabled=not is_valid, use_container_width=True, key="save_attributes"):
                                 if confirmation_text == "SAVE":
                                     with st.spinner("Saving changes..."):
                                         # CRITICAL: Unlock filters after save
@@ -3180,13 +3180,13 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         )
                                         
                                         if success:
-                                            st.success(f"âœ… {message}")
+                                            st.success(f"✅ {message}")
                                             if stats.get('attributes', 0) > 0:
                                                 st.info(f"Updated: {stats['attributes']} attributes")
                                             
                                             # Show errors if any
                                             if stats.get('errors', 0) > 0:
-                                                st.warning(f"âš ï¸ {stats['errors']} rows had errors (skipped)")
+                                                st.warning(f"⚠️ {stats['errors']} rows had errors (skipped)")
                                             
                                             # Clear cache and reset session state
                                             st.cache_data.clear()
@@ -3196,25 +3196,25 @@ def render_interactive_structure_viewer(client, user_id: str):
                                             st.balloons()
                                             st.rerun()
                                         else:
-                                            st.error(f"âŒ {message}")
+                                            st.error(f"❌ {message}")
                                             if stats.get('errors', 0) > 0:
                                                 st.error(f"Failed to update {stats['errors']} rows")
                                 else:
-                                    st.error("âŒ Please type 'SAVE' to confirm")
+                                    st.error("❌ Please type 'SAVE' to confirm")
                         
                         with col3:
-                            if st.button("âª Discard Changes", use_container_width=True, key="discard_attributes"):
+                            if st.button("⏪ Discard Changes", use_container_width=True, key="discard_attributes"):
                                 # v1.10.3: Use state_mgr for consistency
                                 st.session_state.original_df = None
                                 st.session_state.edited_df = None
                                 state_mgr.discard_changes()
-                                st.success("âœ… Changes discarded! Filters re-enabled.")
+                                st.success("✅ Changes discarded! Filters re-enabled.")
                                 st.rerun()
             
             # Add Attribute form - ALWAYS visible, regardless of whether attributes exist
             st.markdown("---")
-            with st.expander("âž• Add New Attribute", expanded=False):
-                st.caption("ðŸ’¡ Two-step process: (1) Select Data Type first â†’ (2) Form shows only relevant fields for that type")
+            with st.expander("➕ Add New Attribute", expanded=False):
+                st.caption("💡 Two-step process: (1) Select Data Type first → (2) Form shows only relevant fields for that type")
                 
                 # Initialize form submission counter in session state
                 if 'attribute_form_counter' not in st.session_state:
@@ -3260,7 +3260,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                     if current_category_filter != "All Categories":
                         filter_parts.append(f"**Category:** {current_category_filter}")
                     
-                    st.info(f"â„¹ï¸ Adding attribute to filtered: {' > '.join(filter_parts)}")
+                    st.info(f"ℹ️ Adding attribute to filtered: {' > '.join(filter_parts)}")
                 
                 # TWO-STEP APPROACH: Select Data Type first (outside form), then show relevant form
                 st.markdown("**Step 1:** Select Data Type")
@@ -3297,13 +3297,13 @@ def render_interactive_structure_viewer(client, user_id: str):
                     field_notes.append("Validation fields hidden (only for 'number'/'datetime')")
                 
                 if field_notes:
-                    st.caption(f"ðŸ’¡ {', '.join(field_notes)}")
+                    st.caption(f"💡 {', '.join(field_notes)}")
                 
                 # Use unique key with counter to force form reset after successful submit
                 with st.form(f"add_attribute_form_{st.session_state.attribute_form_counter}"):
                     # Category selection - locked if only one option
                     if len(cat_options) == 0:
-                        st.warning("âš ï¸ No categories available for the current filter. Please adjust filters or create categories first.")
+                        st.warning("⚠️ No categories available for the current filter. Please adjust filters or create categories first.")
                         new_attr_category = None
                     elif len(cat_options) == 1:
                         # Only one option - show as locked/disabled
@@ -3345,15 +3345,15 @@ def render_interactive_structure_viewer(client, user_id: str):
                     
                     new_attr_desc = st.text_area("Description", placeholder="Optional description...")
                     
-                    submitted = st.form_submit_button("âž• Add Attribute", use_container_width=True)
+                    submitted = st.form_submit_button("➕ Add Attribute", use_container_width=True)
                     
                     if submitted:
                         if not new_attr_name:
-                            st.error("âŒ Attribute name is required!")
+                            st.error("❌ Attribute name is required!")
                         elif not new_attr_category:
-                            st.error("âŒ Please select a category!")
+                            st.error("❌ Please select a category!")
                         elif len(cat_options) == 0:
-                            st.error("âŒ No categories available. Please adjust filters.")
+                            st.error("❌ No categories available. Please adjust filters.")
                         else:
                             is_req = new_attr_required == "Yes"
                             
@@ -3382,7 +3382,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.error(msg)
                 
                 # BUG FIX #3: Discard button for form (v1.10.0)
-                if st.button("ðŸ—‘ï¸ Clear Form", key="discard_attribute_form", help="Close form and clear inputs"):
+                if st.button("🗑️ Clear Form", key="discard_attribute_form", help="Close form and clear inputs"):
                     st.session_state.attribute_form_counter += 1
                     st.rerun()
                 
@@ -3400,7 +3400,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                 discard_help = "Clear all unsaved changes and unlock filters" if has_changes else "No changes to discard"
                 
                 if st.button(
-                    "ðŸ—‘ï¸ Discard All Changes",
+                    "🗑️ Discard All Changes",
                     use_container_width=False,
                     type="secondary",
                     disabled=not has_changes,
@@ -3412,34 +3412,34 @@ def render_interactive_structure_viewer(client, user_id: str):
                     # Reset to original
                     st.session_state.edited_df = None
                     st.session_state.original_df = None
-                    st.success("âœ… Changes discarded! Filters are now enabled.")
+                    st.success("✅ Changes discarded! Filters are now enabled.")
                     st.rerun()
         
         # ============================================
         # TAB 4: UPLOAD HIERARCHICAL EXCEL
         # ============================================
         with tab4:
-            st.markdown("#### ðŸ“¤ Upload Hierarchical Excel")
+            st.markdown("#### 📤 Upload Hierarchical Excel")
             st.info("""
             **Update your structure by uploading an edited Hierarchical_View Excel**
-            - âœ… **Add new rows** for Areas, Categories, Attributes
-            - âœ… **Edit BLUE columns** in existing rows (editable fields)
-            - âœ… **Create hierarchies** using Category_Path
-            - âœ… **Update properties** like descriptions, data types, validation rules
+            - ✅ **Add new rows** for Areas, Categories, Attributes
+            - ✅ **Edit BLUE columns** in existing rows (editable fields)
+            - ✅ **Create hierarchies** using Category_Path
+            - ✅ **Update properties** like descriptions, data types, validation rules
             """)
             
             st.markdown("---")
             
             # File uploader
             uploaded_file = st.file_uploader(
-                "ðŸ“ Browse Files - Upload Hierarchical_View Excel",
+                "📁 Browse Files - Upload Hierarchical_View Excel",
                 type=["xlsx"],
                 help="Upload the Excel file you generated in Read-Only mode",
                 key="isv_upload_excel"
             )
             
             if not uploaded_file:
-                st.markdown("### ðŸ“‹ How to Use Upload")
+                st.markdown("### 📋 How to Use Upload")
                 
                 col1, col2 = st.columns(2)
                 
@@ -3487,18 +3487,18 @@ def render_interactive_structure_viewer(client, user_id: str):
                 st.markdown("---")
                 
                 st.markdown("""
-                ### âœï¸ Editable Fields (BLUE columns)
+                ### ✏️ Editable Fields (BLUE columns)
                 - **Category**, **Attribute_Name**
                 - **Data_Type**: number, text, datetime, boolean, link, image
                 - **Unit**, **Is_Required**, **Default_Value**
                 - **Validation_Min**, **Validation_Max**
                 - **Description**
                 
-                ### ðŸš« Read-Only Fields (PINK columns)
+                ### 🚫 Read-Only Fields (PINK columns)
                 - **Type**, **Level**, **Sort_Order**
                 - **Area**, **Category_Path** (path structure)
                 
-                âš ï¸ **Important:** Don't change PINK columns - they're auto-calculated!
+                ⚠️ **Important:** Don't change PINK columns - they're auto-calculated!
                 """)
             
             else:
@@ -3509,7 +3509,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                 
                 try:
                     # Parse and validate
-                    with st.spinner("ðŸ“– Parsing Excel file..."):
+                    with st.spinner("📖 Parsing Excel file..."):
                         parser = HierarchicalParser(
                             client=client,
                             user_id=user_id,
@@ -3520,28 +3520,28 @@ def render_interactive_structure_viewer(client, user_id: str):
                     
                     # Show validation errors if any
                     if changes.validation_errors:
-                        st.error("âŒ Validation Errors Found")
+                        st.error("❌ Validation Errors Found")
                         
-                        with st.expander("ðŸ” View Validation Errors", expanded=True):
+                        with st.expander("🔍 View Validation Errors", expanded=True):
                             for error in changes.validation_errors:
                                 if error.row > 0:
                                     st.error(f"**Row {error.row}, Column '{error.column}':** {error.message}")
                                 else:
                                     st.error(f"**{error.column}:** {error.message}")
                         
-                        st.warning("âš ï¸ Please fix the errors above and re-upload the file.")
+                        st.warning("⚠️ Please fix the errors above and re-upload the file.")
                         
                         # Generate error Excel with highlighted cells
                         st.markdown("---")
-                        st.markdown("### ðŸ“¥ Download Error Report")
+                        st.markdown("### 📥 Download Error Report")
                         st.info("""
                         **Download an Excel file with errors highlighted:**
-                        - ðŸŸ¡ **Yellow cells** = Cells with validation errors
-                        - ðŸ’¬ **Comments** = Hover over yellow cells to see error details
-                        - âœï¸ **Fix errors** in Excel and re-upload
+                        - 🟡 **Yellow cells** = Cells with validation errors
+                        - 💬 **Comments** = Hover over yellow cells to see error details
+                        - ✏️ **Fix errors** in Excel and re-upload
                         """)
                         
-                        if st.button("ðŸ“¥ Generate Error Report Excel", type="primary", key="isv_error_report"):
+                        if st.button("📥 Generate Error Report Excel", type="primary", key="isv_error_report"):
                             with st.spinner("Generating error report..."):
                                 try:
                                     # Generate error Excel
@@ -3551,11 +3551,11 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     with open(error_excel_path, 'rb') as f:
                                         error_excel_data = f.read()
                                     
-                                    st.success("âœ… Error report generated!")
+                                    st.success("✅ Error report generated!")
                                     
                                     # Download button
                                     st.download_button(
-                                        label="â¬‡ï¸ Download Error Report Excel",
+                                        label="⬇️ Download Error Report Excel",
                                         data=error_excel_data,
                                         file_name=os.path.basename(error_excel_path),
                                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -3568,27 +3568,27 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         os.remove(error_excel_path)
                                 
                                 except Exception as e:
-                                    st.error(f"âŒ Error generating error report: {str(e)}")
-                                    with st.expander("ðŸ” View Error Details"):
+                                    st.error(f"❌ Error generating error report: {str(e)}")
+                                    with st.expander("🔍 View Error Details"):
                                         st.exception(e)
                     
                     # Show validation warnings if any
                     elif changes.validation_warnings:
-                        st.warning("âš ï¸ Validation Warnings")
+                        st.warning("⚠️ Validation Warnings")
                         
-                        with st.expander("ðŸ” View Warnings", expanded=False):
+                        with st.expander("🔍 View Warnings", expanded=False):
                             for warning in changes.validation_warnings:
                                 st.warning(f"**Row {warning.row}, Column '{warning.column}':** {warning.message}")
                     
                     # If no changes detected
                     if not changes.has_changes():
-                        st.info("â„¹ï¸ No changes detected in the uploaded file.")
+                        st.info("ℹ️ No changes detected in the uploaded file.")
                         st.markdown("The file matches your current structure exactly.")
                     
                     elif not changes.validation_errors:
                         # Show detected changes
-                        st.success("âœ… File parsed successfully!")
-                        st.markdown("### ðŸ“Š Detected Changes")
+                        st.success("✅ File parsed successfully!")
+                        st.markdown("### 📊 Detected Changes")
                         
                         # Summary metrics
                         col1, col2, col3, col4, col5, col6 = st.columns(6)
@@ -3610,16 +3610,16 @@ def render_interactive_structure_viewer(client, user_id: str):
                         
                         # Detailed changes
                         change_tabs = st.tabs([
-                            f"âž• New ({len(changes.new_areas) + len(changes.new_categories) + len(changes.new_attributes)})",
-                            f"âœï¸ Updated ({len(changes.updated_areas) + len(changes.updated_categories) + len(changes.updated_attributes)})"
+                            f"➕ New ({len(changes.new_areas) + len(changes.new_categories) + len(changes.new_attributes)})",
+                            f"✏️ Updated ({len(changes.updated_areas) + len(changes.updated_categories) + len(changes.updated_attributes)})"
                         ])
                         
                         # Tab 1: New items
                         with change_tabs[0]:
                             if changes.new_areas:
-                                st.markdown("#### ðŸ†• New Areas")
+                                st.markdown("#### 🆕 New Areas")
                                 for area in changes.new_areas:
-                                    with st.expander(f"ðŸ“ {area['name']} (Row {area['excel_row']})"):
+                                    with st.expander(f"📁 {area['name']} (Row {area['excel_row']})"):
                                         st.json({
                                             'name': area['name'],
                                             'icon': area['icon'],
@@ -3629,9 +3629,9 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         })
                             
                             if changes.new_categories:
-                                st.markdown("#### ðŸ†• New Categories")
+                                st.markdown("#### 🆕 New Categories")
                                 for cat in changes.new_categories:
-                                    with st.expander(f"ðŸ“‚ {cat['path']} (Row {cat['excel_row']})"):
+                                    with st.expander(f"📂 {cat['path']} (Row {cat['excel_row']})"):
                                         st.json({
                                             'name': cat['name'],
                                             'path': cat['path'],
@@ -3641,9 +3641,9 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         })
                             
                             if changes.new_attributes:
-                                st.markdown("#### ðŸ†• New Attributes")
+                                st.markdown("#### 🆕 New Attributes")
                                 for attr in changes.new_attributes:
-                                    with st.expander(f"ðŸ·ï¸ {attr['category_path']} â†’ {attr['name']} (Row {attr['excel_row']})"):
+                                    with st.expander(f"🏷️ {attr['category_path']} → {attr['name']} (Row {attr['excel_row']})"):
                                         st.json({
                                             'name': attr['name'],
                                             'category_path': attr['category_path'],
@@ -3661,25 +3661,25 @@ def render_interactive_structure_viewer(client, user_id: str):
                         # Tab 2: Updated items
                         with change_tabs[1]:
                             if changes.updated_areas:
-                                st.markdown("#### âœï¸ Updated Areas")
+                                st.markdown("#### ✏️ Updated Areas")
                                 for area in changes.updated_areas:
-                                    with st.expander(f"ðŸ“ {area['name']} (Row {area['excel_row']})"):
+                                    with st.expander(f"📁 {area['name']} (Row {area['excel_row']})"):
                                         st.markdown("**Changes:**")
                                         for key, value in area['updates'].items():
                                             st.markdown(f"- **{key}:** `{value}`")
                             
                             if changes.updated_categories:
-                                st.markdown("#### âœï¸ Updated Categories")
+                                st.markdown("#### ✏️ Updated Categories")
                                 for cat in changes.updated_categories:
-                                    with st.expander(f"ðŸ“‚ {cat['path']} (Row {cat['excel_row']})"):
+                                    with st.expander(f"📂 {cat['path']} (Row {cat['excel_row']})"):
                                         st.markdown("**Changes:**")
                                         for key, value in cat['updates'].items():
                                             st.markdown(f"- **{key}:** `{value}`")
                             
                             if changes.updated_attributes:
-                                st.markdown("#### âœï¸ Updated Attributes")
+                                st.markdown("#### ✏️ Updated Attributes")
                                 for attr in changes.updated_attributes:
-                                    with st.expander(f"ðŸ·ï¸ {attr['category_path']} â†’ {attr['name']} (Row {attr['excel_row']})"):
+                                    with st.expander(f"🏷️ {attr['category_path']} → {attr['name']} (Row {attr['excel_row']})"):
                                         st.markdown("**Changes:**")
                                         for key, value in attr['updates'].items():
                                             st.markdown(f"- **{key}:** `{value}`")
@@ -3690,8 +3690,8 @@ def render_interactive_structure_viewer(client, user_id: str):
                         st.markdown("---")
                         
                         # Confirmation
-                        st.markdown("### âœ… Confirm Changes")
-                        st.warning("âš ï¸ **Important:** Once you confirm, these changes will be applied to your database immediately.")
+                        st.markdown("### ✅ Confirm Changes")
+                        st.warning("⚠️ **Important:** Once you confirm, these changes will be applied to your database immediately.")
                         
                         col1, col2 = st.columns([3, 1])
                         
@@ -3706,7 +3706,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                         with col2:
                             st.markdown("<br>", unsafe_allow_html=True)  # Spacing
                             apply_button = st.button(
-                                "ðŸš€ Apply Changes",
+                                "🚀 Apply Changes",
                                 type="primary",
                                 disabled=(confirm_text != "CONFIRM"),
                                 use_container_width=True,
@@ -3714,28 +3714,28 @@ def render_interactive_structure_viewer(client, user_id: str):
                             )
                         
                         if apply_button and confirm_text == "CONFIRM":
-                            with st.spinner("ðŸ’¾ Applying changes to database..."):
+                            with st.spinner("💾 Applying changes to database..."):
                                 success, message = parser.apply_changes()
                                 
                                 if success:
-                                    st.success(f"âœ… {message}")
+                                    st.success(f"✅ {message}")
                                     st.balloons()
                                     
-                                    st.info("ðŸ”„ Changes applied successfully! Refresh to see updates.")
+                                    st.info("🔄 Changes applied successfully! Refresh to see updates.")
                                     
                                     # Clear cache to reload fresh data
-                                    if st.button("ðŸ”„ Refresh Now", type="primary", key="isv_refresh_after_upload"):
+                                    if st.button("🔄 Refresh Now", type="primary", key="isv_refresh_after_upload"):
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
                                         st.session_state.edited_df = None
                                         st.rerun()
                                 else:
-                                    st.error(f"âŒ {message}")
+                                    st.error(f"❌ {message}")
                                     st.warning("Please check the errors and try again.")
                 
                 except Exception as e:
-                    st.error(f"âŒ Error processing file: {str(e)}")
-                    with st.expander("ðŸ” View Error Details"):
+                    st.error(f"❌ Error processing file: {str(e)}")
+                    with st.expander("🔍 View Error Details"):
                         st.exception(e)
                 
                 finally:
