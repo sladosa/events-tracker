@@ -4,7 +4,7 @@ Events Tracker - Interactive Structure Viewer Module
 Created: 2025-11-25 10:00 UTC
 Last Modified: 2025-12-08 09:00 UTC
 Python: 3.11
-Version: 1.10.0 - HYBRID Approach (State Machine + Bug Fixes + New Features)
+Version: 1.10.2 - HYBRID Approach (State Machine + Bug Fixes + New Features)
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -1980,13 +1980,20 @@ def render_interactive_structure_viewer(client, user_id: str):
     unsaved_changes, num_changes = has_unsaved_changes()
     
     # v1.10.1: Sync State Machine with has_unsaved_changes detection
+    state_changed = False
     if unsaved_changes and not state_mgr.state.has_changes:
         # Changes detected - update State Machine
         state_mgr.state.has_changes = True
         state_mgr.state.mode = 'edit'  # Ensure we're in edit mode
+        state_changed = True
     elif not unsaved_changes and state_mgr.state.has_changes:
         # No changes detected but State Machine thinks there are - clear it
         state_mgr.state.has_changes = False
+        state_changed = True
+    
+    # CRITICAL: Force rerun to update UI (lock/unlock filters)
+    if state_changed:
+        st.rerun()
     
     # Show warning banner if there are unsaved changes
     if unsaved_changes:
@@ -2065,15 +2072,12 @@ def render_interactive_structure_viewer(client, user_id: str):
         💡 *Tip: After you save, the banner will disappear and filters will be re-enabled automatically.*
         """)
         
-        # BUG FIX #1: Discard button now in banner (v1.10.0)
-        col1, col2, col3 = st.columns([3, 1, 1])
+        # BUG FIX #1: Discard button in banner (v1.10.0 / v1.10.2 - removed Save)
+        col1, col2 = st.columns([4, 1])
         with col1:
-            st.caption("Choose an option to proceed:")
+            st.info("💡 **Quick action:** Use the Discard button → to cancel all changes")
         with col2:
-            if st.button("💾 Save", type="secondary", help="Scroll down to Save section"):
-                st.info("👇 Scroll down to the Edit Mode section to save your changes")
-        with col3:
-            if st.button("🗑️ Discard", type="secondary", help="Discard all changes"):
+            if st.button("🗑️ Discard", type="secondary", help="Discard all changes", use_container_width=True):
                 # Clear all state
                 st.session_state.original_df = None
                 st.session_state.edited_df = None
