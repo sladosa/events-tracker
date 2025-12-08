@@ -1808,7 +1808,8 @@ def render_interactive_structure_viewer(client, user_id: str):
     if 'edited_df' not in st.session_state:
         st.session_state.edited_df = None
     
-    # Flag to track when user is actively editing (data_editor rendered)
+    # v1.10.1 DEPRECATED: editing_active flag no longer used (State Machine manages state)
+    # Kept for backward compatibility only
     if 'editing_active' not in st.session_state:
         st.session_state.editing_active = False
     
@@ -1855,8 +1856,44 @@ def render_interactive_structure_viewer(client, user_id: str):
         horizontal=True
     )
     
-    # Update session state
-    st.session_state.viewer_mode = 'read_only' if new_mode == 'Read-Only' else 'edit'
+    # ============================================
+    # MODE SWITCH VALIDATION (v1.10.1 FIX)
+    # ============================================
+    # Block mode switch if there are unsaved changes
+    previous_mode = st.session_state.viewer_mode
+    requested_mode = 'read_only' if new_mode == 'Read-Only' else 'edit'
+    
+    # Check if user is trying to switch modes
+    if previous_mode != requested_mode:
+        # Check if State Machine allows mode switch
+        can_switch, reason = state_mgr.can_switch_mode()
+        
+        if not can_switch:
+            # Block the switch - show error and keep current mode
+            st.error(f"""
+            🚨 **Cannot switch to {new_mode} mode!**
+            
+            {reason}
+            
+            **Please:**
+            - 💾 **Save your changes** (scroll down to Edit section), OR
+            - 🗑️ **Discard your changes** (click Discard button below)
+            
+            Then you can switch modes.
+            """)
+            # Keep the current mode (don't switch)
+            st.session_state.viewer_mode = previous_mode
+        else:
+            # Switch allowed - update State Machine
+            if requested_mode == 'read_only':
+                state_mgr.switch_to_viewing()
+                st.session_state.viewer_mode = 'read_only'
+            else:
+                state_mgr.switch_to_editing()
+                st.session_state.viewer_mode = 'edit'
+    else:
+        # No mode change requested - just update session state to match
+        st.session_state.viewer_mode = requested_mode
     
     st.markdown("---")
     
@@ -1941,6 +1978,15 @@ def render_interactive_structure_viewer(client, user_id: str):
     
     # Check for unsaved changes
     unsaved_changes, num_changes = has_unsaved_changes()
+    
+    # v1.10.1: Sync State Machine with has_unsaved_changes detection
+    if unsaved_changes and not state_mgr.state.has_changes:
+        # Changes detected - update State Machine
+        state_mgr.state.has_changes = True
+        state_mgr.state.mode = 'edit'  # Ensure we're in edit mode
+    elif not unsaved_changes and state_mgr.state.has_changes:
+        # No changes detected but State Machine thinks there are - clear it
+        state_mgr.state.has_changes = False
     
     # Show warning banner if there are unsaved changes
     if unsaved_changes:
@@ -2031,7 +2077,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                 # Clear all state
                 st.session_state.original_df = None
                 st.session_state.edited_df = None
-                st.session_state.editing_active = False
+                # v1.10.1: State Machine handles state cleanup
                 state_mgr.discard_changes()
                 st.success("✅ Changes discarded! Filters re-enabled.")
                 st.rerun()
@@ -2042,9 +2088,9 @@ def render_interactive_structure_viewer(client, user_id: str):
     # CONTROLS - ROW 2: UNIFIED FILTERS
     # ============================================
     
-    # Show friendly info in Edit Mode about filter behavior
-    if st.session_state.viewer_mode == 'edit' and not st.session_state.get('editing_active', False):
-        st.info("ℹ️ **Filters are enabled.** When you open a data editor (Areas/Categories/Attributes), filters will lock until you save or discard.")
+    # Show friendly info in Edit Mode about filter behavior (v1.10.1 - using State Machine)
+    if st.session_state.viewer_mode == 'edit' and state_mgr.state.is_editing:
+        st.info("ℹ️ **Filters are enabled.** When you make changes in Edit Mode, filters will lock until you save or discard.")
     
     # Callback functions to ensure state sync (executed BEFORE rerun)
     def on_view_type_change():
@@ -2081,7 +2127,8 @@ def render_interactive_structure_viewer(client, user_id: str):
     
     with col1:
         # View Type selector (applies to Read-Only mode only, but state always maintained)
-        filters_locked = st.session_state.get('editing_active', False)
+        # v1.10.1: Use State Machine for filter locking
+        filters_locked = not state_mgr.state.filters_enabled
         view_help = "Finish editing to use filters (Save or Discard)" if filters_locked else "Sunburst/Treemap/Network: Visual hierarchy | Table: Spreadsheet view"
         
         view_type = st.selectbox(
@@ -2099,7 +2146,8 @@ def render_interactive_structure_viewer(client, user_id: str):
         area_options = ["All Areas"] + sorted(df[df['Type'] == 'Area']['Area'].unique().tolist())
         
         # Help message changes based on editing state
-        filters_locked = st.session_state.get('editing_active', False)
+        # v1.10.1: Use State Machine for filter locking
+        filters_locked = not state_mgr.state.filters_enabled
         filter_help = "Finish editing to use filters (Save or Discard)" if filters_locked else "Filter structure by Area"
         
         selected_area = st.selectbox(
@@ -2120,7 +2168,8 @@ def render_interactive_structure_viewer(client, user_id: str):
             category_options = ["All Categories"] + sorted(area_categories)
             
             # Help message changes based on editing state
-            filters_locked = st.session_state.get('editing_active', False)
+            # v1.10.1: Use State Machine for filter locking
+            filters_locked = not state_mgr.state.filters_enabled
             category_help = "Finish editing to use filters (Save or Discard)" if filters_locked else "Drill down to specific category"
             
             selected_category = st.selectbox(
@@ -2143,7 +2192,8 @@ def render_interactive_structure_viewer(client, user_id: str):
     
     with col4:
         # Show Events toggle
-        filters_locked = st.session_state.get('editing_active', False)
+        # v1.10.1: Use State Machine for filter locking
+        filters_locked = not state_mgr.state.filters_enabled
         show_events = st.checkbox(
             "Show Events",
             value=st.session_state.view_filters['show_events'],
@@ -2307,8 +2357,8 @@ def render_interactive_structure_viewer(client, user_id: str):
                     'Description': st.column_config.TextColumn('Description', help="Area description - editable", disabled=False)
                 }
                 
-                # CRITICAL: Lock filters when data editor is rendered
-                st.session_state.editing_active = True
+                # v1.10.1: State Machine now handles filter locking based on has_changes detection
+                # No need to manually set editing_active flag
                 
                 # Render area editor
                 edited_area_df = st.data_editor(
@@ -2354,7 +2404,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.cache_data.clear()
                                     st.session_state.original_df = None
                                     st.session_state.edited_df = None
-                                    st.session_state.editing_active = False  # Unlock filters!
+                                    # v1.10.1: State Machine handles filter unlocking
                                     st.rerun()
                 
                 st.markdown("---")
@@ -2386,7 +2436,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
                                         st.session_state.edited_df = None
-                                        st.session_state.editing_active = False
+                                        # v1.10.1: Removed editing_active flag (State Machine manages state)
                                         # BUG FIX #2: Update State Machine after successful ADD (v1.10.0)
                                         state_mgr.submit_form()
                                         # Rerun to refresh
@@ -2421,7 +2471,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                     key="discard_button_areas"
                 ):
                     # CRITICAL: Unlock filters after discard
-                    st.session_state.editing_active = False
+                    # v1.10.1: Removed editing_active flag (State Machine manages state)
                     # Reset to original
                     st.session_state.edited_df = None
                     st.session_state.original_df = None
@@ -2480,8 +2530,8 @@ def render_interactive_structure_viewer(client, user_id: str):
                         'Description': st.column_config.TextColumn('Description', help="Category description - editable", disabled=False)
                     }
                     
-                    # CRITICAL: Lock filters when data editor is rendered
-                    st.session_state.editing_active = True
+                    # v1.10.1: State Machine now handles filter locking based on has_changes detection
+                    # No need to manually set editing_active flag
                     
                     # Render category editor
                     edited_cat_df = st.data_editor(
@@ -2527,7 +2577,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
                                         st.session_state.edited_df = None
-                                        st.session_state.editing_active = False  # Unlock filters!
+                                        # v1.10.1: State Machine handles filter unlocking
                                         st.rerun()
                     
                     # Check for edit changes (non-delete)
@@ -2545,7 +2595,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                             if st.button("💾 Save Changes", key="save_categories", disabled=(confirm != "SAVE")):
                                 with st.spinner("Saving category changes..."):
                                     # CRITICAL: Unlock filters after save
-                                    st.session_state.editing_active = False
+                                    # v1.10.1: Removed editing_active flag (State Machine manages state)
                                     
                                     # Save category changes
                                     success, stats = _save_category_changes(
@@ -2637,7 +2687,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.cache_data.clear()
                                     st.session_state.original_df = None
                                     st.session_state.edited_df = None
-                                    st.session_state.editing_active = False
+                                    # v1.10.1: Removed editing_active flag (State Machine manages state)
                                     # BUG FIX #2: Update State Machine after successful ADD (v1.10.0)
                                     state_mgr.submit_form()
                                     # IMPORTANT: rerun to refresh everything and clear form
@@ -2712,7 +2762,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         load_structure_as_dataframe.clear()
                                         st.session_state.original_df = None
                                         st.session_state.edited_df = None
-                                        st.session_state.editing_active = False
+                                        # v1.10.1: Removed editing_active flag (State Machine manages state)
                                         state_mgr.submit_form()
                                         st.rerun()
                                     else:
@@ -2826,7 +2876,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                                 load_structure_as_dataframe.clear()
                                                 st.session_state.original_df = None
                                                 st.session_state.edited_df = None
-                                                st.session_state.editing_active = False
+                                                # v1.10.1: Removed editing_active flag (State Machine manages state)
                                                 state_mgr.submit_form()
                                                 st.balloons()
                                                 st.rerun()
@@ -2858,7 +2908,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                     key="discard_button_categories"
                 ):
                     # CRITICAL: Unlock filters after discard
-                    st.session_state.editing_active = False
+                    # v1.10.1: Removed editing_active flag (State Machine manages state)
                     # Reset to original
                     st.session_state.edited_df = None
                     st.session_state.original_df = None
@@ -2939,8 +2989,8 @@ def render_interactive_structure_viewer(client, user_id: str):
                         'Description': st.column_config.TextColumn('Description', help="Attribute description", disabled=False)
                     }
                     
-                    # CRITICAL: Lock filters when data editor is rendered
-                    st.session_state.editing_active = True
+                    # v1.10.1: State Machine now handles filter locking based on has_changes detection
+                    # No need to manually set editing_active flag
                     
                     # Render attribute editor
                     edited_attr_df = st.data_editor(
@@ -2979,7 +3029,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
                                         st.session_state.edited_df = None
-                                        st.session_state.editing_active = False  # Unlock filters!
+                                        # v1.10.1: State Machine handles filter unlocking
                                         st.rerun()
                     
                     # Store edited dataframe
@@ -3019,7 +3069,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                 if confirmation_text == "SAVE":
                                     with st.spinner("Saving changes..."):
                                         # CRITICAL: Unlock filters after save
-                                        st.session_state.editing_active = False
+                                        # v1.10.1: Removed editing_active flag (State Machine manages state)
                                         
                                         # Use attribute_full_df which has metadata columns (_attribute_id)
                                         full_edited_df = st.session_state.original_df.copy()
@@ -3232,7 +3282,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.cache_data.clear()
                                     st.session_state.original_df = None
                                     st.session_state.edited_df = None
-                                    st.session_state.editing_active = False
+                                    # v1.10.1: Removed editing_active flag (State Machine manages state)
                                     # BUG FIX #2: Update State Machine after successful ADD (v1.10.0)
                                     state_mgr.submit_form()
                                     # Rerun
@@ -3267,7 +3317,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                     key="discard_button_attributes"
                 ):
                     # CRITICAL: Unlock filters after discard
-                    st.session_state.editing_active = False
+                    # v1.10.1: Removed editing_active flag (State Machine manages state)
                     # Reset to original
                     st.session_state.edited_df = None
                     st.session_state.original_df = None
