@@ -4,7 +4,7 @@ Events Tracker - Interactive Structure Viewer Module
 Created: 2025-11-25 10:00 UTC
 Last Modified: 2025-12-08 09:00 UTC
 Python: 3.11
-Version: 1.10.2 - HYBRID Approach (State Machine + Bug Fixes + New Features)
+Version: 1.10.0 - HYBRID Approach (State Machine + Bug Fixes + New Features)
 
 Description:
 Interactive Excel-like table for direct structure editing without Excel files.
@@ -1829,6 +1829,79 @@ def render_interactive_structure_viewer(client, user_id: str):
         st.session_state.original_df = df.copy()
     
     # ============================================
+    # CRITICAL: CHECK CHANGES FIRST (v1.10.3)
+    # ============================================
+    # Must happen BEFORE rendering any filters!
+    # This ensures State Machine is synced before UI renders
+    
+    def has_unsaved_changes_early():
+        """Check for unsaved changes - EARLY version before UI renders"""
+        viewer_mode = st.session_state.get('viewer_mode', 'read_only')
+        
+        if viewer_mode != 'edit':
+            return False, 0
+        
+        original_df = st.session_state.get('original_df')
+        edited_df = st.session_state.get('edited_df')
+        
+        if original_df is None or edited_df is None:
+            return False, 0
+        
+        # Get display columns (exclude internal UUID columns)
+        display_cols = [col for col in original_df.columns if not col.startswith('_')]
+        orig_display = original_df[display_cols].copy()
+        edited_display = edited_df.copy()
+        
+        # Normalize for comparison
+        def normalize_df(df):
+            df_norm = df.copy()
+            for col in df_norm.columns:
+                df_norm[col] = df_norm[col].fillna('').astype(str)
+                df_norm[col] = df_norm[col].str.replace(r'\.0$', '', regex=True)
+            df_norm = df_norm[sorted(df_norm.columns)]
+            return df_norm
+        
+        orig_normalized = normalize_df(orig_display)
+        edited_normalized = normalize_df(edited_display)
+        
+        has_changes = not orig_normalized.equals(edited_normalized)
+        
+        if has_changes:
+            num_changed = 0
+            for idx in orig_normalized.index:
+                if idx in edited_normalized.index:
+                    if not orig_normalized.loc[idx].equals(edited_normalized.loc[idx]):
+                        num_changed += 1
+            
+            new_rows = len(edited_normalized) - len(orig_normalized)
+            if new_rows > 0:
+                num_changed += new_rows
+            
+            if num_changed == 0:
+                return False, 0
+            
+            return True, abs(num_changed)
+        
+        return False, 0
+    
+    # Check for unsaved changes EARLY
+    unsaved_changes_early, num_changes_early = has_unsaved_changes_early()
+    
+    # Sync State Machine IMMEDIATELY
+    state_changed = False
+    if unsaved_changes_early and not state_mgr.state.has_changes:
+        state_mgr.state.has_changes = True
+        state_mgr.state.mode = 'edit'
+        state_changed = True
+    elif not unsaved_changes_early and state_mgr.state.has_changes:
+        state_mgr.state.has_changes = False
+        state_changed = True
+    
+    # Force rerun if state changed
+    if state_changed:
+        st.rerun()
+    
+    # ============================================
     # CENTRALIZED FILTER STATE
     # ============================================
     
@@ -2615,6 +2688,16 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.rerun()
                                     else:
                                         st.error(f"❌ Failed to save changes. {stats['errors']} errors occurred.")
+                        
+                        # v1.10.3: Add Discard button below Save
+                        st.markdown("---")
+                        if st.button("🗑️ Discard Changes", key="discard_category_changes", type="secondary", use_container_width=True):
+                            # Clear all state
+                            st.session_state.original_df = None
+                            st.session_state.edited_df = None
+                            state_mgr.discard_changes()
+                            st.success("✅ Changes discarded! Filters re-enabled.")
+                            st.rerun()
             
             # Add Category form - ALWAYS visible, regardless of whether categories exist
             st.markdown("---")
@@ -3121,7 +3204,11 @@ def render_interactive_structure_viewer(client, user_id: str):
                         
                         with col3:
                             if st.button("⏪ Discard Changes", use_container_width=True, key="discard_attributes"):
+                                # v1.10.3: Use state_mgr for consistency
+                                st.session_state.original_df = None
                                 st.session_state.edited_df = None
+                                state_mgr.discard_changes()
+                                st.success("✅ Changes discarded! Filters re-enabled.")
                                 st.rerun()
             
             # Add Attribute form - ALWAYS visible, regardless of whether attributes exist
