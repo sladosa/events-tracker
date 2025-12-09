@@ -1939,23 +1939,24 @@ def render_interactive_structure_viewer(client, user_id: str):
         Returns:
             Tuple[bool, int]: (has_changes, num_changed_rows)
         """
-        viewer_mode = st.session_state.get('viewer_mode', 'read_only')
-        
-        if viewer_mode != 'edit':
-            return False, 0
-        
-        original_df = st.session_state.get('original_df')
-        if original_df is None:
-            return False, 0
-        
-        # Check all three editor keys and compare data
-        editors = {
-            'areas_editor': 'Area',
-            'categories_editor': 'Category', 
-            'attributes_editor': 'Attribute'
-        }
-        
-        total_changes = 0
+        try:
+            viewer_mode = st.session_state.get('viewer_mode', 'read_only')
+            
+            if viewer_mode != 'edit':
+                return False, 0
+            
+            original_df = st.session_state.get('original_df')
+            if original_df is None:
+                return False, 0
+            
+            # Check all three editor keys and compare data
+            editors = {
+                'areas_editor': 'Area',
+                'categories_editor': 'Category', 
+                'attributes_editor': 'Attribute'
+            }
+            
+            total_changes = 0
         
         for editor_key, type_filter in editors.items():
             # Fast gate: Skip if editor not opened
@@ -1964,8 +1965,19 @@ def render_interactive_structure_viewer(client, user_id: str):
             
             edited_df = st.session_state[editor_key]
             
+            # v1.10.5: Validate that edited_df is actually a DataFrame
+            # Sometimes key exists but value is None or dict (Streamlit quirk)
+            if edited_df is None:
+                continue
+            if not hasattr(edited_df, 'columns'):
+                continue  # Not a DataFrame
+            
             # Filter original_df to match this editor's type
             original_for_type = original_df[original_df['Type'] == type_filter].copy()
+            
+            # Check if we have any data for this type
+            if original_for_type.empty:
+                continue  # No original data to compare
             
             # Get display columns only (exclude metadata)
             display_cols = [col for col in original_for_type.columns if not col.startswith('_')]
@@ -2005,8 +2017,14 @@ def render_interactive_structure_viewer(client, user_id: str):
                 if new_rows > 0:
                     total_changes += new_rows
         
-        # Return True ONLY if actual changes detected
-        return total_changes > 0, total_changes
+            # Return True ONLY if actual changes detected
+            return total_changes > 0, total_changes
+            
+        except Exception as e:
+            # v1.10.5: If any error occurs, return safe default (no changes)
+            # This prevents AttributeError or other exceptions from breaking the app
+            # Error is silently caught - filters stay enabled, no banner shown
+            return False, 0
     
     # Check for unsaved changes EARLY
     unsaved_changes_early, num_changes_early = has_unsaved_changes_early()
@@ -2085,9 +2103,18 @@ def render_interactive_structure_viewer(client, user_id: str):
             if requested_mode == 'read_only':
                 state_mgr.switch_to_viewing()
                 st.session_state.viewer_mode = 'read_only'
+                # v1.10.5: Clear all editor keys when switching to Read-Only
+                if 'areas_editor' in st.session_state:
+                    del st.session_state.areas_editor
+                if 'categories_editor' in st.session_state:
+                    del st.session_state.categories_editor
+                if 'attributes_editor' in st.session_state:
+                    del st.session_state.attributes_editor
+                st.rerun()  # v1.10.5: Rerun to sync state
             else:
                 state_mgr.switch_to_editing()
                 st.session_state.viewer_mode = 'edit'
+                st.rerun()  # v1.10.5: Rerun to sync state
     else:
         # No mode change requested - just update session state to match
         st.session_state.viewer_mode = requested_mode
