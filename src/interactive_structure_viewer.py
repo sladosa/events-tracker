@@ -1957,66 +1957,66 @@ def render_interactive_structure_viewer(client, user_id: str):
             }
             
             total_changes = 0
-        
-        for editor_key, type_filter in editors.items():
-            # Fast gate: Skip if editor not opened
-            if editor_key not in st.session_state:
-                continue
             
-            edited_df = st.session_state[editor_key]
-            
-            # v1.10.5: Validate that edited_df is actually a DataFrame
-            # Sometimes key exists but value is None or dict (Streamlit quirk)
-            if edited_df is None:
-                continue
-            if not hasattr(edited_df, 'columns'):
-                continue  # Not a DataFrame
-            
-            # Filter original_df to match this editor's type
-            original_for_type = original_df[original_df['Type'] == type_filter].copy()
-            
-            # Check if we have any data for this type
-            if original_for_type.empty:
-                continue  # No original data to compare
-            
-            # Get display columns only (exclude metadata)
-            display_cols = [col for col in original_for_type.columns if not col.startswith('_')]
-            original_display = original_for_type[display_cols].copy()
-            
-            # Remove delete checkbox if present in edited
-            edited_clean = edited_df.copy()
-            if '🗑️' in edited_clean.columns:
-                edited_clean = edited_clean.drop(columns=['🗑️'])
-            
-            # Ensure both have same columns
-            common_cols = [col for col in display_cols if col in edited_clean.columns]
-            original_display = original_display[common_cols]
-            edited_clean = edited_clean[common_cols]
-            
-            # Normalize DataFrames for comparison
-            def normalize_df(df):
-                """Normalize DataFrame for robust comparison."""
-                df_norm = df.copy()
-                for col in df_norm.columns:
-                    df_norm[col] = df_norm[col].fillna('').astype(str)
-                    df_norm[col] = df_norm[col].str.replace(r'\.0$', '', regex=True)
-                return df_norm[sorted(df_norm.columns)]
-            
-            orig_norm = normalize_df(original_display)
-            edit_norm = normalize_df(edited_clean)
-            
-            # Compare and count changed rows
-            if not orig_norm.equals(edit_norm):
-                for idx in orig_norm.index:
-                    if idx in edit_norm.index:
-                        if not orig_norm.loc[idx].equals(edit_norm.loc[idx]):
-                            total_changes += 1
+            for editor_key, type_filter in editors.items():
+                # Fast gate: Skip if editor not opened
+                if editor_key not in st.session_state:
+                    continue
                 
-                # Check for new rows
-                new_rows = len(edit_norm) - len(orig_norm)
-                if new_rows > 0:
-                    total_changes += new_rows
-        
+                edited_df = st.session_state[editor_key]
+                
+                # v1.10.5: Validate that edited_df is actually a DataFrame
+                # Sometimes key exists but value is None or dict (Streamlit quirk)
+                if edited_df is None:
+                    continue
+                if not hasattr(edited_df, 'columns'):
+                    continue  # Not a DataFrame
+                
+                # Filter original_df to match this editor's type
+                original_for_type = original_df[original_df['Type'] == type_filter].copy()
+                
+                # Check if we have any data for this type
+                if original_for_type.empty:
+                    continue  # No original data to compare
+                
+                # Get display columns only (exclude metadata)
+                display_cols = [col for col in original_for_type.columns if not col.startswith('_')]
+                original_display = original_for_type[display_cols].copy()
+                
+                # Remove delete checkbox if present in edited
+                edited_clean = edited_df.copy()
+                if '🗑️' in edited_clean.columns:
+                    edited_clean = edited_clean.drop(columns=['🗑️'])
+                
+                # Ensure both have same columns
+                common_cols = [col for col in display_cols if col in edited_clean.columns]
+                original_display = original_display[common_cols]
+                edited_clean = edited_clean[common_cols]
+                
+                # Normalize DataFrames for comparison
+                def normalize_df(df):
+                    """Normalize DataFrame for robust comparison."""
+                    df_norm = df.copy()
+                    for col in df_norm.columns:
+                        df_norm[col] = df_norm[col].fillna('').astype(str)
+                        df_norm[col] = df_norm[col].str.replace(r'\.0$', '', regex=True)
+                    return df_norm[sorted(df_norm.columns)]
+                
+                orig_norm = normalize_df(original_display)
+                edit_norm = normalize_df(edited_clean)
+                
+                # Compare and count changed rows
+                if not orig_norm.equals(edit_norm):
+                    for idx in orig_norm.index:
+                        if idx in edit_norm.index:
+                            if not orig_norm.loc[idx].equals(edit_norm.loc[idx]):
+                                total_changes += 1
+                    
+                    # Check for new rows
+                    new_rows = len(edit_norm) - len(orig_norm)
+                    if new_rows > 0:
+                        total_changes += new_rows
+            
             # Return True ONLY if actual changes detected
             return total_changes > 0, total_changes
             
