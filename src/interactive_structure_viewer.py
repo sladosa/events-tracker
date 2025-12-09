@@ -2,11 +2,42 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-09 15:45 UTC
+Last Modified: 2025-12-09 17:00 UTC
 Python: 3.11
-Version: 1.10.5 - CRITICAL FIX: Infinite Loop Prevention (Hybrid Approach)
+Version: 1.10.6 - SIMPLIFICATION: Back to Single Check (Remove Early Check)
 
-CHANGELOG v1.10.5 (Infinite Loop Fix - CRITICAL):
+CHANGELOG v1.10.6 (Simplification - Remove Early Check):
+- 🎯 PHILOSOPHY CHANGE: Use ONLY has_unsaved_changes() (regular check)
+  - User report: "Banner shows but filters stay enabled" (desync issue)
+  - Root cause: Two different checks see different state at different times
+  - Early check runs BEFORE filters render → sees old state
+  - Regular check runs AFTER filters render → sees new state but too late
+  - Result: Banner and filters react to DIFFERENT information sources
+- ✅ SOLUTION: Single source of truth
+  - Removed has_unsaved_changes_early() function entirely
+  - Removed all session_state editor keys (areas_editor, categories_editor, attributes_editor)
+  - Use ONLY has_unsaved_changes() which checks edited_df
+  - State Machine syncs ONCE after regular check
+  - Filters render AFTER sync → see correct state
+  - Banner and filters now react to SAME check
+- 🔧 TECHNICAL: Simplified flow
+  - Line ~2100: has_unsaved_changes() - THE ONLY CHECK
+  - Line ~2105: State Machine sync immediately after
+  - Line ~2208: Filters render with synced state
+  - Line ~2115: Banner shows with same state
+  - All three editors (Areas, Categories, Attributes) set edited_df consistently
+- 🎯 IMPACT: Reliable synchronization
+  - Banner appears → Filters disabled (both from same check) ✅
+  - No more timing issues ✅
+  - No more dual sync points ✅
+  - Simpler, more maintainable code ✅
+- ⚠️ LESSON LEARNED: Premature optimization
+  - Early check was attempt to detect changes earlier
+  - Created more problems than it solved
+  - Simple, single-check approach is more reliable
+  - KISS principle wins again
+
+CHANGELOG v1.10.5 (Infinite Loop Fix - DEPRECATED):
 - 🐛 CRITICAL FIX: Infinite rerun loop from v1.10.4
   - Problem: has_unsaved_changes_early() only checked if key exists
   - User report: "Constant state flipping Has Changes: False → True"
@@ -1893,17 +1924,11 @@ def render_interactive_structure_viewer(client, user_id: str):
             st.text(f"- has_changes: {state_mgr.state.has_changes}")
             st.text(f"- filters_enabled: {state_mgr.state.filters_enabled}")
             
-            st.markdown("**💾 Editor State:**")
-            areas_state = "SET" if 'areas_editor' in st.session_state else "None"
-            cats_state = "SET" if 'categories_editor' in st.session_state else "None"
-            attrs_state = "SET" if 'attributes_editor' in st.session_state else "None"
-            st.text(f"- areas_editor: {areas_state}")
-            st.text(f"- categories_editor: {cats_state}")
-            st.text(f"- attributes_editor: {attrs_state}")
-            
-            st.markdown("**🗂️ Legacy State:**")
+            st.markdown("**💾 Data State:**")
             edited_df_state = "SET" if st.session_state.get('edited_df') is not None else "None"
+            original_df_state = "SET" if st.session_state.get('original_df') is not None else "None"
             st.text(f"- edited_df: {edited_df_state}")
+            st.text(f"- original_df: {original_df_state}")
         st.markdown("---")
     
     # Load data
@@ -1923,125 +1948,6 @@ def render_interactive_structure_viewer(client, user_id: str):
     # ============================================
     # Must happen BEFORE rendering any filters!
     # This ensures State Machine is synced before UI renders
-    
-    def has_unsaved_changes_early():
-        """
-        Check for unsaved changes - EARLY version before UI renders.
-        
-        v1.10.5 CRITICAL FIX: Hybrid approach to prevent infinite loop.
-        - Checks if editor keys exist (fast gate)
-        - Compares actual DataFrame content (accurate detection)
-        - Returns True ONLY if real data changes exist
-        
-        This prevents the infinite loop from v1.10.4 where key existence alone
-        triggered reruns even without actual data changes.
-        
-        Returns:
-            Tuple[bool, int]: (has_changes, num_changed_rows)
-        """
-        try:
-            viewer_mode = st.session_state.get('viewer_mode', 'read_only')
-            
-            if viewer_mode != 'edit':
-                return False, 0
-            
-            original_df = st.session_state.get('original_df')
-            if original_df is None:
-                return False, 0
-            
-            # Check all three editor keys and compare data
-            editors = {
-                'areas_editor': 'Area',
-                'categories_editor': 'Category', 
-                'attributes_editor': 'Attribute'
-            }
-            
-            total_changes = 0
-            
-            for editor_key, type_filter in editors.items():
-                # Fast gate: Skip if editor not opened
-                if editor_key not in st.session_state:
-                    continue
-                
-                edited_df = st.session_state[editor_key]
-                
-                # v1.10.5: Validate that edited_df is actually a DataFrame
-                # Sometimes key exists but value is None or dict (Streamlit quirk)
-                if edited_df is None:
-                    continue
-                if not hasattr(edited_df, 'columns'):
-                    continue  # Not a DataFrame
-                
-                # Filter original_df to match this editor's type
-                original_for_type = original_df[original_df['Type'] == type_filter].copy()
-                
-                # Check if we have any data for this type
-                if original_for_type.empty:
-                    continue  # No original data to compare
-                
-                # Get display columns only (exclude metadata)
-                display_cols = [col for col in original_for_type.columns if not col.startswith('_')]
-                original_display = original_for_type[display_cols].copy()
-                
-                # Remove delete checkbox if present in edited
-                edited_clean = edited_df.copy()
-                if '🗑️' in edited_clean.columns:
-                    edited_clean = edited_clean.drop(columns=['🗑️'])
-                
-                # Ensure both have same columns
-                common_cols = [col for col in display_cols if col in edited_clean.columns]
-                original_display = original_display[common_cols]
-                edited_clean = edited_clean[common_cols]
-                
-                # Normalize DataFrames for comparison
-                def normalize_df(df):
-                    """Normalize DataFrame for robust comparison."""
-                    df_norm = df.copy()
-                    for col in df_norm.columns:
-                        df_norm[col] = df_norm[col].fillna('').astype(str)
-                        df_norm[col] = df_norm[col].str.replace(r'\.0$', '', regex=True)
-                    return df_norm[sorted(df_norm.columns)]
-                
-                orig_norm = normalize_df(original_display)
-                edit_norm = normalize_df(edited_clean)
-                
-                # Compare and count changed rows
-                if not orig_norm.equals(edit_norm):
-                    for idx in orig_norm.index:
-                        if idx in edit_norm.index:
-                            if not orig_norm.loc[idx].equals(edit_norm.loc[idx]):
-                                total_changes += 1
-                    
-                    # Check for new rows
-                    new_rows = len(edit_norm) - len(orig_norm)
-                    if new_rows > 0:
-                        total_changes += new_rows
-            
-            # Return True ONLY if actual changes detected
-            return total_changes > 0, total_changes
-            
-        except Exception as e:
-            # v1.10.5: If any error occurs, return safe default (no changes)
-            # This prevents AttributeError or other exceptions from breaking the app
-            # Error is silently caught - filters stay enabled, no banner shown
-            return False, 0
-    
-    # Check for unsaved changes EARLY
-    unsaved_changes_early, num_changes_early = has_unsaved_changes_early()
-    
-    # Sync State Machine IMMEDIATELY
-    state_changed = False
-    if unsaved_changes_early and not state_mgr.state.has_changes:
-        state_mgr.state.has_changes = True
-        state_mgr.state.mode = 'edit'
-        state_changed = True
-    elif not unsaved_changes_early and state_mgr.state.has_changes:
-        state_mgr.state.has_changes = False
-        state_changed = True
-    
-    # Force rerun if state changed
-    if state_changed:
-        st.rerun()
     
     # ============================================
     # CENTRALIZED FILTER STATE
@@ -2103,13 +2009,6 @@ def render_interactive_structure_viewer(client, user_id: str):
             if requested_mode == 'read_only':
                 state_mgr.switch_to_viewing()
                 st.session_state.viewer_mode = 'read_only'
-                # v1.10.5: Clear all editor keys when switching to Read-Only
-                if 'areas_editor' in st.session_state:
-                    del st.session_state.areas_editor
-                if 'categories_editor' in st.session_state:
-                    del st.session_state.categories_editor
-                if 'attributes_editor' in st.session_state:
-                    del st.session_state.attributes_editor
                 st.rerun()  # v1.10.5: Rerun to sync state
             else:
                 state_mgr.switch_to_editing()
@@ -2239,15 +2138,9 @@ def render_interactive_structure_viewer(client, user_id: str):
             st.info("💡 **Quick action:** Use the Discard button → to cancel all changes")
         with col2:
             if st.button("🗑️ Discard", type="secondary", help="Discard all changes", use_container_width=True):
-                # Clear all state - v1.10.4: Clear editor keys too
+                # Clear all state
                 st.session_state.original_df = None
                 st.session_state.edited_df = None
-                if 'areas_editor' in st.session_state:
-                    del st.session_state.areas_editor
-                if 'categories_editor' in st.session_state:
-                    del st.session_state.categories_editor
-                if 'attributes_editor' in st.session_state:
-                    del st.session_state.attributes_editor
                 # v1.10.1: State Machine handles state cleanup
                 state_mgr.discard_changes()
                 st.success("✅ Changes discarded! Filters re-enabled.")
@@ -2531,16 +2424,18 @@ def render_interactive_structure_viewer(client, user_id: str):
                 # v1.10.4: Use session_state backend for automatic change detection
                 # When user opens editor, key is created → early check detects it → filters lock
                 
-                # Render area editor with session_state backend
+                # Render area editor
                 edited_area_df = st.data_editor(
                     area_display,
-                    key="areas_editor",  # v1.10.4: Session state backend
                     use_container_width=True,
                     height=300,
                     column_config=area_column_config,
                     hide_index=True,
                     num_rows="fixed"
                 )
+                
+                # v1.10.6: Set edited_df for unsaved changes detection
+                st.session_state.edited_df = edited_area_df
                 
                 # Check if any areas are marked for deletion
                 areas_to_delete = edited_area_df[edited_area_df['🗑️'] == True]
@@ -2576,9 +2471,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.cache_data.clear()
                                     st.session_state.original_df = None
                                     st.session_state.edited_df = None
-                                    # v1.10.4: Clear editor key
-                                    if 'areas_editor' in st.session_state:
-                                        del st.session_state.areas_editor
                                     # v1.10.1: State Machine handles filter unlocking
                                     st.rerun()
                 
@@ -2611,9 +2503,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
                                         st.session_state.edited_df = None
-                                        # v1.10.4: Clear editor key
-                                        if 'areas_editor' in st.session_state:
-                                            del st.session_state.areas_editor
                                         # v1.10.1: Removed editing_active flag (State Machine manages state)
                                         # BUG FIX #2: Update State Machine after successful ADD (v1.10.0)
                                         state_mgr.submit_form()
@@ -2711,16 +2600,18 @@ def render_interactive_structure_viewer(client, user_id: str):
                     # v1.10.4: Use session_state backend for automatic change detection
                     # When user opens editor, key is created → early check detects it → filters lock
                     
-                    # Render category editor with session_state backend
+                    # Render category editor
                     edited_cat_df = st.data_editor(
                         cat_display,
-                        key="categories_editor",  # v1.10.4: Session state backend
                         use_container_width=True,
                         height=300,
                         column_config=cat_column_config,
                         hide_index=True,
                         num_rows="fixed"
                     )
+                    
+                    # v1.10.6: Set edited_df for unsaved changes detection
+                    st.session_state.edited_df = edited_cat_df
                     
                     # Check if any categories are marked for deletion
                     cats_to_delete = edited_cat_df[edited_cat_df['🗑️'] == True]
@@ -2756,9 +2647,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
                                         st.session_state.edited_df = None
-                                        # v1.10.4: Clear editor key
-                                        if 'categories_editor' in st.session_state:
-                                            del st.session_state.categories_editor
                                         # v1.10.1: State Machine handles filter unlocking
                                         st.rerun()
                     
@@ -2789,9 +2677,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
                                         st.session_state.edited_df = None
-                                        # v1.10.4: Clear editor key
-                                        if 'categories_editor' in st.session_state:
-                                            del st.session_state.categories_editor
                                         st.balloons()
                                         st.rerun()
                                     else:
@@ -2803,9 +2688,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                             # Clear all state
                             st.session_state.original_df = None
                             st.session_state.edited_df = None
-                            # v1.10.4: Clear editor key
-                            if 'categories_editor' in st.session_state:
-                                del st.session_state.categories_editor
                             state_mgr.discard_changes()
                             st.success("✅ Changes discarded! Filters re-enabled.")
                             st.rerun()
@@ -2885,9 +2767,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.cache_data.clear()
                                     st.session_state.original_df = None
                                     st.session_state.edited_df = None
-                                    # v1.10.4: Clear editor key
-                                    if 'categories_editor' in st.session_state:
-                                        del st.session_state.categories_editor
                                     # v1.10.1: Removed editing_active flag (State Machine manages state)
                                     # BUG FIX #2: Update State Machine after successful ADD (v1.10.0)
                                     state_mgr.submit_form()
@@ -3193,16 +3072,18 @@ def render_interactive_structure_viewer(client, user_id: str):
                     # v1.10.4: Use session_state backend for automatic change detection
                     # When user opens editor, key is created → early check detects it → filters lock
                     
-                    # Render attribute editor with session_state backend
+                    # Render attribute editor
                     edited_attr_df = st.data_editor(
                         attr_display,
-                        key="attributes_editor",  # v1.10.4: Session state backend
                         use_container_width=True,
                         height=300,
                         column_config=attr_column_config,
                         hide_index=True,
                         num_rows="fixed"
                     )
+                    
+                    # v1.10.6: Set edited_df for unsaved changes detection
+                    st.session_state.edited_df = edited_attr_df
                     
                     # Check if any attributes are marked for deletion
                     attrs_to_delete = edited_attr_df[edited_attr_df['🗑️'] == True]
@@ -3231,9 +3112,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
                                         st.session_state.edited_df = None
-                                        # v1.10.4: Clear editor key
-                                        if 'attributes_editor' in st.session_state:
-                                            del st.session_state.attributes_editor
                                         # v1.10.1: State Machine handles filter unlocking
                                         st.rerun()
                     
@@ -3310,9 +3188,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                                             st.cache_data.clear()
                                             st.session_state.original_df = None
                                             st.session_state.edited_df = None
-                                            # v1.10.4: Clear editor key
-                                            if 'attributes_editor' in st.session_state:
-                                                del st.session_state.attributes_editor
                                             
                                             st.balloons()
                                             st.rerun()
@@ -3328,9 +3203,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                                 # v1.10.3: Use state_mgr for consistency
                                 st.session_state.original_df = None
                                 st.session_state.edited_df = None
-                                # v1.10.4: Clear editor key
-                                if 'attributes_editor' in st.session_state:
-                                    del st.session_state.attributes_editor
                                 state_mgr.discard_changes()
                                 st.success("✅ Changes discarded! Filters re-enabled.")
                                 st.rerun()
@@ -3497,9 +3369,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.cache_data.clear()
                                     st.session_state.original_df = None
                                     st.session_state.edited_df = None
-                                    # v1.10.4: Clear editor key
-                                    if 'attributes_editor' in st.session_state:
-                                        del st.session_state.attributes_editor
                                     # v1.10.1: Removed editing_active flag (State Machine manages state)
                                     # BUG FIX #2: Update State Machine after successful ADD (v1.10.0)
                                     state_mgr.submit_form()
@@ -3539,9 +3408,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                     # Reset to original
                     st.session_state.edited_df = None
                     st.session_state.original_df = None
-                    # v1.10.4: Clear editor key
-                    if 'attributes_editor' in st.session_state:
-                        del st.session_state.attributes_editor
                     st.success("✅ Changes discarded! Filters are now enabled.")
                     st.rerun()
         
