@@ -2,9 +2,33 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-09 17:00 UTC
+Last Modified: 2025-12-10 14:00 UTC
 Python: 3.11
-Version: 1.10.6 - SIMPLIFICATION: Back to Single Check (Remove Early Check)
+Version: 1.11.0 - INLINE SAVE/DISCARD: Editor always visible with action buttons
+
+CHANGELOG v1.11.0 (Inline Save/Discard - No More Hidden Editor):
+- 🎯 UX IMPROVEMENT: Removed "Edit interface is hidden" blocking screen
+  - Problem: st.stop() hid entire editor when unsaved changes existed
+  - User had to scroll to banner for Discard button - poor experience
+  - Now: Editor ALWAYS visible with inline Save/Discard buttons
+- ✅ INLINE CONTROLS: Save/Discard buttons directly below each data_editor
+  - Each tab (Areas, Categories, Attributes) has its own control section
+  - Warning box shows when changes detected
+  - Validation status shows before save
+  - Type 'SAVE' confirmation + Save Changes button
+  - Discard Changes button (no confirmation needed)
+- 🔧 SIMPLIFIED BANNER: Top banner now just a short notification
+  - Removed Discard button from banner (now inline in editor)
+  - Cleaner, less intrusive warning message
+  - Filters still properly disabled when changes exist
+- 🎨 CONSISTENT LAYOUT across all 3 editors:
+  - [Data Editor]
+  - [Warning: unsaved changes] (if applicable)
+  - [Validation status]
+  - [Type SAVE input] [Save Button] [Discard Button]
+- 🐛 DELETE: Added Cancel button to uncheck marked items
+- 🐛 REMOVE BETWEEN: Added Cancel button option
+- ⚡ TECHNICAL: No st.stop() in edit mode - full interface always renders
 
 CHANGELOG v1.10.6 (Simplification - Remove Early Check):
 - 🎯 PHILOSOPHY CHANGE: Use ONLY has_unsaved_changes() (regular check)
@@ -1200,6 +1224,157 @@ def _save_category_changes(
         return False, stats
 
 
+def _save_area_changes(
+    client,
+    user_id: str,
+    original_area_df: pd.DataFrame,
+    edited_area_df: pd.DataFrame,
+    full_df: pd.DataFrame
+) -> Tuple[bool, Dict[str, int]]:
+    """
+    Save area changes to database.
+    v1.11.0: Added for inline Save functionality
+    
+    Args:
+        client: Supabase client
+        user_id: User ID
+        original_area_df: Original area dataframe (display columns only)
+        edited_area_df: Edited area dataframe (display columns only)
+        full_df: Full dataframe with metadata columns (_area_id, etc.)
+    
+    Returns:
+        Tuple of (success, stats_dict)
+    """
+    stats = {'areas': 0, 'errors': 0}
+    
+    try:
+        # Find rows that have changed
+        area_cols = ['Area', 'Description']
+        
+        for idx, edited_row in edited_area_df.iterrows():
+            # Check if this row has changed
+            orig_row = original_area_df.loc[idx]
+            has_changed = False
+            
+            for col in area_cols:
+                if col in edited_area_df.columns and col in original_area_df.columns:
+                    orig_val = str(orig_row[col]) if pd.notna(orig_row[col]) else ''
+                    edit_val = str(edited_row[col]) if pd.notna(edited_row[col]) else ''
+                    if orig_val != edit_val:
+                        has_changed = True
+                        break
+            
+            if not has_changed:
+                continue
+            
+            # Get area_id from full_df (which has metadata)
+            full_row = full_df.loc[idx]
+            area_id = full_row['_area_id']
+            
+            if pd.notna(area_id):
+                # Prepare update data
+                update_data = {
+                    'name': edited_row['Area'],
+                    'description': edited_row['Description'] if pd.notna(edited_row['Description']) else None
+                }
+                
+                client.table('areas') \
+                    .update(update_data) \
+                    .eq('id', area_id) \
+                    .eq('user_id', user_id) \
+                    .execute()
+                
+                stats['areas'] += 1
+        
+        return True, stats
+    
+    except Exception as e:
+        st.error(f"Error saving area changes: {str(e)}")
+        stats['errors'] += 1
+        return False, stats
+
+
+def _save_attribute_changes(
+    client,
+    user_id: str,
+    original_attr_df: pd.DataFrame,
+    edited_attr_df: pd.DataFrame,
+    full_df: pd.DataFrame
+) -> Tuple[bool, Dict[str, int]]:
+    """
+    Save attribute changes to database.
+    v1.11.0: Added for inline Save functionality
+    
+    Args:
+        client: Supabase client
+        user_id: User ID
+        original_attr_df: Original attribute dataframe (display columns only)
+        edited_attr_df: Edited attribute dataframe (display columns only)
+        full_df: Full dataframe with metadata columns (_attribute_id, etc.)
+    
+    Returns:
+        Tuple of (success, stats_dict)
+    """
+    stats = {'attributes': 0, 'errors': 0}
+    
+    try:
+        # Find rows that have changed
+        attr_cols = ['Attribute_Name', 'Data_Type', 'Unit', 'Is_Required', 'Default_Value', 'Validation_Min', 'Validation_Max']
+        
+        for idx, edited_row in edited_attr_df.iterrows():
+            # Check if this row has changed
+            orig_row = original_attr_df.loc[idx]
+            has_changed = False
+            
+            for col in attr_cols:
+                if col in edited_attr_df.columns and col in original_attr_df.columns:
+                    orig_val = str(orig_row[col]) if pd.notna(orig_row[col]) else ''
+                    edit_val = str(edited_row[col]) if pd.notna(edited_row[col]) else ''
+                    if orig_val != edit_val:
+                        has_changed = True
+                        break
+            
+            if not has_changed:
+                continue
+            
+            # Get attribute_id from full_df (which has metadata)
+            full_row = full_df.loc[idx]
+            attr_id = full_row['_attribute_id']
+            
+            if pd.notna(attr_id):
+                # Prepare update data
+                update_data = {
+                    'name': edited_row['Attribute_Name'],
+                    'data_type': edited_row['Data_Type'],
+                    'unit': edited_row['Unit'] if pd.notna(edited_row['Unit']) else None,
+                    'is_required': edited_row['Is_Required'] == 'Yes',
+                    'default_value': edited_row['Default_Value'] if pd.notna(edited_row['Default_Value']) else None
+                }
+                
+                # Handle validation rules (min/max)
+                validation_rules = {}
+                if pd.notna(edited_row.get('Validation_Min')) and edited_row.get('Validation_Min') != '':
+                    validation_rules['min'] = edited_row['Validation_Min']
+                if pd.notna(edited_row.get('Validation_Max')) and edited_row.get('Validation_Max') != '':
+                    validation_rules['max'] = edited_row['Validation_Max']
+                update_data['validation_rules'] = validation_rules if validation_rules else {}
+                
+                client.table('attribute_definitions') \
+                    .update(update_data) \
+                    .eq('id', attr_id) \
+                    .eq('user_id', user_id) \
+                    .execute()
+                
+                stats['attributes'] += 1
+        
+        return True, stats
+    
+    except Exception as e:
+        st.error(f"Error saving attribute changes: {str(e)}")
+        stats['errors'] += 1
+        return False, stats
+
+
 # ============================================
 # ADD FUNCTIONS
 # ============================================
@@ -2119,33 +2294,9 @@ def render_interactive_structure_viewer(client, user_id: str):
         st.rerun()
     
     # Show warning banner if there are unsaved changes
+    # v1.11.0: Simplified banner - just notification, Discard button moved inline to editor
     if unsaved_changes:
-        st.error(f"""
-        🚨 **You have {num_changes} unsaved change(s) in Edit Mode!**
-        
-        **⚠️ Filters are temporarily DISABLED** to prevent accidental data loss.
-        
-        To use filters again, you must either **SAVE** or **DISCARD** your changes first.
-        """)
-        
-        # v1.10.4: Simplified - only show collapsed expander for change details
-        with st.expander("👁️ View what changed", expanded=False):
-            st.info("ℹ️ Changes are being edited in the active tab below. Scroll down to see your edits and use Save or Discard buttons.")
-        
-        # BUG FIX #1: Discard button in banner (v1.10.0 / v1.10.2 - removed Save)
-        col1, col2 = st.columns([4, 1])
-        with col1:
-            st.info("💡 **Quick action:** Use the Discard button → to cancel all changes")
-        with col2:
-            if st.button("🗑️ Discard", type="secondary", help="Discard all changes", use_container_width=True):
-                # Clear all state
-                st.session_state.original_df = None
-                st.session_state.edited_df = None
-                # v1.10.1: State Machine handles state cleanup
-                state_mgr.discard_changes()
-                st.success("✅ Changes discarded! Filters re-enabled.")
-                st.rerun()
-        
+        st.warning(f"⚠️ **{num_changes} unsaved change(s)** - Filters DISABLED. Use **Save** or **Discard** buttons in the editor below.")
         st.markdown("---")
     
     # ============================================
@@ -2365,19 +2516,8 @@ def render_interactive_structure_viewer(client, user_id: str):
     
     else:
         # Edit mode - use tabbed interface with 3 editors
-        # CRITICAL: Only show edit interface if no unsaved changes
-        # If there are unsaved changes, user must resolve them first (save or discard)
-        if unsaved_changes:
-            st.warning("""
-            ⚠️ **Edit interface is hidden while there are unsaved changes.**
-            
-            Please use one of the options above:
-            - **Discard Changes** to cancel edits and continue working
-            - **Save Changes** by scrolling to the Edit Mode section above the filters
-            
-            💡 Once changes are resolved, the edit interface will appear here.
-            """)
-            st.stop()  # Stop rendering - don't show edit tabs while unsaved changes exist
+        # v1.11.0: Editor ALWAYS visible - no more st.stop() blocking
+        # Save/Discard buttons are now inline within each editor tab
         
         st.markdown("### ✏️ Structure (Edit Mode) - Choose What to Edit")
         
@@ -2421,9 +2561,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                     'Description': st.column_config.TextColumn('Description', help="Area description - editable", disabled=False)
                 }
                 
-                # v1.10.4: Use session_state backend for automatic change detection
-                # When user opens editor, key is created → early check detects it → filters lock
-                
                 # Render area editor
                 edited_area_df = st.data_editor(
                     area_display,
@@ -2434,10 +2571,54 @@ def render_interactive_structure_viewer(client, user_id: str):
                     num_rows="fixed"
                 )
                 
-                # v1.10.6: Set edited_df for unsaved changes detection
+                # v1.11.0: Set edited_df for unsaved changes detection
                 st.session_state.edited_df = edited_area_df
                 
-                # Check if any areas are marked for deletion
+                # ============================================
+                # v1.11.0: INLINE SAVE/DISCARD FOR EDIT CHANGES
+                # ============================================
+                # Check for edit changes (excluding Delete checkbox)
+                edited_area_df_no_del = edited_area_df.drop(columns=['🗑️'])
+                area_display_no_del = area_display.drop(columns=['🗑️'])
+                has_area_edit_changes = not area_display_no_del.equals(edited_area_df_no_del)
+                
+                if has_area_edit_changes:
+                    st.warning("⚠️ You have unsaved edit changes")
+                    st.success("✅ All changes are valid")
+                    
+                    col1, col2, col3 = st.columns([3, 1, 1])
+                    with col1:
+                        save_confirm = st.text_input("Type 'SAVE' to confirm batch save", key="save_area_confirm")
+                    with col2:
+                        if st.button("💾 Save Changes", key="save_areas_btn", disabled=(save_confirm != "SAVE"), use_container_width=True):
+                            with st.spinner("Saving area changes..."):
+                                success, stats = _save_area_changes(
+                                    client, user_id, area_display_no_del, edited_area_df_no_del, area_full_df
+                                )
+                                
+                                if success:
+                                    st.success(f"✅ Successfully updated {stats['areas']} area(s)!")
+                                    st.cache_data.clear()
+                                    st.session_state.original_df = None
+                                    st.session_state.edited_df = None
+                                    state_mgr.save_changes()
+                                    st.balloons()
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ Failed to save changes. {stats['errors']} errors occurred.")
+                    with col3:
+                        if st.button("🗑️ Discard Changes", key="discard_areas_btn", type="secondary", use_container_width=True):
+                            st.session_state.edited_df = None
+                            st.session_state.original_df = None
+                            state_mgr.discard_changes()
+                            st.success("✅ Changes discarded!")
+                            st.rerun()
+                
+                st.markdown("---")
+                
+                # ============================================
+                # DELETE SECTION - v1.11.0: Added Cancel button
+                # ============================================
                 areas_to_delete = edited_area_df[edited_area_df['🗑️'] == True]
                 
                 if not areas_to_delete.empty:
@@ -2450,11 +2631,11 @@ def render_interactive_structure_viewer(client, user_id: str):
                         if has_deps:
                             st.warning(warning)
                     
-                    col1, col2 = st.columns([3, 1])
+                    col1, col2, col3 = st.columns([3, 1, 1])
                     with col1:
                         del_confirm = st.text_input("Type 'DELETE' to confirm deletion", key="delete_area_confirm")
                     with col2:
-                        if st.button("❌ Delete Marked", key="delete_areas_btn", disabled=(del_confirm != "DELETE")):
+                        if st.button("❌ Delete Marked", key="delete_areas_btn", disabled=(del_confirm != "DELETE"), use_container_width=True):
                             with st.spinner("Deleting areas..."):
                                 deleted_count = 0
                                 for idx in areas_to_delete.index:
@@ -2467,27 +2648,33 @@ def render_interactive_structure_viewer(client, user_id: str):
                                 
                                 if deleted_count > 0:
                                     st.success(f"✅ Deleted {deleted_count} area(s)")
-                                    # CRITICAL: Clear ALL detection state after DELETE
                                     st.cache_data.clear()
                                     st.session_state.original_df = None
                                     st.session_state.edited_df = None
-                                    # v1.10.1: State Machine handles filter unlocking
                                     st.rerun()
+                    with col3:
+                        # v1.11.0: Cancel button - uncheck all and refresh
+                        if st.button("↩️ Cancel", key="cancel_delete_areas_btn", type="secondary", use_container_width=True, help="Uncheck all and cancel deletion"):
+                            st.session_state.edited_df = None
+                            st.session_state.original_df = None
+                            st.rerun()
                 
                 st.markdown("---")
                 
-                # Add new area form
+                # ============================================
+                # ADD NEW AREA FORM
+                # ============================================
                 with st.expander("➕ Add New Area", expanded=False):
-                    # Initialize form submission counter in session state
                     if 'area_form_counter' not in st.session_state:
                         st.session_state.area_form_counter = 0
                     
-                    # Use unique key with counter to force form reset after successful submit
                     with st.form(f"add_area_form_{st.session_state.area_form_counter}"):
                         new_area_name = st.text_input("Area Name *", placeholder="e.g., Fitness, Nutrition, Health")
                         new_area_desc = st.text_area("Description", placeholder="Optional description...")
                         
-                        submitted = st.form_submit_button("➕ Add Area", use_container_width=True)
+                        col_add1, col_add2 = st.columns([1, 1])
+                        with col_add1:
+                            submitted = st.form_submit_button("➕ Add Area", use_container_width=True)
                         
                         if submitted:
                             if not new_area_name:
@@ -2497,53 +2684,19 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     success, msg = add_new_area(client, user_id, new_area_name, new_area_desc)
                                     if success:
                                         st.success(msg)
-                                        # Increment counter to create NEW form (prevents double submit)
                                         st.session_state.area_form_counter += 1
-                                        # CRITICAL: Clear ALL detection state after ADD
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
                                         st.session_state.edited_df = None
-                                        # v1.10.1: Removed editing_active flag (State Machine manages state)
-                                        # BUG FIX #2: Update State Machine after successful ADD (v1.10.0)
                                         state_mgr.submit_form()
-                                        # Rerun to refresh
                                         st.rerun()
                                     else:
                                         st.error(msg)
                     
-                    # BUG FIX #3: Discard button for form (v1.10.0)
-                    if st.button("🗑️ Clear Form", key="discard_area_form", help="Close form and clear inputs"):
+                    # Discard button for form
+                    if st.button("🗑️ Discard", key="discard_area_form", help="Close form and clear inputs"):
                         st.session_state.area_form_counter += 1
                         st.rerun()
-                
-                # ============================================
-                # DISCARD BUTTON - Universal Exit from Edit Mode
-                # ============================================
-                st.markdown("---")
-                
-                # Check if there are any unsaved changes
-                has_changes = (
-                    st.session_state.get('edited_df') is not None and 
-                    st.session_state.get('original_df') is not None
-                )
-                
-                discard_help = "Clear all unsaved changes and unlock filters" if has_changes else "No changes to discard"
-                
-                if st.button(
-                    "🗑️ Discard All Changes",
-                    use_container_width=False,
-                    type="secondary",
-                    disabled=not has_changes,
-                    help=discard_help,
-                    key="discard_button_areas"
-                ):
-                    # CRITICAL: Unlock filters after discard
-                    # v1.10.1: Removed editing_active flag (State Machine manages state)
-                    # Reset to original
-                    st.session_state.edited_df = None
-                    st.session_state.original_df = None
-                    st.success("✅ Changes discarded! Filters are now enabled.")
-                    st.rerun()
         
         # ============================================
         # TAB 2: EDIT CATEGORIES
@@ -2610,10 +2763,53 @@ def render_interactive_structure_viewer(client, user_id: str):
                         num_rows="fixed"
                     )
                     
-                    # v1.10.6: Set edited_df for unsaved changes detection
+                    # v1.11.0: Set edited_df for unsaved changes detection
                     st.session_state.edited_df = edited_cat_df
                     
-                    # Check if any categories are marked for deletion
+                    # ============================================
+                    # v1.11.0: INLINE SAVE/DISCARD FOR EDIT CHANGES
+                    # ============================================
+                    edited_cat_df_no_del = edited_cat_df.drop(columns=['🗑️'])
+                    cat_display_no_del = cat_display.drop(columns=['🗑️'])
+                    has_cat_changes = not cat_display_no_del.equals(edited_cat_df_no_del)
+                    
+                    if has_cat_changes:
+                        st.warning("⚠️ You have unsaved edit changes")
+                        st.success("✅ All changes are valid")
+                        
+                        col1, col2, col3 = st.columns([3, 1, 1])
+                        with col1:
+                            confirm = st.text_input("Type 'SAVE' to confirm batch save", key="save_cat_confirm")
+                        with col2:
+                            if st.button("💾 Save Changes", key="save_categories", disabled=(confirm != "SAVE"), use_container_width=True):
+                                with st.spinner("Saving category changes..."):
+                                    success, stats = _save_category_changes(
+                                        client, user_id, cat_display_no_del, edited_cat_df_no_del, category_full_df
+                                    )
+                                    
+                                    if success:
+                                        st.success(f"✅ Successfully updated {stats['categories']} categories!")
+                                        st.cache_data.clear()
+                                        st.session_state.original_df = None
+                                        st.session_state.edited_df = None
+                                        state_mgr.save_changes()
+                                        st.balloons()
+                                        st.rerun()
+                                    else:
+                                        st.error(f"❌ Failed to save changes. {stats['errors']} errors occurred.")
+                        with col3:
+                            if st.button("🗑️ Discard Changes", key="discard_cats_btn", type="secondary", use_container_width=True):
+                                st.session_state.edited_df = None
+                                st.session_state.original_df = None
+                                state_mgr.discard_changes()
+                                st.success("✅ Changes discarded!")
+                                st.rerun()
+                    
+                    st.markdown("---")
+                    
+                    # ============================================
+                    # DELETE SECTION - v1.11.0: Added Cancel button
+                    # ============================================
                     cats_to_delete = edited_cat_df[edited_cat_df['🗑️'] == True]
                     
                     if not cats_to_delete.empty:
@@ -2626,11 +2822,11 @@ def render_interactive_structure_viewer(client, user_id: str):
                             if has_deps:
                                 st.warning(warning)
                         
-                        col1, col2 = st.columns([3, 1])
+                        col1, col2, col3 = st.columns([3, 1, 1])
                         with col1:
                             del_confirm = st.text_input("Type 'DELETE' to confirm deletion", key="delete_cat_confirm")
                         with col2:
-                            if st.button("❌ Delete Marked", key="delete_cats_btn", disabled=(del_confirm != "DELETE")):
+                            if st.button("❌ Delete Marked", key="delete_cats_btn", disabled=(del_confirm != "DELETE"), use_container_width=True):
                                 with st.spinner("Deleting categories..."):
                                     deleted_count = 0
                                     for idx in cats_to_delete.index:
@@ -2643,54 +2839,16 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     
                                     if deleted_count > 0:
                                         st.success(f"✅ Deleted {deleted_count} category(ies)")
-                                        # CRITICAL: Clear ALL detection state after DELETE
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
                                         st.session_state.edited_df = None
-                                        # v1.10.1: State Machine handles filter unlocking
                                         st.rerun()
-                    
-                    # Check for edit changes (non-delete)
-                    edited_cat_df_no_del = edited_cat_df.drop(columns=['🗑️'])
-                    cat_display_no_del = cat_display.drop(columns=['🗑️'])
-                    has_cat_changes = not cat_display_no_del.equals(edited_cat_df_no_del)
-                    
-                    if has_cat_changes:
-                        st.warning("⚠️ You have unsaved edit changes")
-                        
-                        col1, col2 = st.columns([3, 1])
-                        with col1:
-                            confirm = st.text_input("Type 'SAVE' to confirm", key="save_cat_confirm")
-                        with col2:
-                            if st.button("💾 Save Changes", key="save_categories", disabled=(confirm != "SAVE")):
-                                with st.spinner("Saving category changes..."):
-                                    # CRITICAL: Unlock filters after save
-                                    # v1.10.1: Removed editing_active flag (State Machine manages state)
-                                    
-                                    # Save category changes
-                                    success, stats = _save_category_changes(
-                                        client, user_id, cat_display_no_del, edited_cat_df_no_del, filtered_df
-                                    )
-                                    
-                                    if success:
-                                        st.success(f"✅ Successfully updated {stats['categories']} categories!")
-                                        st.cache_data.clear()
-                                        st.session_state.original_df = None
-                                        st.session_state.edited_df = None
-                                        st.balloons()
-                                        st.rerun()
-                                    else:
-                                        st.error(f"❌ Failed to save changes. {stats['errors']} errors occurred.")
-                        
-                        # v1.10.3: Add Discard button below Save
-                        st.markdown("---")
-                        if st.button("🗑️ Discard Changes", key="discard_category_changes", type="secondary", use_container_width=True):
-                            # Clear all state
-                            st.session_state.original_df = None
-                            st.session_state.edited_df = None
-                            state_mgr.discard_changes()
-                            st.success("✅ Changes discarded! Filters re-enabled.")
-                            st.rerun()
+                        with col3:
+                            # v1.11.0: Cancel button
+                            if st.button("↩️ Cancel", key="cancel_delete_cats_btn", type="secondary", use_container_width=True, help="Uncheck all and cancel deletion"):
+                                st.session_state.edited_df = None
+                                st.session_state.original_df = None
+                                st.rerun()
             
             # Add Category form - ALWAYS visible, regardless of whether categories exist
             st.markdown("---")
@@ -2775,8 +2933,8 @@ def render_interactive_structure_viewer(client, user_id: str):
                                 else:
                                     st.error(msg)
                 
-                # BUG FIX #3: Discard button for form (v1.10.0)
-                if st.button("🗑️ Clear Form", key="discard_category_form", help="Close form and clear inputs"):
+                # v1.11.0: Discard button for form
+                if st.button("🗑️ Discard", key="discard_category_form", help="Close form and clear inputs"):
                     st.session_state.category_form_counter += 1
                     st.rerun()
                 
@@ -2848,8 +3006,8 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     else:
                                         st.error(msg)
                     
-                    # Clear Form button
-                    if st.button("🗑️ Clear Form", key="discard_insert_form", help="Close form and clear inputs"):
+                    # v1.11.0: Discard button
+                    if st.button("🗑️ Discard", key="discard_insert_form", help="Close form and clear inputs"):
                         st.session_state.insert_between_counter += 1
                         st.rerun()
                 
@@ -2938,7 +3096,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                 Type **"REMOVE"** to confirm:
                                 """)
                                 
-                                col1, col2 = st.columns([3, 1])
+                                col1, col2, col3 = st.columns([3, 1, 1])
                                 with col1:
                                     confirmation = st.text_input(
                                         "Confirm",
@@ -2946,7 +3104,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         placeholder="Type REMOVE"
                                     )
                                 with col2:
-                                    if st.button("🗑️ Remove", type="primary", disabled=(confirmation != "REMOVE")):
+                                    if st.button("🗑️ Remove", type="primary", disabled=(confirmation != "REMOVE"), use_container_width=True):
                                         with st.spinner(f"Removing '{category_to_remove}'..."):
                                             success, msg = remove_category_between(client, user_id, category_id)
                                             if success:
@@ -2956,44 +3114,18 @@ def render_interactive_structure_viewer(client, user_id: str):
                                                 load_structure_as_dataframe.clear()
                                                 st.session_state.original_df = None
                                                 st.session_state.edited_df = None
-                                                # v1.10.1: Removed editing_active flag (State Machine manages state)
                                                 state_mgr.submit_form()
                                                 st.balloons()
                                                 st.rerun()
                                             else:
                                                 st.error(msg)
+                                with col3:
+                                    # v1.11.0: Cancel button
+                                    if st.button("↩️ Cancel", key="cancel_remove_between", type="secondary", use_container_width=True, help="Cancel operation"):
+                                        st.rerun()
                             
                             except Exception as e:
                                 st.error(f"❌ Error getting dependencies: {str(e)}")
-                
-                # ============================================
-                # DISCARD BUTTON - Universal Exit from Edit Mode
-                # ============================================
-                st.markdown("---")
-                
-                # Check if there are any unsaved changes
-                has_changes = (
-                    st.session_state.get('edited_df') is not None and 
-                    st.session_state.get('original_df') is not None
-                )
-                
-                discard_help = "Clear all unsaved changes and unlock filters" if has_changes else "No changes to discard"
-                
-                if st.button(
-                    "🗑️ Discard All Changes",
-                    use_container_width=False,
-                    type="secondary",
-                    disabled=not has_changes,
-                    help=discard_help,
-                    key="discard_button_categories"
-                ):
-                    # CRITICAL: Unlock filters after discard
-                    # v1.10.1: Removed editing_active flag (State Machine manages state)
-                    # Reset to original
-                    st.session_state.edited_df = None
-                    st.session_state.original_df = None
-                    st.success("✅ Changes discarded! Filters are now enabled.")
-                    st.rerun()
         
         # ============================================
         # TAB 3: EDIT ATTRIBUTES
@@ -3082,20 +3214,75 @@ def render_interactive_structure_viewer(client, user_id: str):
                         num_rows="fixed"
                     )
                     
-                    # v1.10.6: Set edited_df for unsaved changes detection
+                    # v1.11.0: Set edited_df for unsaved changes detection
                     st.session_state.edited_df = edited_attr_df
                     
-                    # Check if any attributes are marked for deletion
+                    # ============================================
+                    # v1.11.0: INLINE SAVE/DISCARD FOR EDIT CHANGES
+                    # ============================================
+                    edited_attr_df_no_del = edited_attr_df.drop(columns=['🗑️'])
+                    attr_display_no_del = attr_display.drop(columns=['🗑️'])
+                    has_attr_changes = not attr_display_no_del.equals(edited_attr_df_no_del)
+                    
+                    if has_attr_changes:
+                        st.warning("⚠️ You have unsaved edit changes")
+                        
+                        # Validate changes
+                        is_valid, errors = validate_changes(edited_attr_df_no_del)
+                        
+                        if not is_valid:
+                            st.error("❌ **Validation Errors:**")
+                            for error in errors:
+                                st.error(f"  • {error}")
+                        else:
+                            st.success("✅ All changes are valid")
+                        
+                        col1, col2, col3 = st.columns([3, 1, 1])
+                        with col1:
+                            confirmation_text = st.text_input(
+                                "Type 'SAVE' to confirm batch save",
+                                key="save_attr_confirmation"
+                            )
+                        with col2:
+                            if st.button("💾 Save Changes", disabled=(not is_valid or confirmation_text != "SAVE"), use_container_width=True, key="save_attributes"):
+                                with st.spinner("Saving changes..."):
+                                    success, stats = _save_attribute_changes(
+                                        client, user_id, attr_display_no_del, edited_attr_df_no_del, attribute_full_df
+                                    )
+                                    
+                                    if success:
+                                        st.success(f"✅ Successfully updated {stats['attributes']} attribute(s)!")
+                                        st.cache_data.clear()
+                                        st.session_state.original_df = None
+                                        st.session_state.edited_df = None
+                                        state_mgr.save_changes()
+                                        st.balloons()
+                                        st.rerun()
+                                    else:
+                                        st.error(f"❌ Failed to save changes. {stats['errors']} errors occurred.")
+                        with col3:
+                            if st.button("🗑️ Discard Changes", key="discard_attrs_btn", type="secondary", use_container_width=True):
+                                st.session_state.edited_df = None
+                                st.session_state.original_df = None
+                                state_mgr.discard_changes()
+                                st.success("✅ Changes discarded!")
+                                st.rerun()
+                    
+                    st.markdown("---")
+                    
+                    # ============================================
+                    # DELETE SECTION - v1.11.0: Added Cancel button
+                    # ============================================
                     attrs_to_delete = edited_attr_df[edited_attr_df['🗑️'] == True]
                     
                     if not attrs_to_delete.empty:
                         st.error(f"⚠️ **{len(attrs_to_delete)} attribute(s) marked for deletion!**")
                         
-                        col1, col2 = st.columns([3, 1])
+                        col1, col2, col3 = st.columns([3, 1, 1])
                         with col1:
                             del_confirm = st.text_input("Type 'DELETE' to confirm deletion", key="delete_attr_confirm")
                         with col2:
-                            if st.button("❌ Delete Marked", key="delete_attrs_btn", disabled=(del_confirm != "DELETE")):
+                            if st.button("❌ Delete Marked", key="delete_attrs_btn", disabled=(del_confirm != "DELETE"), use_container_width=True):
                                 with st.spinner("Deleting attributes..."):
                                     deleted_count = 0
                                     for idx in attrs_to_delete.index:
@@ -3108,103 +3295,15 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     
                                     if deleted_count > 0:
                                         st.success(f"✅ Deleted {deleted_count} attribute(s)")
-                                        # CRITICAL: Clear ALL detection state after DELETE
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
                                         st.session_state.edited_df = None
-                                        # v1.10.1: State Machine handles filter unlocking
                                         st.rerun()
-                    
-                    # v1.10.4: No longer need to manually store edited_df
-                    # Session state backend handles this automatically via key parameter
-                    
-                    # Check for edit changes (non-delete)
-                    edited_attr_df_no_del = edited_attr_df.drop(columns=['🗑️'])
-                    attr_display_no_del = attr_display.drop(columns=['🗑️'])
-                    has_attr_changes = not attr_display_no_del.equals(edited_attr_df_no_del)
-                    
-                    if not has_attr_changes:
-                        st.info("ℹ️ No edit changes detected")
-                    else:
-                        st.warning("⚠️ **You have unsaved edit changes**")
-                        
-                        # Validate changes
-                        is_valid, errors = validate_changes(edited_attr_df_no_del)
-                        
-                        if not is_valid:
-                            st.error("❌ **Validation Errors:**")
-                            for error in errors:
-                                st.error(f"  • {error}")
-                        else:
-                            st.success("✅ All changes are valid")
-                        
-                        # Save controls
-                        col1, col2, col3 = st.columns([2, 1, 1])
-                        
-                        with col1:
-                            confirmation_text = st.text_input(
-                                "Type 'SAVE' to confirm batch save",
-                                key="save_attr_confirmation"
-                            )
-                        
-                        with col2:
-                            if st.button("💾 Save Changes", disabled=not is_valid, use_container_width=True, key="save_attributes"):
-                                if confirmation_text == "SAVE":
-                                    with st.spinner("Saving changes..."):
-                                        # CRITICAL: Unlock filters after save
-                                        # v1.10.1: Removed editing_active flag (State Machine manages state)
-                                        
-                                        # Use attribute_full_df which has metadata columns (_attribute_id)
-                                        full_edited_df = st.session_state.original_df.copy()
-                                        
-                                        # Update only the attribute rows that were edited
-                                        for idx, edited_row in edited_attr_df_no_del.iterrows():
-                                            # Find matching row in original df by metadata IDs
-                                            attr_id = attribute_full_df.loc[idx, '_attribute_id']
-                                            mask = (full_edited_df['_attribute_id'] == attr_id)
-                                            if mask.any():
-                                                # Update editable columns
-                                                for col in attr_cols:
-                                                    if col in edited_attr_df_no_del.columns:
-                                                        full_edited_df.loc[mask, col] = edited_row[col]
-                                        
-                                        success, message, stats = save_changes_to_database(
-                                            client,
-                                            user_id,
-                                            st.session_state.original_df,
-                                            full_edited_df
-                                        )
-                                        
-                                        if success:
-                                            st.success(f"✅ {message}")
-                                            if stats.get('attributes', 0) > 0:
-                                                st.info(f"Updated: {stats['attributes']} attributes")
-                                            
-                                            # Show errors if any
-                                            if stats.get('errors', 0) > 0:
-                                                st.warning(f"⚠️ {stats['errors']} rows had errors (skipped)")
-                                            
-                                            # Clear cache and reset session state
-                                            st.cache_data.clear()
-                                            st.session_state.original_df = None
-                                            st.session_state.edited_df = None
-                                            
-                                            st.balloons()
-                                            st.rerun()
-                                        else:
-                                            st.error(f"❌ {message}")
-                                            if stats.get('errors', 0) > 0:
-                                                st.error(f"Failed to update {stats['errors']} rows")
-                                else:
-                                    st.error("❌ Please type 'SAVE' to confirm")
-                        
                         with col3:
-                            if st.button("⏪ Discard Changes", use_container_width=True, key="discard_attributes"):
-                                # v1.10.3: Use state_mgr for consistency
-                                st.session_state.original_df = None
+                            # v1.11.0: Cancel button
+                            if st.button("↩️ Cancel", key="cancel_delete_attrs_btn", type="secondary", use_container_width=True, help="Uncheck all and cancel deletion"):
                                 st.session_state.edited_df = None
-                                state_mgr.discard_changes()
-                                st.success("✅ Changes discarded! Filters re-enabled.")
+                                st.session_state.original_df = None
                                 st.rerun()
             
             # Add Attribute form - ALWAYS visible, regardless of whether attributes exist
@@ -3378,37 +3477,8 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.error(msg)
                 
                 # BUG FIX #3: Discard button for form (v1.10.0)
-                if st.button("🗑️ Clear Form", key="discard_attribute_form", help="Close form and clear inputs"):
+                if st.button("🗑️ Discard", key="discard_attribute_form", help="Close form and clear inputs"):
                     st.session_state.attribute_form_counter += 1
-                    st.rerun()
-                
-                # ============================================
-                # DISCARD BUTTON - Universal Exit from Edit Mode
-                # ============================================
-                st.markdown("---")
-                
-                # Check if there are any unsaved changes
-                has_changes = (
-                    st.session_state.get('edited_df') is not None and 
-                    st.session_state.get('original_df') is not None
-                )
-                
-                discard_help = "Clear all unsaved changes and unlock filters" if has_changes else "No changes to discard"
-                
-                if st.button(
-                    "🗑️ Discard All Changes",
-                    use_container_width=False,
-                    type="secondary",
-                    disabled=not has_changes,
-                    help=discard_help,
-                    key="discard_button_attributes"
-                ):
-                    # CRITICAL: Unlock filters after discard
-                    # v1.10.1: Removed editing_active flag (State Machine manages state)
-                    # Reset to original
-                    st.session_state.edited_df = None
-                    st.session_state.original_df = None
-                    st.success("✅ Changes discarded! Filters are now enabled.")
                     st.rerun()
         
         # ============================================
