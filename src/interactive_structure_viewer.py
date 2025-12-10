@@ -2,20 +2,24 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-10 15:30 UTC
+Last Modified: 2025-12-10 16:00 UTC
 Python: 3.11
-Version: 1.11.1 - HOTFIX: Discard button fix + removed info messages
+Version: 1.11.2 - FIX: Discard infinite loop - complete refactor of change detection
+
+CHANGELOG v1.11.2 (Critical Fix - Discard Loop):
+- 🐛 ROOT CAUSE FIXED: original_df contained ALL data, edited_df contained SINGLE TAB
+  - This mismatch caused has_unsaved_changes() to always detect "changes"
+  - After Discard, data_editor re-rendered and set edited_df, triggering false positive
+- ✅ SOLUTION: Removed global has_unsaved_changes() sync entirely
+  - Each tab now manages its own change detection locally
+  - state_mgr.state.has_changes is set ONLY when local tab detects real changes
+- 🔧 Added normalize_for_comparison() helper function
+  - Handles dtype differences from st.data_editor
+  - Prevents false positives from float/int/string mismatches
+- 🎯 Filters now lock/unlock based on LOCAL change detection, not global
+- ⚡ Removed st.session_state.edited_df assignments (no longer needed)
 
 CHANGELOG v1.11.1 (Hotfix):
-- 🐛 FIX: Discard button no longer causes double editor rendering
-  - Removed st.success() before st.rerun() which caused visual glitch
-  - Discard now cleanly refreshes page without intermediate messages
-- 🎨 REMOVED: "Filters are enabled..." info message (distracted from controls)
-- 🎨 REMOVED: "X unsaved change(s) - Filters DISABLED" banner (redundant)
-  - Save/Discard buttons in editor provide sufficient visual feedback
-  - Cleaner UI without repeated warnings
-
-CHANGELOG v1.11.0 (Inline Save/Discard - No More Hidden Editor):
 - 🎯 UX IMPROVEMENT: Removed "Edit interface is hidden" blocking screen
   - Problem: st.stop() hid entire editor when unsaved changes existed
   - User had to scroll to banner for Discard button - poor experience
@@ -992,6 +996,38 @@ def apply_filters(df: pd.DataFrame, selected_area: str, selected_category: str =
         filtered = filtered[mask | area_mask]
     
     return filtered
+
+
+# ============================================
+# v1.11.1: HELPER FOR ROBUST DATAFRAME COMPARISON
+# ============================================
+
+def normalize_for_comparison(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normalize DataFrame for robust comparison.
+    Handles dtype differences, NaN values, and float precision that
+    st.data_editor may introduce.
+    
+    Args:
+        df: DataFrame to normalize
+        
+    Returns:
+        Normalized DataFrame safe for equals() comparison
+    """
+    df_norm = df.copy()
+    
+    for col in df_norm.columns:
+        # Fill NaN/None with empty string before conversion
+        df_norm[col] = df_norm[col].fillna('').astype(str)
+        
+        # Clean up string representation of floats
+        # "0.0" -> "0", "1.0" -> "1" 
+        df_norm[col] = df_norm[col].str.replace(r'\.0$', '', regex=True)
+    
+    # Sort columns alphabetically
+    df_norm = df_norm[sorted(df_norm.columns)]
+    
+    return df_norm
 
 
 # ============================================
@@ -2283,24 +2319,11 @@ def render_interactive_structure_viewer(client, user_id: str):
         
         return False, 0
     
-    # Check for unsaved changes
-    unsaved_changes, num_changes = has_unsaved_changes()
-    
-    # v1.10.1: Sync State Machine with has_unsaved_changes detection
-    state_changed = False
-    if unsaved_changes and not state_mgr.state.has_changes:
-        # Changes detected - update State Machine
-        state_mgr.state.has_changes = True
-        state_mgr.state.mode = 'edit'  # Ensure we're in edit mode
-        state_changed = True
-    elif not unsaved_changes and state_mgr.state.has_changes:
-        # No changes detected but State Machine thinks there are - clear it
-        state_mgr.state.has_changes = False
-        state_changed = True
-    
-    # CRITICAL: Force rerun to update UI (lock/unlock filters)
-    if state_changed:
-        st.rerun()
+    # v1.11.1: REMOVED global has_unsaved_changes() sync
+    # Problem: original_df contains ALL data, edited_df contains SINGLE TAB
+    # This caused constant mismatch and infinite loops
+    # Solution: Each tab manages its own has_changes state locally
+    # The state_mgr.state.has_changes is set ONLY when local tab detects real changes
     
     # ============================================
     # CONTROLS - ROW 2: UNIFIED FILTERS
@@ -2571,16 +2594,20 @@ def render_interactive_structure_viewer(client, user_id: str):
                     num_rows="fixed"
                 )
                 
-                # v1.11.0: Set edited_df for unsaved changes detection
-                st.session_state.edited_df = edited_area_df
-                
                 # ============================================
                 # v1.11.0: INLINE SAVE/DISCARD FOR EDIT CHANGES
                 # ============================================
                 # Check for edit changes (excluding Delete checkbox)
                 edited_area_df_no_del = edited_area_df.drop(columns=['🗑️'])
                 area_display_no_del = area_display.drop(columns=['🗑️'])
-                has_area_edit_changes = not area_display_no_del.equals(edited_area_df_no_del)
+                # v1.11.1: Use normalized comparison to avoid false positives from dtype differences
+                has_area_edit_changes = not normalize_for_comparison(area_display_no_del).equals(
+                    normalize_for_comparison(edited_area_df_no_del)
+                )
+                
+                # v1.11.1: Set state_mgr.has_changes based on LOCAL check (not global edited_df)
+                if has_area_edit_changes:
+                    state_mgr.state.has_changes = True
                 
                 if has_area_edit_changes:
                     st.warning("⚠️ You have unsaved edit changes")
@@ -2608,6 +2635,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.error(f"❌ Failed to save changes. {stats['errors']} errors occurred.")
                     with col3:
                         if st.button("🗑️ Discard Changes", key="discard_areas_btn", type="secondary", use_container_width=True):
+                            st.cache_data.clear()
                             st.session_state.edited_df = None
                             st.session_state.original_df = None
                             state_mgr.discard_changes()
@@ -2654,6 +2682,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                     with col3:
                         # v1.11.0: Cancel button - uncheck all and refresh
                         if st.button("↩️ Cancel", key="cancel_delete_areas_btn", type="secondary", use_container_width=True, help="Uncheck all and cancel deletion"):
+                            st.cache_data.clear()
                             st.session_state.edited_df = None
                             st.session_state.original_df = None
                             st.rerun()
@@ -2762,15 +2791,19 @@ def render_interactive_structure_viewer(client, user_id: str):
                         num_rows="fixed"
                     )
                     
-                    # v1.11.0: Set edited_df for unsaved changes detection
-                    st.session_state.edited_df = edited_cat_df
-                    
                     # ============================================
                     # v1.11.0: INLINE SAVE/DISCARD FOR EDIT CHANGES
                     # ============================================
                     edited_cat_df_no_del = edited_cat_df.drop(columns=['🗑️'])
                     cat_display_no_del = cat_display.drop(columns=['🗑️'])
-                    has_cat_changes = not cat_display_no_del.equals(edited_cat_df_no_del)
+                    # v1.11.1: Use normalized comparison to avoid false positives
+                    has_cat_changes = not normalize_for_comparison(cat_display_no_del).equals(
+                        normalize_for_comparison(edited_cat_df_no_del)
+                    )
+                    
+                    # v1.11.1: Set state_mgr.has_changes based on LOCAL check
+                    if has_cat_changes:
+                        state_mgr.state.has_changes = True
                     
                     if has_cat_changes:
                         st.warning("⚠️ You have unsaved edit changes")
@@ -2798,6 +2831,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.error(f"❌ Failed to save changes. {stats['errors']} errors occurred.")
                         with col3:
                             if st.button("🗑️ Discard Changes", key="discard_cats_btn", type="secondary", use_container_width=True):
+                                st.cache_data.clear()
                                 st.session_state.edited_df = None
                                 st.session_state.original_df = None
                                 state_mgr.discard_changes()
@@ -2844,6 +2878,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                         with col3:
                             # v1.11.0: Cancel button
                             if st.button("↩️ Cancel", key="cancel_delete_cats_btn", type="secondary", use_container_width=True, help="Uncheck all and cancel deletion"):
+                                st.cache_data.clear()
                                 st.session_state.edited_df = None
                                 st.session_state.original_df = None
                                 st.rerun()
@@ -3212,15 +3247,19 @@ def render_interactive_structure_viewer(client, user_id: str):
                         num_rows="fixed"
                     )
                     
-                    # v1.11.0: Set edited_df for unsaved changes detection
-                    st.session_state.edited_df = edited_attr_df
-                    
                     # ============================================
                     # v1.11.0: INLINE SAVE/DISCARD FOR EDIT CHANGES
                     # ============================================
                     edited_attr_df_no_del = edited_attr_df.drop(columns=['🗑️'])
                     attr_display_no_del = attr_display.drop(columns=['🗑️'])
-                    has_attr_changes = not attr_display_no_del.equals(edited_attr_df_no_del)
+                    # v1.11.1: Use normalized comparison to avoid false positives
+                    has_attr_changes = not normalize_for_comparison(attr_display_no_del).equals(
+                        normalize_for_comparison(edited_attr_df_no_del)
+                    )
+                    
+                    # v1.11.1: Set state_mgr.has_changes based on LOCAL check
+                    if has_attr_changes:
+                        state_mgr.state.has_changes = True
                     
                     if has_attr_changes:
                         st.warning("⚠️ You have unsaved edit changes")
@@ -3260,6 +3299,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.error(f"❌ Failed to save changes. {stats['errors']} errors occurred.")
                         with col3:
                             if st.button("🗑️ Discard Changes", key="discard_attrs_btn", type="secondary", use_container_width=True):
+                                st.cache_data.clear()
                                 st.session_state.edited_df = None
                                 st.session_state.original_df = None
                                 state_mgr.discard_changes()
