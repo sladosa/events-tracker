@@ -1,5 +1,5 @@
 """
-State Machine - Simplified State Management for Interactive Structure Viewer
+State Machine - Simplified State Management for Interactive Structure Viewer 1
 
 Features:
 - Single source of truth (AppState dataclass)
@@ -11,7 +11,7 @@ Features:
 
 Dependencies: dataclasses, typing
 
-Last Modified: 2025-12-10 18:00 UTC
+Last Modified: 2025-12-10 19:00 UTC
 """
 
 from dataclasses import dataclass, field
@@ -27,6 +27,7 @@ class AppState:
     active_tab: Optional[str] = None
     form_data: Dict[str, Any] = field(default_factory=dict)
     # v1.1.0: Flag to prevent false positive detection immediately after discard
+    # This flag persists for ONE full render cycle, then is cleared at the end
     discard_pending: bool = False
     
     @property
@@ -69,7 +70,7 @@ class AppState:
         self.operation = None
         self.has_changes = False
         self.form_data = {}
-        # Don't clear discard_pending here - it's cleared after first render
+        # Don't clear discard_pending here - it's cleared at end of render cycle
     
     def transition_to_modifying(self, tab: str):
         """Transition when user opens data editor"""
@@ -86,10 +87,6 @@ class AppState:
         self.has_changes = False
         self.active_tab = tab
         self.form_data = {}
-        self.discard_pending = False
-    
-    def clear_discard_pending(self):
-        """Clear the discard_pending flag after successful render"""
         self.discard_pending = False
 
 
@@ -150,9 +147,10 @@ class StateManager:
         """
         Discard operation.
         Sets discard_pending flag to prevent false positive detection on next render.
+        The flag will be cleared at the END of the next render cycle (after all tabs).
         """
         self.state.transition_to_editing()
-        self.state.discard_pending = True  # v1.1.0: Prevent false positive on next render
+        self.state.discard_pending = True  # Persists for ONE full render cycle
         self._clear_editor_state()
         return True, "Changes discarded"
     
@@ -161,13 +159,6 @@ class StateManager:
         self.state.transition_to_editing()
         self.state.form_data = {}
         return True, "Item added successfully"
-    
-    def acknowledge_discard(self):
-        """
-        Clear discard_pending flag after successful render without false positives.
-        Call this AFTER change detection has passed without detecting changes.
-        """
-        self.state.clear_discard_pending()
     
     def _clear_editor_state(self):
         """Clear all editor-related state variables"""
