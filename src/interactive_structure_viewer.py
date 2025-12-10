@@ -2,9 +2,18 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-10 14:00 UTC
+Last Modified: 2025-12-10 15:30 UTC
 Python: 3.11
-Version: 1.11.0 - INLINE SAVE/DISCARD: Editor always visible with action buttons
+Version: 1.11.1 - HOTFIX: Discard button fix + removed info messages
+
+CHANGELOG v1.11.1 (Hotfix):
+- 🐛 FIX: Discard button no longer causes double editor rendering
+  - Removed st.success() before st.rerun() which caused visual glitch
+  - Discard now cleanly refreshes page without intermediate messages
+- 🎨 REMOVED: "Filters are enabled..." info message (distracted from controls)
+- 🎨 REMOVED: "X unsaved change(s) - Filters DISABLED" banner (redundant)
+  - Save/Discard buttons in editor provide sufficient visual feedback
+  - Cleaner UI without repeated warnings
 
 CHANGELOG v1.11.0 (Inline Save/Discard - No More Hidden Editor):
 - 🎯 UX IMPROVEMENT: Removed "Edit interface is hidden" blocking screen
@@ -2293,19 +2302,10 @@ def render_interactive_structure_viewer(client, user_id: str):
     if state_changed:
         st.rerun()
     
-    # Show warning banner if there are unsaved changes
-    # v1.11.0: Simplified banner - just notification, Discard button moved inline to editor
-    if unsaved_changes:
-        st.warning(f"⚠️ **{num_changes} unsaved change(s)** - Filters DISABLED. Use **Save** or **Discard** buttons in the editor below.")
-        st.markdown("---")
-    
     # ============================================
     # CONTROLS - ROW 2: UNIFIED FILTERS
     # ============================================
-    
-    # Show friendly info in Edit Mode about filter behavior (v1.10.1 - using State Machine)
-    if st.session_state.viewer_mode == 'edit' and state_mgr.state.is_editing:
-        st.info("ℹ️ **Filters are enabled.** When you make changes in Edit Mode, filters will lock until you save or discard.")
+    # v1.11.0: Removed info messages about filters - they distract from Save/Discard buttons
     
     # Callback functions to ensure state sync (executed BEFORE rerun)
     def on_view_type_change():
@@ -2611,7 +2611,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                             st.session_state.edited_df = None
                             st.session_state.original_df = None
                             state_mgr.discard_changes()
-                            st.success("✅ Changes discarded!")
                             st.rerun()
                 
                 st.markdown("---")
@@ -2802,7 +2801,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                                 st.session_state.edited_df = None
                                 st.session_state.original_df = None
                                 state_mgr.discard_changes()
-                                st.success("✅ Changes discarded!")
                                 st.rerun()
                     
                     st.markdown("---")
@@ -3265,7 +3263,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                                 st.session_state.edited_df = None
                                 st.session_state.original_df = None
                                 state_mgr.discard_changes()
-                                st.success("✅ Changes discarded!")
                                 st.rerun()
                     
                     st.markdown("---")
