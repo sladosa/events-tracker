@@ -2,9 +2,26 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-10 19:00 UTC
+Last Modified: 2025-12-10 20:00 UTC
 Python: 3.11
-Version: 1.11.3 - FIX: Discard infinite loop - COMPLETE FIX + Code cleanup
+Version: 1.11.4 - FIX: Form Discard buttons + Code cleanup
+
+CHANGELOG v1.11.4 (Form Discard Fix):
+- 🐛 FIXED: Discard buttons on ADD forms now clear state properly
+  - Problem: Form Discard buttons only incremented counter and rerun
+  - This left change detection state intact → could cause false positives
+  - Affected: Add Area, Add Category, Add Attribute, Insert Between forms
+- ✅ SOLUTION: All form Discard/Cancel buttons now clear state:
+  - st.session_state.original_df = None
+  - st.session_state.edited_df = None
+  - Then st.rerun()
+- 🔧 FIXED BUTTONS:
+  - Discard on Add New Area form
+  - Discard on Add New Category form
+  - Discard on Insert Category Between form
+  - Discard on Add New Attribute form
+  - Cancel on Remove Category Between
+- 🎯 IMPACT: No more loops when using Discard on ADD forms
 
 CHANGELOG v1.11.3 (CRITICAL FIX - Discard Loop COMPLETE + Cleanup):
 - 🐛 ROOT CAUSE #1: DataFrame index mismatch after Discard
@@ -2582,8 +2599,12 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.error(msg)
                     
                     # Discard button for form
+                    # v1.11.3: Also clear state to prevent false positive detection
                     if st.button("🗑️ Discard", key="discard_area_form", help="Close form and clear inputs"):
                         st.session_state.area_form_counter += 1
+                        # Clear any potential change detection state
+                        st.session_state.original_df = None
+                        st.session_state.edited_df = None
                         st.rerun()
         
         # ============================================
@@ -2832,8 +2853,12 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.error(msg)
                 
                 # v1.11.0: Discard button for form
+                # v1.11.3: Also clear state to prevent false positive detection
                 if st.button("🗑️ Discard", key="discard_category_form", help="Close form and clear inputs"):
                     st.session_state.category_form_counter += 1
+                    # Clear any potential change detection state
+                    st.session_state.original_df = None
+                    st.session_state.edited_df = None
                     st.rerun()
                 
             st.markdown("---")
@@ -2905,8 +2930,12 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.error(msg)
                     
                     # v1.11.0: Discard button
+                    # v1.11.3: Also clear state to prevent false positive detection
                     if st.button("🗑️ Discard", key="discard_insert_form", help="Close form and clear inputs"):
                         st.session_state.insert_between_counter += 1
+                        # Clear any potential change detection state
+                        st.session_state.original_df = None
+                        st.session_state.edited_df = None
                         st.rerun()
                 
             st.markdown("---")
@@ -3019,7 +3048,10 @@ def render_interactive_structure_viewer(client, user_id: str):
                                                 st.error(msg)
                                 with col3:
                                     # v1.11.0: Cancel button
+                                    # v1.11.3: Also clear state to prevent false positive detection
                                     if st.button("↩️ Cancel", key="cancel_remove_between", type="secondary", use_container_width=True, help="Cancel operation"):
+                                        st.session_state.original_df = None
+                                        st.session_state.edited_df = None
                                         st.rerun()
                             
                             except Exception as e:
@@ -3384,8 +3416,12 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.error(msg)
                 
                 # BUG FIX #3: Discard button for form (v1.10.0)
+                # v1.11.3: Also clear state to prevent false positive detection
                 if st.button("🗑️ Discard", key="discard_attribute_form", help="Close form and clear inputs"):
                     st.session_state.attribute_form_counter += 1
+                    # Clear any potential change detection state
+                    st.session_state.original_df = None
+                    st.session_state.edited_df = None
                     st.rerun()
         
         # ============================================
