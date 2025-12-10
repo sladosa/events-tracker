@@ -1,5 +1,5 @@
 """
-State Machine - Simplified State Management for Interactive Structure Viewer 1
+State Machine - Simplified State Management for Interactive Structure Viewer
 
 Features:
 - Single source of truth (AppState dataclass)

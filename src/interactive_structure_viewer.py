@@ -1,30 +1,40 @@
 """
-Events Tracker - Interactive Structure Viewer Module - ssl
+Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-10 18:30 UTC
+Last Modified: 2025-12-10 19:00 UTC
 Python: 3.11
-Version: 1.11.3 - FIX: Discard infinite loop - COMPLETE FIX with index reset
+Version: 1.11.3 - FIX: Discard infinite loop - COMPLETE FIX + Code cleanup
 
-CHANGELOG v1.11.3 (CRITICAL FIX - Discard Loop COMPLETE):
-- 🐛 ROOT CAUSE IDENTIFIED: DataFrame index mismatch after Discard
+CHANGELOG v1.11.3 (CRITICAL FIX - Discard Loop COMPLETE + Cleanup):
+- 🐛 ROOT CAUSE #1: DataFrame index mismatch after Discard
   - area_display has original indices from filtered_df (e.g., [0, 5, 10])
   - st.data_editor returns DataFrame with RESET indices [0, 1, 2]
   - df.equals() compares indices too → always detected as "different"
   - This caused infinite loop: Discard → rerun → false positive → Discard...
+- 🐛 ROOT CAUSE #2: discard_pending flag cleared too early
+  - Tab1 (Areas) was clearing the flag before Tab2/Tab3 could see it
+  - Result: Categories and Attributes tabs still detected false positives
 - ✅ SOLUTION 1: Fixed normalize_for_comparison() to reset indices
   - Added reset_index(drop=True) before comparison
   - Now compares only DATA, not indices
-- ✅ SOLUTION 2: Added discard_pending flag in State Machine
-  - Prevents false positive detection immediately after Discard
-  - Flag cleared after first successful render without changes
+- ✅ SOLUTION 2: Fixed discard_pending lifecycle
+  - Flag is now cleared AFTER ALL TABS are rendered (at end of edit mode block)
+  - Each tab checks the flag but does NOT clear it
+  - Flag persists for exactly ONE full render cycle
+- 🗑️ REMOVED: has_unsaved_changes() function (NEVER CALLED - dead code!)
+  - This function compared ALL data with SINGLE TAB → constant false positives
+  - Each tab now manages its own LOCAL change detection
+- 🗑️ REMOVED: save_changes_to_database() function (NEVER CALLED - dead code!)
+  - Each tab uses its own specific save function instead
 - 🔧 IMPROVED: All 3 tabs (Areas, Categories, Attributes) now:
-  - Check discard_pending before setting has_changes
-  - Call acknowledge_discard() after clean render
+  - Check discard_pending but DON'T clear it
+  - Only set has_changes = True if real changes AND no discard_pending
 - 🎯 IMPACT: Discard button now works correctly in ALL scenarios
-  - No more infinite loops
-  - Filters unlock immediately after Discard
-  - Clean state transition
+  - No more infinite loops in ANY tab ✅
+  - Filters unlock immediately after Discard ✅
+  - Clean state transition ✅
+  - Cleaner codebase (removed ~150 lines of dead code) ✅
 
 CHANGELOG v1.11.2 (Critical Fix - Discard Loop):
 - 🐛 ROOT CAUSE FIXED: original_df contained ALL data, edited_df contained SINGLE TAB
@@ -1104,130 +1114,13 @@ def validate_changes(df: pd.DataFrame) -> Tuple[bool, List[str]]:
 
 
 # ============================================
-# SAVE TO DATABASE
+# SAVE TO DATABASE - Per-Entity Functions
 # ============================================
-
-def save_changes_to_database(
-    client,
-    user_id: str,
-    original_df: pd.DataFrame,
-    edited_df: pd.DataFrame
-) -> Tuple[bool, str, Dict[str, int]]:
-    """
-    Save changes to database.
-    Compares original_df and edited_df to identify changes.
-    
-    Args:
-        client: Supabase client
-        user_id: Current user's UUID
-        original_df: Original dataframe with metadata columns
-        edited_df: Edited dataframe (may not have all metadata columns)
-    
-    Returns:
-        Tuple of (success, message, stats_dict)
-    """
-    stats = {
-        'categories': 0,
-        'attributes': 0,
-        'errors': 0
-    }
-    errors = []
-    
-    try:
-        # Iterate through rows and detect changes
-        for idx, edit_row in edited_df.iterrows():
-            try:
-                # Find corresponding row in original_df
-                orig_row = original_df.loc[idx]
-                
-                row_type = orig_row['Type']
-                
-                # Check if row has changed
-                has_changed = False
-                for col in edited_df.columns:
-                    if col in original_df.columns:
-                        if str(edit_row[col]) != str(orig_row[col]):
-                            has_changed = True
-                            break
-                
-                if not has_changed:
-                    continue
-                
-                # CATEGORY UPDATE
-                if row_type == 'Category':
-                    cat_id = orig_row['_category_id']
-                    if pd.notna(cat_id):
-                        # Prepare update data
-                        update_data = {
-                            'name': edit_row['Category'],
-                            'description': edit_row['Description'] if edit_row['Description'] else None
-                        }
-                        
-                        client.table('categories') \
-                            .update(update_data) \
-                            .eq('id', cat_id) \
-                            .eq('user_id', user_id) \
-                            .execute()
-                        
-                        stats['categories'] += 1
-                
-                # ATTRIBUTE UPDATE
-                elif row_type == 'Attribute':
-                    attr_id = orig_row['_attribute_id']
-                    if pd.notna(attr_id):
-                        # Parse validation rules
-                        val_rules = {}
-                        if edit_row['Validation_Min']:
-                            try:
-                                val_rules['min'] = float(edit_row['Validation_Min'])
-                            except:
-                                val_rules['min'] = edit_row['Validation_Min']
-                        
-                        if edit_row['Validation_Max']:
-                            try:
-                                val_rules['max'] = float(edit_row['Validation_Max'])
-                            except:
-                                val_rules['max'] = edit_row['Validation_Max']
-                        
-                        # Convert Is_Required to boolean
-                        is_required = edit_row['Is_Required'] == 'Yes'
-                        
-                        # Prepare update data
-                        update_data = {
-                            'name': edit_row['Attribute_Name'],
-                            'data_type': edit_row['Data_Type'] if edit_row['Data_Type'] else 'text',
-                            'unit': edit_row['Unit'] if edit_row['Unit'] else None,
-                            'is_required': is_required,
-                            'default_value': edit_row['Default_Value'] if edit_row['Default_Value'] else None,
-                            'validation_rules': val_rules if val_rules else {},
-                            'description': edit_row['Description'] if edit_row['Description'] else None
-                        }
-                        
-                        client.table('attribute_definitions') \
-                            .update(update_data) \
-                            .eq('id', attr_id) \
-                            .eq('user_id', user_id) \
-                            .execute()
-                        
-                        stats['attributes'] += 1
-            
-            except Exception as e:
-                stats['errors'] += 1
-                errors.append(f"Row {idx + 1}: {str(e)}")
-                # Continue processing other rows
-        
-        total_updates = stats['categories'] + stats['attributes']
-        
-        if stats['errors'] > 0:
-            error_msg = f"Completed with {stats['errors']} errors. Check details below."
-            return False, error_msg, stats
-        elif total_updates == 0:
-            return True, "No changes detected", stats
-        else:
-            return True, f"Successfully updated {total_updates} items", stats
-    
-    except Exception as e:
-        return False, f"Error saving changes: {str(e)}", stats
+# v1.11.3: Removed unused save_changes_to_database() function
+# Each tab uses its own specific save function:
+# - _save_area_changes()
+# - _save_category_changes()  
+# - _save_attribute_changes()
 
 
 def _save_category_changes(
@@ -2274,86 +2167,10 @@ def render_interactive_structure_viewer(client, user_id: str):
     # ============================================
     # UNSAVED CHANGES DETECTION & WARNING
     # ============================================
-    
-    def has_unsaved_changes() -> Tuple[bool, int]:
-        """
-        Check if there are unsaved changes in Edit Mode.
-        
-        Returns:
-            Tuple of (has_changes, num_changed_rows)
-            
-        Note: Uses normalized comparison to avoid false positives from dtype/NaN differences
-        that st.data_editor may introduce.
-        """
-        if st.session_state.viewer_mode != 'edit':
-            return False, 0
-        
-        if st.session_state.original_df is None or st.session_state.edited_df is None:
-            return False, 0
-        
-        display_cols = [col for col in st.session_state.original_df.columns if not col.startswith('_')]
-        orig_display = st.session_state.original_df[display_cols].copy()
-        edited_display = st.session_state.edited_df.copy()
-        
-        # Normalize DataFrames to avoid false positives
-        def normalize_df(df):
-            """
-            Normalize DataFrame for robust comparison.
-            Handles dtype differences, NaN values, and float precision.
-            """
-            df_norm = df.copy()
-            
-            # Convert all columns to string for consistent comparison
-            # This handles dtype mismatches (object vs str, int vs float, etc.)
-            for col in df_norm.columns:
-                # Fill NaN/None with empty string before conversion
-                df_norm[col] = df_norm[col].fillna('').astype(str)
-                
-                # Clean up string representation of floats
-                # "0.0" -> "0", "1.0" -> "1" 
-                df_norm[col] = df_norm[col].str.replace(r'\.0$', '', regex=True)
-            
-            # Sort columns alphabetically to handle column order differences
-            df_norm = df_norm[sorted(df_norm.columns)]
-            
-            return df_norm
-        
-        orig_normalized = normalize_df(orig_display)
-        edited_normalized = normalize_df(edited_display)
-        
-        # Check if DataFrames are equal after normalization
-        has_changes = not orig_normalized.equals(edited_normalized)
-        
-        if has_changes:
-            # Count changed rows using normalized comparison
-            num_changed = 0
-            
-            # Check for modified rows
-            for idx in orig_normalized.index:
-                if idx in edited_normalized.index:
-                    orig_row = orig_normalized.loc[idx]
-                    edited_row = edited_normalized.loc[idx]
-                    if not orig_row.equals(edited_row):
-                        num_changed += 1
-            
-            # Count new rows (in edited but not in original)
-            new_rows = len(edited_normalized) - len(orig_normalized)
-            if new_rows > 0:
-                num_changed += new_rows
-            
-            # CRITICAL: If no actual changes detected, return False
-            # This prevents false positives from minor DataFrame differences (index order, etc.)
-            if num_changed == 0:
-                return False, 0
-            
-            return True, abs(num_changed)
-        
-        return False, 0
-    
-    # v1.11.1: REMOVED global has_unsaved_changes() sync
-    # Problem: original_df contains ALL data, edited_df contains SINGLE TAB
-    # This caused constant mismatch and infinite loops
-    # Solution: Each tab manages its own has_changes state locally
+    # v1.11.3: REMOVED has_unsaved_changes() function - it was NEVER CALLED!
+    # Problem: Function compared ALL data (original_df) with SINGLE TAB (edited_df)
+    # This caused constant false positives after Discard
+    # Solution: Each tab now manages its own LOCAL change detection using normalize_for_comparison()
     # The state_mgr.state.has_changes is set ONLY when local tab detects real changes
     
     # ============================================
@@ -2573,11 +2390,10 @@ def render_interactive_structure_viewer(client, user_id: str):
         # v1.11.0: Editor ALWAYS visible - no more st.stop() blocking
         # Save/Discard buttons are now inline within each editor tab
         
-        # v1.11.3: Reset has_changes at start of tab rendering
-        # Each tab will set it to True if it detects actual changes
+        # v1.11.3: ALWAYS reset has_changes at start of tab rendering
+        # Each tab will set it to True ONLY if it detects actual changes AND discard_pending is False
         # This ensures proper state when switching between tabs
-        if not state_mgr.state.discard_pending:
-            state_mgr.state.has_changes = False
+        state_mgr.state.has_changes = False
         
         st.markdown("### ✏️ Structure (Edit Mode) - Choose What to Edit")
         
@@ -2646,8 +2462,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                 # If user just clicked Discard, ignore any detected changes for this render
                 if state_mgr.state.discard_pending:
                     has_area_edit_changes = False
-                    # Clear the flag after acknowledging (only if no real changes)
-                    state_mgr.acknowledge_discard()
+                    # NOTE: Don't call acknowledge_discard() here - let all tabs see the flag first!
                 
                 # v1.11.3: Set state_mgr.has_changes based on LOCAL check
                 # Only set to True if there are actual changes
@@ -2849,7 +2664,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                     # v1.11.3: Check discard_pending flag to prevent false positive after Discard
                     if state_mgr.state.discard_pending:
                         has_cat_changes = False
-                        state_mgr.acknowledge_discard()
+                        # NOTE: Don't call acknowledge_discard() here - let all tabs see the flag first!
                     
                     # v1.11.3: Set state_mgr.has_changes based on LOCAL check
                     if has_cat_changes:
@@ -3310,7 +3125,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                     # v1.11.3: Check discard_pending flag to prevent false positive after Discard
                     if state_mgr.state.discard_pending:
                         has_attr_changes = False
-                        state_mgr.acknowledge_discard()
+                        # NOTE: Don't call acknowledge_discard() here - let all tabs see the flag first!
                     
                     # v1.11.3: Set state_mgr.has_changes based on LOCAL check
                     if has_attr_changes:
@@ -3900,3 +3715,11 @@ def render_interactive_structure_viewer(client, user_id: str):
                     # Cleanup temporary file
                     if os.path.exists(tmp_path):
                         os.remove(tmp_path)
+        
+        # ============================================
+        # v1.11.3: CLEAR discard_pending AFTER ALL TABS RENDERED
+        # ============================================
+        # This ensures the flag persists for ONE full render cycle
+        # allowing all tabs to see it and skip false positive detection
+        if state_mgr.state.discard_pending:
+            state_mgr.state.discard_pending = False
