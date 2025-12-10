@@ -8,10 +8,11 @@ Features:
 - Filter management based on state
 - Form state tracking
 - v1.1.0: Added discard_pending flag to prevent false positive detection after discard
+- v1.1.1: Added editor_reset_counter increment in _clear_editor_state()
 
 Dependencies: dataclasses, typing
 
-Last Modified: 2025-12-10 20:00 UTC
+Last Modified: 2025-12-10 21:00 UTC
 """
 
 from dataclasses import dataclass, field
@@ -162,6 +163,11 @@ class StateManager:
     
     def _clear_editor_state(self):
         """Clear all editor-related state variables"""
+        # v1.11.4: Increment counter to force data_editor widget reset
+        # This changes the widget key, forcing Streamlit to create fresh widgets
+        if hasattr(self.session_state, 'editor_reset_counter'):
+            self.session_state.editor_reset_counter += 1
+        
         # Clear old state variables (backward compatibility)
         if hasattr(self.session_state, 'original_df'):
             self.session_state.original_df = None

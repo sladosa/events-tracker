@@ -2,26 +2,37 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-10 20:00 UTC
+Last Modified: 2025-12-10 21:00 UTC
 Python: 3.11
-Version: 1.11.4 - FIX: Form Discard buttons + Code cleanup
+Version: 1.11.4 - FIX: Dynamic key for data_editors + ALL Discard/Cancel buttons fixed
 
-CHANGELOG v1.11.4 (Form Discard Fix):
-- 🐛 FIXED: Discard buttons on ADD forms now clear state properly
-  - Problem: Form Discard buttons only incremented counter and rerun
-  - This left change detection state intact → could cause false positives
-  - Affected: Add Area, Add Category, Add Attribute, Insert Between forms
-- ✅ SOLUTION: All form Discard/Cancel buttons now clear state:
-  - st.session_state.original_df = None
-  - st.session_state.edited_df = None
-  - Then st.rerun()
-- 🔧 FIXED BUTTONS:
-  - Discard on Add New Area form
-  - Discard on Add New Category form
-  - Discard on Insert Category Between form
-  - Discard on Add New Attribute form
-  - Cancel on Remove Category Between
-- 🎯 IMPACT: No more loops when using Discard on ADD forms
+CHANGELOG v1.11.4 (CRITICAL - Complete Discard Fix):
+- 🐛 ROOT CAUSE FOUND: st.data_editor had NO `key` parameter!
+  - Without explicit key, Streamlit keeps internal widget state between reruns
+  - Even after calling discard_changes(), data_editor retained user's edits
+  - Result: On next render, change detection found "changes" → infinite loop
+- ✅ SOLUTION: Added dynamic `key` parameter to ALL data_editors:
+  - `key=f"area_editor_{st.session_state.editor_reset_counter}"`
+  - `key=f"category_editor_{st.session_state.editor_reset_counter}"`
+  - `key=f"attribute_editor_{st.session_state.editor_reset_counter}"`
+- ✅ SOLUTION 2: `_clear_editor_state()` now increments `editor_reset_counter`
+  - This forces Streamlit to create FRESH widget instances
+  - All previous widget state is discarded
+- 🔧 ALSO FIXED: ALL Discard/Cancel buttons now call state_mgr.discard_changes()
+  - This sets discard_pending flag AND increments editor_reset_counter
+  - Affected buttons:
+    - ✅ Discard on Add New Area form
+    - ✅ Discard on Add New Category form  
+    - ✅ Discard on Insert Category Between form
+    - ✅ Discard on Add New Attribute form
+    - ✅ Cancel on Remove Category Between
+    - ✅ Cancel on Delete Areas (checkbox uncheck)
+    - ✅ Cancel on Delete Categories (checkbox uncheck)
+    - ✅ Cancel on Delete Attributes (checkbox uncheck)
+- 🎯 IMPACT: 
+  - No more infinite loops on ANY Discard/Cancel operation ✅
+  - Data editors properly reset to original values ✅
+  - Clean state transitions ✅
 
 CHANGELOG v1.11.3 (CRITICAL FIX - Discard Loop COMPLETE + Cleanup):
 - 🐛 ROOT CAUSE #1: DataFrame index mismatch after Discard
@@ -2056,6 +2067,11 @@ def render_interactive_structure_viewer(client, user_id: str):
     if 'edited_df' not in st.session_state:
         st.session_state.edited_df = None
     
+    # v1.11.4: Counter to force data_editor reset after Discard
+    # Incrementing this counter changes the widget key, forcing a fresh state
+    if 'editor_reset_counter' not in st.session_state:
+        st.session_state.editor_reset_counter = 0
+    
     # v1.10.1 DEPRECATED: editing_active flag no longer used (State Machine manages state)
     # Kept for backward compatibility only
     if 'editing_active' not in st.session_state:
@@ -2455,13 +2471,15 @@ def render_interactive_structure_viewer(client, user_id: str):
                 }
                 
                 # Render area editor
+                # v1.11.4: Dynamic key forces reset after Discard (incrementing counter changes key)
                 edited_area_df = st.data_editor(
                     area_display,
                     use_container_width=True,
                     height=300,
                     column_config=area_column_config,
                     hide_index=True,
-                    num_rows="fixed"
+                    num_rows="fixed",
+                    key=f"area_editor_{st.session_state.editor_reset_counter}"
                 )
                 
                 # ============================================
@@ -2558,10 +2576,12 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.rerun()
                     with col3:
                         # v1.11.0: Cancel button - uncheck all and refresh
+                        # v1.11.4: Must use state_mgr.discard_changes() to set discard_pending flag!
                         if st.button("↩️ Cancel", key="cancel_delete_areas_btn", type="secondary", use_container_width=True, help="Uncheck all and cancel deletion"):
                             st.cache_data.clear()
                             st.session_state.edited_df = None
                             st.session_state.original_df = None
+                            state_mgr.discard_changes()  # CRITICAL: Sets discard_pending flag!
                             st.rerun()
                 
                 st.markdown("---")
@@ -2599,12 +2619,14 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.error(msg)
                     
                     # Discard button for form
-                    # v1.11.3: Also clear state to prevent false positive detection
+                    # v1.11.4: Must use state_mgr.discard_changes() to set discard_pending flag!
                     if st.button("🗑️ Discard", key="discard_area_form", help="Close form and clear inputs"):
                         st.session_state.area_form_counter += 1
                         # Clear any potential change detection state
+                        st.cache_data.clear()
                         st.session_state.original_df = None
                         st.session_state.edited_df = None
+                        state_mgr.discard_changes()  # CRITICAL: Sets discard_pending flag!
                         st.rerun()
         
         # ============================================
@@ -2663,13 +2685,15 @@ def render_interactive_structure_viewer(client, user_id: str):
                     # When user opens editor, key is created → early check detects it → filters lock
                     
                     # Render category editor
+                    # v1.11.4: Dynamic key forces reset after Discard (incrementing counter changes key)
                     edited_cat_df = st.data_editor(
                         cat_display,
                         use_container_width=True,
                         height=300,
                         column_config=cat_column_config,
                         hide_index=True,
-                        num_rows="fixed"
+                        num_rows="fixed",
+                        key=f"category_editor_{st.session_state.editor_reset_counter}"
                     )
                     
                     # ============================================
@@ -2763,10 +2787,12 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.rerun()
                         with col3:
                             # v1.11.0: Cancel button
+                            # v1.11.4: Must use state_mgr.discard_changes() to set discard_pending flag!
                             if st.button("↩️ Cancel", key="cancel_delete_cats_btn", type="secondary", use_container_width=True, help="Uncheck all and cancel deletion"):
                                 st.cache_data.clear()
                                 st.session_state.edited_df = None
                                 st.session_state.original_df = None
+                                state_mgr.discard_changes()  # CRITICAL: Sets discard_pending flag!
                                 st.rerun()
             
             # Add Category form - ALWAYS visible, regardless of whether categories exist
@@ -2853,12 +2879,14 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.error(msg)
                 
                 # v1.11.0: Discard button for form
-                # v1.11.3: Also clear state to prevent false positive detection
+                # v1.11.4: Must use state_mgr.discard_changes() to set discard_pending flag!
                 if st.button("🗑️ Discard", key="discard_category_form", help="Close form and clear inputs"):
                     st.session_state.category_form_counter += 1
                     # Clear any potential change detection state
+                    st.cache_data.clear()
                     st.session_state.original_df = None
                     st.session_state.edited_df = None
+                    state_mgr.discard_changes()  # CRITICAL: Sets discard_pending flag!
                     st.rerun()
                 
             st.markdown("---")
@@ -2930,12 +2958,14 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.error(msg)
                     
                     # v1.11.0: Discard button
-                    # v1.11.3: Also clear state to prevent false positive detection
+                    # v1.11.4: Must use state_mgr.discard_changes() to set discard_pending flag!
                     if st.button("🗑️ Discard", key="discard_insert_form", help="Close form and clear inputs"):
                         st.session_state.insert_between_counter += 1
                         # Clear any potential change detection state
+                        st.cache_data.clear()
                         st.session_state.original_df = None
                         st.session_state.edited_df = None
+                        state_mgr.discard_changes()  # CRITICAL: Sets discard_pending flag!
                         st.rerun()
                 
             st.markdown("---")
@@ -3048,10 +3078,12 @@ def render_interactive_structure_viewer(client, user_id: str):
                                                 st.error(msg)
                                 with col3:
                                     # v1.11.0: Cancel button
-                                    # v1.11.3: Also clear state to prevent false positive detection
+                                    # v1.11.4: Must use state_mgr.discard_changes() to set discard_pending flag!
                                     if st.button("↩️ Cancel", key="cancel_remove_between", type="secondary", use_container_width=True, help="Cancel operation"):
+                                        st.cache_data.clear()
                                         st.session_state.original_df = None
                                         st.session_state.edited_df = None
+                                        state_mgr.discard_changes()  # CRITICAL: Sets discard_pending flag!
                                         st.rerun()
                             
                             except Exception as e:
@@ -3135,13 +3167,15 @@ def render_interactive_structure_viewer(client, user_id: str):
                     # When user opens editor, key is created → early check detects it → filters lock
                     
                     # Render attribute editor
+                    # v1.11.4: Dynamic key forces reset after Discard (incrementing counter changes key)
                     edited_attr_df = st.data_editor(
                         attr_display,
                         use_container_width=True,
                         height=300,
                         column_config=attr_column_config,
                         hide_index=True,
-                        num_rows="fixed"
+                        num_rows="fixed",
+                        key=f"attribute_editor_{st.session_state.editor_reset_counter}"
                     )
                     
                     # ============================================
@@ -3240,9 +3274,12 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.rerun()
                         with col3:
                             # v1.11.0: Cancel button
+                            # v1.11.4: Must use state_mgr.discard_changes() to set discard_pending flag!
                             if st.button("↩️ Cancel", key="cancel_delete_attrs_btn", type="secondary", use_container_width=True, help="Uncheck all and cancel deletion"):
+                                st.cache_data.clear()
                                 st.session_state.edited_df = None
                                 st.session_state.original_df = None
+                                state_mgr.discard_changes()  # CRITICAL: Sets discard_pending flag!
                                 st.rerun()
             
             # Add Attribute form - ALWAYS visible, regardless of whether attributes exist
@@ -3416,12 +3453,14 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.error(msg)
                 
                 # BUG FIX #3: Discard button for form (v1.10.0)
-                # v1.11.3: Also clear state to prevent false positive detection
+                # v1.11.4: Must use state_mgr.discard_changes() to set discard_pending flag!
                 if st.button("🗑️ Discard", key="discard_attribute_form", help="Close form and clear inputs"):
                     st.session_state.attribute_form_counter += 1
                     # Clear any potential change detection state
+                    st.cache_data.clear()
                     st.session_state.original_df = None
                     st.session_state.edited_df = None
+                    state_mgr.discard_changes()  # CRITICAL: Sets discard_pending flag!
                     st.rerun()
         
         # ============================================
