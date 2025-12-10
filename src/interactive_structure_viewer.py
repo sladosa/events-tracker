@@ -2,24 +2,22 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-10 16:00 UTC
+Last Modified: 2025-12-10 16:30 UTC
 Python: 3.11
-Version: 1.11.2 - FIX: Discard infinite loop - complete refactor of change detection
+Version: 1.11.3 - MAJOR SIMPLIFICATION: Back to v1.8.0 logic
+
+CHANGELOG v1.11.3 (Major Simplification):
+- 🔄 BACK TO BASICS: Restored simple Discard logic from v1.8.0
+  - Discard now simply: st.session_state.edited_df = None; st.rerun()
+  - Removed: cache_data.clear(), original_df clearing, state_mgr.discard_changes()
+- 🔓 REMOVED FILTER LOCKING: Filters always enabled (like v1.8.0)
+  - Users can change filters even with unsaved changes
+  - Much simpler UX - no need to save/discard before filtering
+- 🔧 FIXED: render_graph_viewer import (was render_graph_viewer_integrated)
+- ⚡ Simplified Cancel buttons (same pattern as Discard)
+- 📝 State Machine still used for mode tracking, but not for filter locking
 
 CHANGELOG v1.11.2 (Critical Fix - Discard Loop):
-- 🐛 ROOT CAUSE FIXED: original_df contained ALL data, edited_df contained SINGLE TAB
-  - This mismatch caused has_unsaved_changes() to always detect "changes"
-  - After Discard, data_editor re-rendered and set edited_df, triggering false positive
-- ✅ SOLUTION: Removed global has_unsaved_changes() sync entirely
-  - Each tab now manages its own change detection locally
-  - state_mgr.state.has_changes is set ONLY when local tab detects real changes
-- 🔧 Added normalize_for_comparison() helper function
-  - Handles dtype differences from st.data_editor
-  - Prevents false positives from float/int/string mismatches
-- 🎯 Filters now lock/unlock based on LOCAL change detection, not global
-- ⚡ Removed st.session_state.edited_df assignments (no longer needed)
-
-CHANGELOG v1.11.1 (Hotfix):
 - 🎯 UX IMPROVEMENT: Removed "Edit interface is hidden" blocking screen
   - Problem: st.stop() hid entire editor when unsaved changes existed
   - User had to scroll to banner for Discard button - poor experience
@@ -508,7 +506,7 @@ from .hierarchical_parser import HierarchicalParser
 from .error_reporter import generate_error_excel
 
 # Import Graph Viewer module
-from .structure_graph_viewer import render_graph_viewer_integrated
+from .structure_graph_viewer import render_graph_viewer
 
 
 # ============================================
@@ -2365,9 +2363,8 @@ def render_interactive_structure_viewer(client, user_id: str):
     
     with col1:
         # View Type selector (applies to Read-Only mode only, but state always maintained)
-        # v1.10.1: Use State Machine for filter locking
-        filters_locked = not state_mgr.state.filters_enabled
-        view_help = "Finish editing to use filters (Save or Discard)" if filters_locked else "Sunburst/Treemap/Network: Visual hierarchy | Table: Spreadsheet view"
+        # v1.11.3: Removed filter locking - filters always enabled like v1.8.0
+        view_help = "Sunburst/Treemap/Network: Visual hierarchy | Table: Spreadsheet view"
         
         view_type = st.selectbox(
             "View Type",
@@ -2375,18 +2372,15 @@ def render_interactive_structure_viewer(client, user_id: str):
             index=["Sunburst", "Treemap", "Network Graph", "Table View"].index(st.session_state.view_filters['view_type']),
             key="view_type_selector",
             help=view_help,
-            on_change=on_view_type_change,
-            disabled=filters_locked  # Disable when actively editing
+            on_change=on_view_type_change
         )
     
     with col2:
         # Area filter
         area_options = ["All Areas"] + sorted(df[df['Type'] == 'Area']['Area'].unique().tolist())
         
-        # Help message changes based on editing state
-        # v1.10.1: Use State Machine for filter locking
-        filters_locked = not state_mgr.state.filters_enabled
-        filter_help = "Finish editing to use filters (Save or Discard)" if filters_locked else "Filter structure by Area"
+        # v1.11.3: Removed filter locking
+        filter_help = "Filter structure by Area"
         
         selected_area = st.selectbox(
             "Filter by Area",
@@ -2394,7 +2388,6 @@ def render_interactive_structure_viewer(client, user_id: str):
             index=area_options.index(st.session_state.view_filters['area']) if st.session_state.view_filters['area'] in area_options else 0,
             key="area_filter_selector",
             on_change=on_area_change,
-            disabled=filters_locked,  # Disable when actively editing
             help=filter_help
         )
     
@@ -2405,10 +2398,8 @@ def render_interactive_structure_viewer(client, user_id: str):
             area_categories = df[(df['Type'] == 'Category') & (df['Area'] == st.session_state.view_filters['area'])]['Category'].unique().tolist()
             category_options = ["All Categories"] + sorted(area_categories)
             
-            # Help message changes based on editing state
-            # v1.10.1: Use State Machine for filter locking
-            filters_locked = not state_mgr.state.filters_enabled
-            category_help = "Finish editing to use filters (Save or Discard)" if filters_locked else "Drill down to specific category"
+            # v1.11.3: Removed filter locking
+            category_help = "Drill down to specific category"
             
             selected_category = st.selectbox(
                 "Drill-down to Category",
@@ -2416,7 +2407,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                 index=category_options.index(st.session_state.view_filters['category']) if st.session_state.view_filters['category'] in category_options else 0,
                 key="category_filter_selector",
                 on_change=on_category_change,
-                disabled=filters_locked,  # Disable when actively editing
                 help=category_help
             )
         else:
@@ -2430,14 +2420,12 @@ def render_interactive_structure_viewer(client, user_id: str):
     
     with col4:
         # Show Events toggle
-        # v1.10.1: Use State Machine for filter locking
-        filters_locked = not state_mgr.state.filters_enabled
+        # v1.11.3: Removed filter locking
         show_events = st.checkbox(
             "Show Events",
             value=st.session_state.view_filters['show_events'],
             key="show_events_toggle",
-            on_change=on_show_events_change,
-            disabled=filters_locked  # Disable when actively editing
+            on_change=on_show_events_change
         )
     
     with col5:
@@ -2495,7 +2483,7 @@ def render_interactive_structure_viewer(client, user_id: str):
             pass  # Will be handled by existing table rendering code below
         else:
             # Render graph view (Sunburst, Treemap, or Network Graph)
-            render_graph_viewer_integrated(client, user_id, st.session_state.view_filters)
+            render_graph_viewer(client, user_id)
             return  # Exit function after rendering graph
     
     # Continue with Table View (Read-Only Table or Edit Mode)
@@ -2634,11 +2622,9 @@ def render_interactive_structure_viewer(client, user_id: str):
                                 else:
                                     st.error(f"❌ Failed to save changes. {stats['errors']} errors occurred.")
                     with col3:
+                        # v1.11.3: Simplified Discard - just clear edited_df and rerun (like v1.8.0)
                         if st.button("🗑️ Discard Changes", key="discard_areas_btn", type="secondary", use_container_width=True):
-                            st.cache_data.clear()
                             st.session_state.edited_df = None
-                            st.session_state.original_df = None
-                            state_mgr.discard_changes()
                             st.rerun()
                 
                 st.markdown("---")
@@ -2680,11 +2666,9 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.session_state.edited_df = None
                                     st.rerun()
                     with col3:
-                        # v1.11.0: Cancel button - uncheck all and refresh
+                        # v1.11.3: Simplified Cancel - just clear and refresh
                         if st.button("↩️ Cancel", key="cancel_delete_areas_btn", type="secondary", use_container_width=True, help="Uncheck all and cancel deletion"):
-                            st.cache_data.clear()
                             st.session_state.edited_df = None
-                            st.session_state.original_df = None
                             st.rerun()
                 
                 st.markdown("---")
@@ -2830,11 +2814,9 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     else:
                                         st.error(f"❌ Failed to save changes. {stats['errors']} errors occurred.")
                         with col3:
+                            # v1.11.3: Simplified Discard
                             if st.button("🗑️ Discard Changes", key="discard_cats_btn", type="secondary", use_container_width=True):
-                                st.cache_data.clear()
                                 st.session_state.edited_df = None
-                                st.session_state.original_df = None
-                                state_mgr.discard_changes()
                                 st.rerun()
                     
                     st.markdown("---")
@@ -2876,11 +2858,9 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.session_state.edited_df = None
                                         st.rerun()
                         with col3:
-                            # v1.11.0: Cancel button
+                            # v1.11.3: Simplified Cancel
                             if st.button("↩️ Cancel", key="cancel_delete_cats_btn", type="secondary", use_container_width=True, help="Uncheck all and cancel deletion"):
-                                st.cache_data.clear()
                                 st.session_state.edited_df = None
-                                st.session_state.original_df = None
                                 st.rerun()
             
             # Add Category form - ALWAYS visible, regardless of whether categories exist
@@ -3298,11 +3278,9 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     else:
                                         st.error(f"❌ Failed to save changes. {stats['errors']} errors occurred.")
                         with col3:
+                            # v1.11.3: Simplified Discard
                             if st.button("🗑️ Discard Changes", key="discard_attrs_btn", type="secondary", use_container_width=True):
-                                st.cache_data.clear()
                                 st.session_state.edited_df = None
-                                st.session_state.original_df = None
-                                state_mgr.discard_changes()
                                 st.rerun()
                     
                     st.markdown("---")
@@ -3337,10 +3315,9 @@ def render_interactive_structure_viewer(client, user_id: str):
                                         st.session_state.edited_df = None
                                         st.rerun()
                         with col3:
-                            # v1.11.0: Cancel button
+                            # v1.11.3: Simplified Cancel
                             if st.button("↩️ Cancel", key="cancel_delete_attrs_btn", type="secondary", use_container_width=True, help="Uncheck all and cancel deletion"):
                                 st.session_state.edited_df = None
-                                st.session_state.original_df = None
                                 st.rerun()
             
             # Add Attribute form - ALWAYS visible, regardless of whether attributes exist
