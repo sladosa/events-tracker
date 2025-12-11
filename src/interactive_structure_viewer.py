@@ -2,9 +2,18 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-11 14:00 UTC
+Last Modified: 2025-12-11 20:00 UTC
 Python: 3.11
-Version: 1.12.4 - FIX: Remove Category Between safety checks
+Version: 1.12.5 - FIX: Remove Category Between unique identification
+
+CHANGELOG v1.12.5 (Remove Category Between - Critical Fix):
+- 🐛 CRITICAL FIX: Remove Category Between now uses Category_Path for unique identification
+  - ROOT CAUSE: Using only 'Category' name allowed selecting wrong category
+  - If multiple categories had same name, could delete wrong one
+  - SOLUTION: Use full Category_Path in selectbox + path-to-id mapping
+- 🔒 Added validation: Checks category_id exists before proceeding
+- 🎨 IMPROVED: Shows full path in dropdown for clarity
+- 📝 IMPROVED: Uses short name (cat_name_display) in success/error messages
 
 CHANGELOG v1.12.4 (Remove Category Between - Safety Improvements):
 - 🛡️ SAFETY: Added grandchildren check - blocks removal if children have sub-categories
@@ -2602,6 +2611,9 @@ def render_interactive_structure_viewer(client, user_id: str):
             else:
                 st.markdown(f"**Viewing {len(area_full_df)} areas**")
                 
+                # v1.12.5: Visual indication for editable columns
+                st.caption("🔓 **Editable:** Area, Description | 🔒 **Locked:** Type, Sort_Order")
+                
                 # Select relevant columns for Areas (display only)
                 area_cols = ['Type', 'Sort_Order', 'Area', 'Description']
                 area_display = area_full_df[area_cols].copy()
@@ -2809,6 +2821,9 @@ def render_interactive_structure_viewer(client, user_id: str):
                     st.info("ℹ️ No categories found. Add your first category below.")
             else:
                     st.markdown(f"**Viewing {len(category_full_df)} categories**")
+                    
+                    # v1.12.5: Visual indication for editable columns
+                    st.caption("🔓 **Editable:** Category, Description | 🔒 **Locked:** Type, Level, Sort_Order, Area, Category_Path")
                     
                     # Select relevant columns for Categories (display only)
                     cat_cols = ['Type', 'Level', 'Sort_Order', 'Area', 'Category_Path', 'Category', 'Description']
@@ -3144,6 +3159,7 @@ def render_interactive_structure_viewer(client, user_id: str):
             st.markdown("---")
             
             # NEW FEATURE v1.10.0: Remove Category Between
+            # v1.12.5: FIXED - Use Category_Path for unique identification (prevents wrong category deletion)
             with st.expander("🗑️ Remove Category Between", expanded=False):
                 st.warning("⚠️ **Remove Between** deletes the category but **promotes its children** up one level")
                 st.info("💡 Use this to remove a middle layer without losing child categories")
@@ -3154,111 +3170,135 @@ def render_interactive_structure_viewer(client, user_id: str):
                 if categories_in_area_df.empty:
                     st.warning("⚠️ No categories in current filter.")
                 else:
-                    # Let user select which category to remove
-                    category_to_remove = st.selectbox(
-                        "Select Category to Remove",
-                        categories_in_area_df['Category'].tolist(),
-                        help="This category will be deleted, but its children will be promoted"
-                    )
+                    # v1.12.5: Use Category_Path for unique identification
+                    # Format: "Category_Path (Category Name)" for clarity
+                    # This prevents selecting wrong category when multiple have same name
+                    category_options = []
+                    category_path_to_id = {}  # Map path to category_id
                     
-                    if category_to_remove:
-                        # Get category info
-                        cat_row = categories_in_area_df[categories_in_area_df['Category'] == category_to_remove]
-                        if not cat_row.empty:
-                            category_id = cat_row.iloc[0]['_category_id']
+                    for idx, row in categories_in_area_df.iterrows():
+                        cat_path = row.get('Category_Path', '')
+                        cat_name = row.get('Category', '')
+                        cat_id = row.get('_category_id')
+                        
+                        if cat_id:  # Only include rows with valid category_id
+                            # Use path as unique identifier
+                            display_name = f"{cat_path}" if cat_path else cat_name
+                            category_options.append(display_name)
+                            category_path_to_id[display_name] = cat_id
+                    
+                    if not category_options:
+                        st.warning("⚠️ No valid categories found.")
+                    else:
+                        # Let user select which category to remove
+                        category_to_remove = st.selectbox(
+                            "Select Category to Remove",
+                            category_options,
+                            help="Select by full path to ensure correct category is removed"
+                        )
+                        
+                        if category_to_remove:
+                            # v1.12.5: Get category_id directly from mapping (no ambiguity)
+                            category_id = category_path_to_id.get(category_to_remove)
                             
-                            # Get dependencies info
-                            try:
-                                # Count children
-                                children = client.table('categories')\
-                                    .select('id')\
-                                    .eq('parent_category_id', category_id)\
-                                    .eq('user_id', user_id)\
-                                    .execute()
-                                children_count = len(children.data) if children.data else 0
-                                
-                                # Count attributes
-                                attrs = client.table('attribute_definitions')\
-                                    .select('id')\
-                                    .eq('category_id', category_id)\
-                                    .eq('user_id', user_id)\
-                                    .execute()
-                                attrs_count = len(attrs.data) if attrs.data else 0
-                                
-                                # Count events
-                                events = client.table('events')\
-                                    .select('id')\
-                                    .eq('category_id', category_id)\
-                                    .eq('user_id', user_id)\
-                                    .execute()
-                                events_count = len(events.data) if events.data else 0
-                                
-                                # Show impact preview
-                                st.markdown("**Impact Preview:**")
-                                col1, col2, col3 = st.columns(3)
-                                with col1:
-                                    if children_count > 0:
-                                        st.success(f"✅ **{children_count}** child categories will be **promoted**")
-                                    else:
-                                        st.info("ℹ️ No child categories")
-                                with col2:
-                                    if attrs_count > 0:
-                                        st.error(f"❌ **{attrs_count}** attributes will be **deleted**")
-                                    else:
-                                        st.success("✅ No attributes")
-                                with col3:
-                                    if events_count > 0:
-                                        st.error(f"❌ **{events_count}** events will be **deleted**")
-                                    else:
-                                        st.success("✅ No events")
-                                
-                                # Confirmation section
-                                st.markdown("---")
-                                st.warning(f"""
-                                **⚠️ Confirm Remove Between:**
-                                
-                                You are about to:
-                                - ❌ Delete category: **{category_to_remove}**
-                                - ❌ Delete {attrs_count} attributes
-                                - ❌ Delete {events_count} events
-                                - ✅ Promote {children_count} child categories
-                                
-                                Type **"REMOVE"** to confirm:
-                                """)
-                                
-                                col1, col2, col3 = st.columns([3, 1, 1])
-                                with col1:
-                                    confirmation = st.text_input(
-                                        "Confirm",
-                                        key="confirm_remove_between",
-                                        placeholder="Type REMOVE"
-                                    )
-                                with col2:
-                                    if st.button("🗑️ Remove", type="primary", disabled=(confirmation != "REMOVE"), use_container_width=True):
-                                        with st.spinner(f"Removing '{category_to_remove}'..."):
-                                            success, msg = remove_category_between(client, user_id, category_id)
-                                            if success:
-                                                st.success(msg)
-                                                # Clear state
-                                                st.cache_data.clear()
-                                                st.session_state.original_df = None
-                                                st.session_state.edited_df = None
-                                                state_mgr.submit_form()
-                                                st.balloons()
-                                                st.rerun()
-                                            else:
-                                                st.error(msg)
-                                with col3:
-                                    # v1.12.1: Cancel button with dynamic key (prevents infinite loop)
-                                    if st.button("↩️ Cancel", key=f"cancel_remove_between_{st.session_state.editor_reset_counter}", type="secondary", use_container_width=True, help="Cancel operation"):
-                                        st.cache_data.clear()
-                                        st.session_state.original_df = None
-                                        st.session_state.edited_df = None
-                                        state_mgr.discard_changes()  # CRITICAL: Sets discard_pending flag!
-                                        st.rerun()
+                            if not category_id:
+                                st.error("❌ Could not identify category. Please refresh and try again.")
+                            else:
+                                # Get the category name for display (last part of path)
+                                cat_name_display = category_to_remove.split(' > ')[-1] if ' > ' in category_to_remove else category_to_remove
                             
-                            except Exception as e:
-                                st.error(f"❌ Error getting dependencies: {str(e)}")
+                                # Get dependencies info
+                                try:
+                                    # Count children
+                                    children = client.table('categories')\
+                                        .select('id')\
+                                        .eq('parent_category_id', category_id)\
+                                        .eq('user_id', user_id)\
+                                        .execute()
+                                    children_count = len(children.data) if children.data else 0
+                                    
+                                    # Count attributes
+                                    attrs = client.table('attribute_definitions')\
+                                        .select('id')\
+                                        .eq('category_id', category_id)\
+                                        .eq('user_id', user_id)\
+                                        .execute()
+                                    attrs_count = len(attrs.data) if attrs.data else 0
+                                    
+                                    # Count events
+                                    events = client.table('events')\
+                                        .select('id')\
+                                        .eq('category_id', category_id)\
+                                        .eq('user_id', user_id)\
+                                        .execute()
+                                    events_count = len(events.data) if events.data else 0
+                                    
+                                    # Show impact preview
+                                    st.markdown("**Impact Preview:**")
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        if children_count > 0:
+                                            st.success(f"✅ **{children_count}** child categories will be **promoted**")
+                                        else:
+                                            st.info("ℹ️ No child categories")
+                                    with col2:
+                                        if attrs_count > 0:
+                                            st.error(f"❌ **{attrs_count}** attributes will be **deleted**")
+                                        else:
+                                            st.success("✅ No attributes")
+                                    with col3:
+                                        if events_count > 0:
+                                            st.error(f"❌ **{events_count}** events will be **deleted**")
+                                        else:
+                                            st.success("✅ No events")
+                                    
+                                    # Confirmation section
+                                    st.markdown("---")
+                                    st.warning(f"""
+                                    **⚠️ Confirm Remove Between:**
+                                    
+                                    You are about to:
+                                    - ❌ Delete category: **{cat_name_display}**
+                                    - ❌ Delete {attrs_count} attributes
+                                    - ❌ Delete {events_count} events
+                                    - ✅ Promote {children_count} child categories
+                                    
+                                    Type **"REMOVE"** to confirm:
+                                    """)
+                                    
+                                    col1, col2, col3 = st.columns([3, 1, 1])
+                                    with col1:
+                                        confirmation = st.text_input(
+                                            "Confirm",
+                                            key="confirm_remove_between",
+                                            placeholder="Type REMOVE"
+                                        )
+                                    with col2:
+                                        if st.button("🗑️ Remove", type="primary", disabled=(confirmation != "REMOVE"), use_container_width=True):
+                                            with st.spinner(f"Removing '{cat_name_display}'..."):
+                                                success, msg = remove_category_between(client, user_id, category_id)
+                                                if success:
+                                                    st.success(msg)
+                                                    # Clear state
+                                                    st.cache_data.clear()
+                                                    st.session_state.original_df = None
+                                                    st.session_state.edited_df = None
+                                                    state_mgr.submit_form()
+                                                    st.balloons()
+                                                    st.rerun()
+                                                else:
+                                                    st.error(msg)
+                                    with col3:
+                                        # v1.12.1: Cancel button with dynamic key (prevents infinite loop)
+                                        if st.button("↩️ Cancel", key=f"cancel_remove_between_{st.session_state.editor_reset_counter}", type="secondary", use_container_width=True, help="Cancel operation"):
+                                            st.cache_data.clear()
+                                            st.session_state.original_df = None
+                                            st.session_state.edited_df = None
+                                            state_mgr.discard_changes()  # CRITICAL: Sets discard_pending flag!
+                                            st.rerun()
+                                
+                                except Exception as e:
+                                    st.error(f"❌ Error getting dependencies: {str(e)}")
         
         # ============================================
         # TAB 3: EDIT ATTRIBUTES
@@ -3304,6 +3344,9 @@ def render_interactive_structure_viewer(client, user_id: str):
                     st.info("ℹ️ No attributes found. Add your first attribute below.")
             else:
                     st.markdown(f"**Viewing {len(attribute_full_df)} attributes**")
+                    
+                    # v1.12.5: Visual indication for editable columns
+                    st.caption("🔓 **Editable:** Attribute_Name, Data_Type, Unit, Is_Required, Default_Value, Validation_Min/Max, Description | 🔒 **Locked:** Type, Level, Sort_Order, Area, Category_Path, Category")
                     
                     # Select relevant columns for Attributes (display only)
                     attr_cols = ['Type', 'Level', 'Sort_Order', 'Area', 'Category_Path', 'Category',

@@ -2,9 +2,19 @@
 Events Tracker - Structure Graph Viewer Module
 ===============================================
 Created: 2025-12-03 13:30 UTC
-Last Modified: 2025-12-05 14:00 UTC
+Last Modified: 2025-12-11 20:30 UTC
 Python: 3.11
-Version: 1.3.0 - Integrated mode with external filter control
+Version: 1.3.1 - FIX: Graphs now work with "All Areas" filter
+
+CHANGELOG v1.3.1 (Critical Fix - All Areas Graph Display):
+- 🐛 CRITICAL FIX: Sunburst/Treemap now display correctly with "All Areas"
+  - ROOT CAUSE: Plotly used 'labels' as unique identifiers
+  - If two categories had same name in different Areas, graph broke
+  - SOLUTION: Added 'ids' parameter with unique node IDs
+  - 'labels' now only for display, 'ids' for parent-child mapping
+- 🔧 Updated build_plotly_tree() to use ids parameter
+- 🔧 Updated build_plotly_sunburst() to use ids parameter
+- ✅ Network Graph already used unique IDs (no change needed)
 
 Description:
 Interactive hierarchical graph visualization of Areas → Categories → Attributes → Events
@@ -241,6 +251,10 @@ def build_plotly_tree(graph_data: Dict) -> go.Figure:
     """
     Build Plotly tree diagram from graph data.
     
+    v1.3.1 FIX: Use 'ids' parameter for unique identification.
+    This fixes the bug where categories with same name in different Areas
+    caused the graph to not render properly.
+    
     Args:
         graph_data: Dictionary with nodes and edges
         
@@ -250,10 +264,9 @@ def build_plotly_tree(graph_data: Dict) -> go.Figure:
     nodes = graph_data['nodes']
     edges = graph_data['edges']
     
-    # Build ID to label mapping
-    id_to_label = {node['id']: node['label'] for node in nodes}
-    
     # Build hierarchy for treemap
+    # v1.3.1: Use separate ids and labels to handle duplicate names
+    ids = []
     labels = []
     parents = []
     values = []
@@ -263,13 +276,15 @@ def build_plotly_tree(graph_data: Dict) -> go.Figure:
     for node in nodes:
         if node['id'] == 'root':
             continue  # Skip root
-            
+        
+        # v1.3.1: Use node ID as unique identifier
+        ids.append(node['id'])
         labels.append(node['label'])
         
-        # Convert parent ID to parent label (Plotly expects labels, not IDs)
+        # Parent ID directly (no label conversion needed with ids parameter)
         parent_id = node.get('parent', '')
-        if parent_id and parent_id in id_to_label:
-            parents.append(id_to_label[parent_id])
+        if parent_id and parent_id != 'root':
+            parents.append(parent_id)
         else:
             parents.append('')  # Top-level node
         
@@ -296,8 +311,9 @@ def build_plotly_tree(graph_data: Dict) -> go.Figure:
             hover_text += f"<br>{node['description']}"
         texts.append(hover_text)
     
-    # Create treemap
+    # Create treemap with ids parameter
     fig = go.Figure(go.Treemap(
+        ids=ids,  # v1.3.1: Unique identifiers
         labels=labels,
         parents=parents,
         values=values,
@@ -333,6 +349,10 @@ def build_plotly_sunburst(graph_data: Dict) -> go.Figure:
     """
     Build Plotly sunburst diagram (circular hierarchy).
     
+    v1.3.1 FIX: Use 'ids' parameter for unique identification.
+    This fixes the bug where categories with same name in different Areas
+    caused the graph to not render properly when "All Areas" is selected.
+    
     Args:
         graph_data: Dictionary with nodes and edges
         
@@ -341,9 +361,8 @@ def build_plotly_sunburst(graph_data: Dict) -> go.Figure:
     """
     nodes = graph_data['nodes']
     
-    # Build ID to label mapping
-    id_to_label = {node['id']: node['label'] for node in nodes}
-    
+    # v1.3.1: Use separate ids and labels to handle duplicate names
+    ids = []
     labels = []
     parents = []
     values = []
@@ -353,13 +372,15 @@ def build_plotly_sunburst(graph_data: Dict) -> go.Figure:
     for node in nodes:
         if node['id'] == 'root':
             continue
-            
+        
+        # v1.3.1: Use node ID as unique identifier
+        ids.append(node['id'])
         labels.append(node['label'])
         
-        # Convert parent ID to parent label (Plotly expects labels, not IDs)
+        # Parent ID directly (no label conversion needed with ids parameter)
         parent_id = node.get('parent', '')
-        if parent_id and parent_id in id_to_label:
-            parents.append(id_to_label[parent_id])
+        if parent_id and parent_id != 'root':
+            parents.append(parent_id)
         else:
             parents.append('')  # Top-level node
         
@@ -380,7 +401,9 @@ def build_plotly_sunburst(graph_data: Dict) -> go.Figure:
         hover_text = f"{icon} {node['label']}"
         texts.append(hover_text)
     
+    # v1.3.1: Create sunburst with ids parameter for unique identification
     fig = go.Figure(go.Sunburst(
+        ids=ids,  # v1.3.1: Unique identifiers
         labels=labels,
         parents=parents,
         values=values,
@@ -390,7 +413,7 @@ def build_plotly_sunburst(graph_data: Dict) -> go.Figure:
         ),
         text=texts,
         hovertemplate='%{text}<br>%{label}<extra></extra>',
-        branchvalues='remainder',  # Changed from 'total' to 'remainder'
+        branchvalues='remainder',
         textfont=dict(size=14, color='white')
     ))
     
