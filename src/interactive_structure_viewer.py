@@ -2,9 +2,16 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-11 13:00 UTC
+Last Modified: 2025-12-11 14:00 UTC
 Python: 3.11
-Version: 1.12.3 - COMPLETE REWRITE: Insert Category Between
+Version: 1.12.4 - FIX: Remove Category Between safety checks
+
+CHANGELOG v1.12.4 (Remove Category Between - Safety Improvements):
+- 🛡️ SAFETY: Added grandchildren check - blocks removal if children have sub-categories
+- 🛡️ SAFETY: Added name conflict check - prevents duplicate names after promotion
+- 📝 IMPROVED: Shows promoted category names in success message
+- 🔧 FIXED: Promote children BEFORE deletion (correct operation order)
+- 🔧 FIXED: Better error handling with specific failure messages
 
 CHANGELOG v1.12.3 (Insert Category Between - Complete Rewrite):
 - 🔄 COMPLETE REWRITE: insert_category_between() function
@@ -1717,7 +1724,7 @@ def remove_category_between(
     """
     Remove category and promote its children to parent level.
     
-    NEW FEATURE in v1.10.0 - Remove Between
+    v1.12.4 - Enhanced with better safety checks and transaction-like behavior.
     
     This "removes the middle layer" - deletes a category but keeps its
     children by promoting them up one level to the deleted category's parent.
@@ -1725,6 +1732,10 @@ def remove_category_between(
     WARNING: This will also delete:
     - All attributes attached to this category
     - All events in this category
+    
+    SAFETY: Will NOT delete if:
+    - Category has grandchildren (too complex, use regular delete)
+    - Promotion would create duplicate names under same parent
     
     Args:
         client: Supabase client
@@ -1735,9 +1746,9 @@ def remove_category_between(
         Tuple of (success, message)
     """
     try:
-        # Get category info
+        # 1. Get category info
         category = client.table('categories')\
-            .select('name, parent_category_id, level')\
+            .select('id, name, parent_category_id, area_id, level')\
             .eq('id', category_id)\
             .eq('user_id', user_id)\
             .single().execute()
@@ -1747,53 +1758,104 @@ def remove_category_between(
         
         cat_name = category.data['name']
         parent_id = category.data['parent_category_id']
+        cat_level = category.data['level']
+        area_id = category.data['area_id']
         
-        # Get children
+        # 2. Get direct children
         children = client.table('categories')\
-            .select('id, name')\
+            .select('id, name, level')\
             .eq('parent_category_id', category_id)\
             .eq('user_id', user_id)\
             .execute()
         
-        # Promote children to parent's level (remove the middle)
-        if children.data:
-            for child in children.data:
-                client.table('categories')\
-                    .update({
-                        'parent_category_id': parent_id,
-                        'level': category.data['level']  # Same level as deleted category
-                    })\
-                    .eq('id', child['id'])\
-                    .eq('user_id', user_id)\
-                    .execute()
+        children_data = children.data if children.data else []
+        children_count = len(children_data)
         
-        # Delete attributes (CASCADE will handle event_attributes)
+        # 3. SAFETY CHECK: Check for grandchildren (children of children)
+        # If any child has children, this operation is too complex
+        for child in children_data:
+            grandchildren = client.table('categories')\
+                .select('id')\
+                .eq('parent_category_id', child['id'])\
+                .eq('user_id', user_id)\
+                .limit(1)\
+                .execute()
+            
+            if grandchildren.data and len(grandchildren.data) > 0:
+                return False, f"❌ Cannot remove '{cat_name}' - child '{child['name']}' has sub-categories. Use regular Delete instead."
+        
+        # 4. SAFETY CHECK: Check for name conflicts after promotion
+        # Get existing children of the new parent (siblings after promotion)
+        if parent_id:
+            existing_siblings = client.table('categories')\
+                .select('name')\
+                .eq('parent_category_id', parent_id)\
+                .eq('user_id', user_id)\
+                .neq('id', category_id)\
+                .execute()
+        else:
+            # Will become root categories
+            existing_siblings = client.table('categories')\
+                .select('name')\
+                .eq('area_id', area_id)\
+                .eq('user_id', user_id)\
+                .is_('parent_category_id', 'null')\
+                .neq('id', category_id)\
+                .execute()
+        
+        existing_names = set(s['name'] for s in (existing_siblings.data or []))
+        for child in children_data:
+            if child['name'] in existing_names:
+                return False, f"❌ Cannot promote - '{child['name']}' would conflict with existing category at target level"
+        
+        # 5. PROMOTE CHILDREN FIRST (before any deletion!)
+        promoted_children = []
+        for child in children_data:
+            update_result = client.table('categories')\
+                .update({
+                    'parent_category_id': parent_id,
+                    'level': cat_level  # Same level as the category being deleted
+                })\
+                .eq('id', child['id'])\
+                .eq('user_id', user_id)\
+                .execute()
+            
+            if update_result.data:
+                promoted_children.append(child['name'])
+            else:
+                # Rollback is not easy, but at least report the error
+                return False, f"❌ Failed to promote child '{child['name']}'. Operation aborted."
+        
+        # 6. Delete attributes for THIS category only
         client.table('attribute_definitions')\
             .delete()\
             .eq('category_id', category_id)\
             .eq('user_id', user_id)\
             .execute()
         
-        # Delete events
+        # 7. Delete events for THIS category only
         client.table('events')\
             .delete()\
             .eq('category_id', category_id)\
             .eq('user_id', user_id)\
             .execute()
         
-        # Delete category
-        client.table('categories')\
+        # 8. Finally delete the category
+        delete_result = client.table('categories')\
             .delete()\
             .eq('id', category_id)\
             .eq('user_id', user_id)\
             .execute()
         
-        # Clear cache - use the actual cached function
+        if not delete_result.data:
+            return False, f"❌ Failed to delete category '{cat_name}'"
+        
+        # Clear cache
         load_all_structure_data.clear()
         
         msg = f"✅ Removed '{cat_name}'"
-        if len(children.data) > 0:
-            msg += f" and promoted {len(children.data)} child categories"
+        if children_count > 0:
+            msg += f" and promoted {children_count} child categories: {', '.join(promoted_children)}"
         
         return True, msg
         
