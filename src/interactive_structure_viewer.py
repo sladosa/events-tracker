@@ -2,9 +2,22 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-11 11:00 UTC
+Last Modified: 2025-12-11 12:00 UTC
 Python: 3.11
-Version: 1.12.1 - HOTFIX: Fixed .clear() call on non-cached function
+Version: 1.12.2 - FIX: Insert Category logic + Cancel button loops
+
+CHANGELOG v1.12.2 (Fixes):
+- 🐛 FIXED: "Insert Category Between" now correctly adds as CHILD of selected category
+  - ROOT CAUSE: Old logic used selected category's PARENT (sibling insert)
+  - User expected: SubTEST > NewCategory (child relationship)
+  - Old result: SubTEST, NewCategory (sibling relationship)
+  - SOLUTION: Changed to use add_new_category() with selected category as parent
+- 🔧 RENAMED: "Insert Category Between" → "Insert Category (As Child)"
+  - Clearer terminology prevents confusion
+  - Dropdown now says "Parent Category" instead of "Insert After"
+  - Option "As Root Category (Level 1)" instead of "At Beginning"
+- 🐛 FIXED: Cancel button in Remove Category Between - dynamic key prevents loop
+  - Pattern: key=f"cancel_remove_between_{editor_reset_counter}"
 
 CHANGELOG v1.12.1 (HOTFIX):
 - 🐛 FIXED: "function object has no attribute 'clear'" error in Insert Category Between
@@ -2941,8 +2954,10 @@ def render_interactive_structure_viewer(client, user_id: str):
             st.markdown("---")
             
             # NEW FEATURE v1.10.0: Insert Category Between
-            with st.expander("📌 Insert Category Between", expanded=False):
-                st.info("💡 Insert a new category between existing ones without disrupting data")
+            # v1.12.2: Fixed terminology and logic
+            with st.expander("📌 Insert Category (As Child)", expanded=False):
+                st.info("💡 **Add a new category as a child** of an existing category, or as a root category")
+                st.caption("Example: Select 'SubTEST' to create new category under SubTEST → NewCategory")
                 
                 # Get categories in filtered area
                 categories_in_area_df = filtered_df[filtered_df['Type'] == 'Category'].copy()
@@ -2955,28 +2970,28 @@ def render_interactive_structure_viewer(client, user_id: str):
                         st.session_state.insert_between_counter = 0
                     
                     with st.form(f"insert_category_form_{st.session_state.insert_between_counter}"):
-                        # Build position options
-                        cat_options = ['At Beginning'] + categories_in_area_df['Category'].tolist()
-                        insert_after = st.selectbox(
-                            "Insert After",
+                        # Build position options - clearer terminology
+                        cat_options = ['As Root Category (Level 1)'] + categories_in_area_df['Category'].tolist()
+                        parent_selection = st.selectbox(
+                            "Parent Category",
                             cat_options,
-                            help="Select where to insert the new category"
+                            help="Select parent for the new category. Choose 'As Root Category' for top-level category."
                         )
                         
                         name = st.text_input("New Category Name *", placeholder="e.g., Intermediate Training", max_chars=100)
                         description = st.text_area("Description (optional)", placeholder="Optional description...", max_chars=500)
                         
-                        submitted = st.form_submit_button("📌 Insert Category", use_container_width=True)
+                        submitted = st.form_submit_button("📌 Add Category", use_container_width=True)
                         
                         if submitted:
                             if not name:
                                 st.error("❌ Category name is required")
                             else:
-                                # v1.12.0: Better error handling for Insert Between
+                                # v1.12.2: Simplified logic - parent_selection determines parent
                                 try:
-                                    # Determine insert_after_id and area_id
-                                    if insert_after == 'At Beginning':
-                                        insert_after_id = None
+                                    # Determine parent_id and area_id
+                                    if parent_selection == 'As Root Category (Level 1)':
+                                        parent_id = None  # Root category has no parent
                                         # Get area_id from first category in filtered view
                                         if categories_in_area_df.empty:
                                             st.error("❌ No categories available to determine area")
@@ -2986,22 +3001,23 @@ def render_interactive_structure_viewer(client, user_id: str):
                                             st.stop()
                                         area_id = categories_in_area_df.iloc[0]['_area_id']
                                     else:
-                                        cat_row = categories_in_area_df[categories_in_area_df['Category'] == insert_after]
+                                        # Selected category becomes the PARENT
+                                        cat_row = categories_in_area_df[categories_in_area_df['Category'] == parent_selection]
                                         if cat_row.empty:
-                                            st.error(f"❌ Selected category '{insert_after}' not found")
+                                            st.error(f"❌ Selected category '{parent_selection}' not found")
                                             st.stop()
-                                        insert_after_id = cat_row.iloc[0]['_category_id']
+                                        parent_id = cat_row.iloc[0]['_category_id']  # THIS is the parent!
                                         area_id = cat_row.iloc[0]['_area_id']
                                     
-                                    # Validate we have valid UUIDs
+                                    # Validate we have valid area_id
                                     if not area_id:
                                         st.error("❌ Could not determine area ID")
                                         st.stop()
                                     
-                                    # Call insert function
-                                    with st.spinner("Inserting category..."):
-                                        success, msg = insert_category_between(
-                                            client, user_id, area_id, insert_after_id, name, description
+                                    # Call the standard add_new_category function (not insert_between)
+                                    with st.spinner("Adding category..."):
+                                        success, msg = add_new_category(
+                                            client, user_id, area_id, name, description, parent_id
                                         )
                                         
                                         if success:
@@ -3136,9 +3152,8 @@ def render_interactive_structure_viewer(client, user_id: str):
                                             else:
                                                 st.error(msg)
                                 with col3:
-                                    # v1.11.0: Cancel button
-                                    # v1.11.4: Must use state_mgr.discard_changes() to set discard_pending flag!
-                                    if st.button("↩️ Cancel", key="cancel_remove_between", type="secondary", use_container_width=True, help="Cancel operation"):
+                                    # v1.12.1: Cancel button with dynamic key (prevents infinite loop)
+                                    if st.button("↩️ Cancel", key=f"cancel_remove_between_{st.session_state.editor_reset_counter}", type="secondary", use_container_width=True, help="Cancel operation"):
                                         st.cache_data.clear()
                                         st.session_state.original_df = None
                                         st.session_state.edited_df = None
