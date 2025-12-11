@@ -9,11 +9,10 @@ Features:
 - Form state tracking
 - v1.1.0: Added discard_pending flag to prevent false positive detection after discard
 - v1.1.1: Added editor_reset_counter increment in _clear_editor_state()
-- v1.2.0: Added filter_sync_needed flag for UI synchronization
 
 Dependencies: dataclasses, typing
 
-Last Modified: 2025-12-11 10:00 UTC
+Last Modified: 2025-12-10 21:00 UTC
 """
 
 from dataclasses import dataclass, field
@@ -31,9 +30,6 @@ class AppState:
     # v1.1.0: Flag to prevent false positive detection immediately after discard
     # This flag persists for ONE full render cycle, then is cleared at the end
     discard_pending: bool = False
-    # v1.2.0: Flag to track if filter UI needs sync after state change
-    # This prevents the filter-detection timing issue
-    filter_sync_needed: bool = False
     
     @property
     def is_viewing(self) -> bool:
@@ -68,7 +64,6 @@ class AppState:
         self.active_tab = None
         self.form_data = {}
         self.discard_pending = False
-        self.filter_sync_needed = False
     
     def transition_to_editing(self):
         """Clean transition to editing state"""
@@ -76,7 +71,6 @@ class AppState:
         self.operation = None
         self.has_changes = False
         self.form_data = {}
-        self.filter_sync_needed = False
         # Don't clear discard_pending here - it's cleared at end of render cycle
     
     def transition_to_modifying(self, tab: str):
@@ -86,7 +80,6 @@ class AppState:
         self.has_changes = True
         self.active_tab = tab
         self.discard_pending = False
-        self.filter_sync_needed = False
     
     def transition_to_adding(self, tab: str):
         """Transition when user opens add form"""
@@ -166,34 +159,14 @@ class StateManager:
         """Form submitted successfully"""
         self.state.transition_to_editing()
         self.state.form_data = {}
-        self._clear_editor_state()  # v1.2.0: Also clear editor state after form submit
         return True, "Item added successfully"
-    
-    def request_filter_sync(self):
-        """
-        v1.2.0: Request a UI sync (rerun) because has_changes state changed.
-        This ensures filters reflect the current state.
-        """
-        self.state.filter_sync_needed = True
-    
-    def clear_filter_sync(self):
-        """Clear the filter sync request flag"""
-        self.state.filter_sync_needed = False
     
     def _clear_editor_state(self):
         """Clear all editor-related state variables"""
         # v1.11.4: Increment counter to force data_editor widget reset
         # This changes the widget key, forcing Streamlit to create fresh widgets
-        if 'editor_reset_counter' in self.session_state:
+        if hasattr(self.session_state, 'editor_reset_counter'):
             self.session_state.editor_reset_counter += 1
-        else:
-            self.session_state.editor_reset_counter = 1
-        
-        # v1.2.0: Also increment form counters to reset form widgets
-        for counter_name in ['area_form_counter', 'category_form_counter', 
-                            'attribute_form_counter', 'insert_between_counter']:
-            if counter_name in self.session_state:
-                self.session_state[counter_name] += 1
         
         # Clear old state variables (backward compatibility)
         if hasattr(self.session_state, 'original_df'):
