@@ -2,24 +2,27 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-11 12:00 UTC
+Last Modified: 2025-12-11 13:00 UTC
 Python: 3.11
-Version: 1.12.2 - FIX: Insert Category logic + Cancel button loops
+Version: 1.12.3 - COMPLETE REWRITE: Insert Category Between
+
+CHANGELOG v1.12.3 (Insert Category Between - Complete Rewrite):
+- 🔄 COMPLETE REWRITE: insert_category_between() function
+  - OLD behavior: Inserted as SIBLING (same level as target)
+  - NEW behavior: Inserted as NEW PARENT (one level above target)
+  - Example: Insert "SSL" before "A_test" in `Automobili > A_test`
+    - OLD result: `Automobili > SSL, A_test` (siblings)
+    - NEW result: `Automobili > SSL > A_test` (SSL is parent of A_test)
+- 🆕 NEW: _increment_descendant_levels() helper function
+  - Recursively increments level for all descendants
+  - Called after target category's parent is changed
+- 🎨 IMPROVED UI:
+  - Shows Category_Path in dropdown for clarity
+  - Preview shows what the new path will look like
+  - Better help text explaining the operation
+- 🐛 FIXED: Cancel button in Remove Between - dynamic key prevents loop
 
 CHANGELOG v1.12.2 (Fixes):
-- 🐛 FIXED: "Insert Category Between" now correctly adds as CHILD of selected category
-  - ROOT CAUSE: Old logic used selected category's PARENT (sibling insert)
-  - User expected: SubTEST > NewCategory (child relationship)
-  - Old result: SubTEST, NewCategory (sibling relationship)
-  - SOLUTION: Changed to use add_new_category() with selected category as parent
-- 🔧 RENAMED: "Insert Category Between" → "Insert Category (As Child)"
-  - Clearer terminology prevents confusion
-  - Dropdown now says "Parent Category" instead of "Insert After"
-  - Option "As Root Category (Level 1)" instead of "At Beginning"
-- 🐛 FIXED: Cancel button in Remove Category Between - dynamic key prevents loop
-  - Pattern: key=f"cancel_remove_between_{editor_reset_counter}"
-
-CHANGELOG v1.12.1 (HOTFIX):
 - 🐛 FIXED: "function object has no attribute 'clear'" error in Insert Category Between
   - ROOT CAUSE: load_structure_as_dataframe() is NOT decorated with @st.cache_data
   - Only load_all_structure_data() has the cache decorator
@@ -1579,21 +1582,32 @@ def add_new_category(
 def insert_category_between(
     client,
     user_id: str,
-    area_id: str,
-    insert_after_category_id: Optional[str],
+    target_category_id: str,
     name: str,
     description: str = ""
 ) -> Tuple[bool, str]:
     """
-    Insert new category between existing ones (preserves sort order).
+    Insert new category BETWEEN a category and its parent.
     
-    NEW FEATURE in v1.10.0 - Insert Between
+    v1.12.3 - Complete rewrite for correct "Insert Parent" behavior.
+    
+    This inserts a NEW category that becomes the new parent of the target category.
+    The target category (and all its children) move down one level.
+    
+    Example:
+        BEFORE: Automobili > A_test > A_test2
+        INSERT "SSL" before "A_test"
+        AFTER:  Automobili > SSL > A_test > A_test2
+        
+    The operation:
+    1. Create SSL with parent = Automobili (A_test's old parent)
+    2. Change A_test's parent to SSL
+    3. Increment level for A_test and ALL its descendants
     
     Args:
         client: Supabase client
         user_id: User ID
-        area_id: Area UUID
-        insert_after_category_id: Category to insert after (None = at beginning)
+        target_category_id: Category that will become child of new category
         name: New category name
         description: Category description
     
@@ -1601,89 +1615,98 @@ def insert_category_between(
         Tuple of (success, message)
     """
     try:
-        # Determine parent_category_id and insert position
-        parent_id = None
-        insert_order = 0
-        
-        if insert_after_category_id:
-            # Get the category we're inserting after
-            cat_after = client.table('categories')\
-                .select('parent_category_id, sort_order')\
-                .eq('id', insert_after_category_id)\
-                .eq('user_id', user_id)\
-                .single().execute()
-            
-            if not cat_after.data:
-                return False, "❌ Reference category not found"
-            
-            parent_id = cat_after.data['parent_category_id']
-            insert_order = cat_after.data['sort_order']
-        
-        # Get categories that need to be reordered (all after insert point)
-        query = client.table('categories')\
-            .select('id, sort_order, parent_category_id')\
-            .eq('area_id', area_id)\
+        # 1. Get target category info
+        target = client.table('categories')\
+            .select('id, name, parent_category_id, area_id, level, sort_order')\
+            .eq('id', target_category_id)\
             .eq('user_id', user_id)\
-            .gte('sort_order', insert_order + 1)\
-            .order('sort_order')
+            .single().execute()
         
-        categories_to_reorder = query.execute()
+        if not target.data:
+            return False, "❌ Target category not found"
         
-        # Filter by same parent (important for correct sibling ordering)
-        if parent_id:
-            to_reorder = [c for c in categories_to_reorder.data 
-                         if c.get('parent_category_id') == parent_id]
-        else:
-            to_reorder = [c for c in categories_to_reorder.data 
-                         if c.get('parent_category_id') is None]
+        target_name = target.data['name']
+        old_parent_id = target.data['parent_category_id']
+        area_id = target.data['area_id']
+        target_level = target.data['level']
+        target_sort_order = target.data['sort_order']
         
-        # Increment sort_order for all categories after insert point
-        for cat in to_reorder:
-            client.table('categories')\
-                .update({'sort_order': cat['sort_order'] + 1})\
-                .eq('id', cat['id'])\
-                .eq('user_id', user_id)\
-                .execute()
-        
-        # Calculate level
-        level = 1
-        if parent_id:
-            parent = client.table('categories')\
-                .select('level')\
-                .eq('id', parent_id)\
-                .eq('user_id', user_id)\
-                .single().execute()
-            
-            if parent.data:
-                level = parent.data['level'] + 1
-        
-        # Generate slug
+        # 2. Generate new category data
+        new_id = str(uuid.uuid4())
         slug = generate_slug(name)
         
-        # Insert new category at the correct position
         new_category = {
-            'id': str(uuid.uuid4()),
+            'id': new_id,
             'user_id': user_id,
             'area_id': area_id,
-            'parent_category_id': parent_id,
+            'parent_category_id': old_parent_id,  # Takes target's old parent
             'name': name,
             'slug': slug,
             'description': description if description else None,
-            'level': level,
-            'sort_order': insert_order + 1
+            'level': target_level,  # Same level as target (will push target down)
+            'sort_order': target_sort_order  # Same sort order as target
         }
         
+        # 3. Insert new category
         result = client.table('categories').insert(new_category).execute()
         
-        if result.data and len(result.data) > 0:
-            # Clear cache - use the actual cached function
-            load_all_structure_data.clear()
-            return True, f"✅ Category '{name}' inserted successfully!"
-        else:
-            return False, f"❌ Failed to insert category"
+        if not result.data or len(result.data) == 0:
+            return False, "❌ Failed to create new category"
+        
+        # 4. Update target category - new parent is the inserted category
+        client.table('categories')\
+            .update({
+                'parent_category_id': new_id,
+                'level': target_level + 1
+            })\
+            .eq('id', target_category_id)\
+            .eq('user_id', user_id)\
+            .execute()
+        
+        # 5. Recursively increment level for ALL descendants of target
+        _increment_descendant_levels(client, user_id, target_category_id)
+        
+        # Clear cache
+        load_all_structure_data.clear()
+        
+        return True, f"✅ Inserted '{name}' above '{target_name}'"
         
     except Exception as e:
         return False, f"❌ Error inserting category: {str(e)}"
+
+
+def _increment_descendant_levels(client, user_id: str, parent_id: str):
+    """
+    Recursively increment level for all descendants of a category.
+    
+    Helper function for insert_category_between.
+    Called AFTER the parent's level has been updated.
+    
+    Args:
+        client: Supabase client
+        user_id: User ID
+        parent_id: Parent category whose children need level updates
+    """
+    # Get all direct children
+    children = client.table('categories')\
+        .select('id, level')\
+        .eq('parent_category_id', parent_id)\
+        .eq('user_id', user_id)\
+        .execute()
+    
+    if not children.data:
+        return
+    
+    for child in children.data:
+        # Increment this child's level
+        client.table('categories')\
+            .update({'level': child['level'] + 1})\
+            .eq('id', child['id'])\
+            .eq('user_id', user_id)\
+            .execute()
+        
+        # Recursively process this child's children
+        _increment_descendant_levels(client, user_id, child['id'])
 
 
 def remove_category_between(
@@ -2953,71 +2976,83 @@ def render_interactive_structure_viewer(client, user_id: str):
                 
             st.markdown("---")
             
-            # NEW FEATURE v1.10.0: Insert Category Between
-            # v1.12.2: Fixed terminology and logic
-            with st.expander("📌 Insert Category (As Child)", expanded=False):
-                st.info("💡 **Add a new category as a child** of an existing category, or as a root category")
-                st.caption("Example: Select 'SubTEST' to create new category under SubTEST → NewCategory")
+            # v1.12.3: TRUE "Insert Category Between" - inserts as NEW PARENT
+            with st.expander("📌 Insert Category Between", expanded=False):
+                st.warning("""
+                💡 **Insert a category BETWEEN an existing category and its parent.**
+                
+                The new category becomes the **new parent** of the selected category.
+                All children of the selected category stay attached to it.
+                """)
+                
+                st.caption("""
+                **Example:** If you have `Automobili > A_test > A_test2`  
+                and insert "SSL" before "A_test", you get:  
+                `Automobili > SSL > A_test > A_test2`
+                """)
                 
                 # Get categories in filtered area
                 categories_in_area_df = filtered_df[filtered_df['Type'] == 'Category'].copy()
                 
                 if categories_in_area_df.empty:
-                    st.warning("⚠️ No categories in current filter. Use 'Add New Category' instead.")
+                    st.warning("⚠️ No categories in current filter.")
                 else:
                     # Initialize form counter
                     if 'insert_between_counter' not in st.session_state:
                         st.session_state.insert_between_counter = 0
                     
                     with st.form(f"insert_category_form_{st.session_state.insert_between_counter}"):
-                        # Build position options - clearer terminology
-                        cat_options = ['As Root Category (Level 1)'] + categories_in_area_df['Category'].tolist()
-                        parent_selection = st.selectbox(
-                            "Parent Category",
-                            cat_options,
-                            help="Select parent for the new category. Choose 'As Root Category' for top-level category."
+                        # Show Category_Path for clarity
+                        cat_display_options = []
+                        cat_id_map = {}
+                        for idx, row in categories_in_area_df.iterrows():
+                            display_name = f"{row['Category']} ({row['Category_Path']})"
+                            cat_display_options.append(display_name)
+                            cat_id_map[display_name] = row['_category_id']
+                        
+                        target_selection = st.selectbox(
+                            "Insert NEW category BEFORE:",
+                            cat_display_options,
+                            help="The selected category will become a CHILD of the new category"
                         )
                         
-                        name = st.text_input("New Category Name *", placeholder="e.g., Intermediate Training", max_chars=100)
+                        name = st.text_input("New Category Name *", placeholder="e.g., SSL, Intermediate", max_chars=100)
                         description = st.text_area("Description (optional)", placeholder="Optional description...", max_chars=500)
                         
-                        submitted = st.form_submit_button("📌 Add Category", use_container_width=True)
+                        # Preview what will happen
+                        if target_selection and name:
+                            selected_row = categories_in_area_df[
+                                categories_in_area_df['_category_id'] == cat_id_map.get(target_selection)
+                            ]
+                            if not selected_row.empty:
+                                old_path = selected_row.iloc[0]['Category_Path']
+                                # Build new path preview
+                                path_parts = old_path.split(' > ')
+                                if len(path_parts) >= 2:
+                                    new_path = ' > '.join(path_parts[:-1]) + f' > {name} > ' + path_parts[-1]
+                                else:
+                                    new_path = f"{name} > {path_parts[0]}"
+                                st.info(f"📍 **Preview:** `{new_path}`")
+                        
+                        submitted = st.form_submit_button("📌 Insert Category", use_container_width=True)
                         
                         if submitted:
                             if not name:
                                 st.error("❌ Category name is required")
+                            elif not target_selection:
+                                st.error("❌ Please select a category")
                             else:
-                                # v1.12.2: Simplified logic - parent_selection determines parent
                                 try:
-                                    # Determine parent_id and area_id
-                                    if parent_selection == 'As Root Category (Level 1)':
-                                        parent_id = None  # Root category has no parent
-                                        # Get area_id from first category in filtered view
-                                        if categories_in_area_df.empty:
-                                            st.error("❌ No categories available to determine area")
-                                            st.stop()
-                                        if '_area_id' not in categories_in_area_df.columns:
-                                            st.error("❌ Internal error: _area_id column not found")
-                                            st.stop()
-                                        area_id = categories_in_area_df.iloc[0]['_area_id']
-                                    else:
-                                        # Selected category becomes the PARENT
-                                        cat_row = categories_in_area_df[categories_in_area_df['Category'] == parent_selection]
-                                        if cat_row.empty:
-                                            st.error(f"❌ Selected category '{parent_selection}' not found")
-                                            st.stop()
-                                        parent_id = cat_row.iloc[0]['_category_id']  # THIS is the parent!
-                                        area_id = cat_row.iloc[0]['_area_id']
+                                    target_category_id = cat_id_map.get(target_selection)
                                     
-                                    # Validate we have valid area_id
-                                    if not area_id:
-                                        st.error("❌ Could not determine area ID")
+                                    if not target_category_id:
+                                        st.error("❌ Could not find selected category")
                                         st.stop()
                                     
-                                    # Call the standard add_new_category function (not insert_between)
-                                    with st.spinner("Adding category..."):
-                                        success, msg = add_new_category(
-                                            client, user_id, area_id, name, description, parent_id
+                                    # Call the insert function
+                                    with st.spinner("Inserting category..."):
+                                        success, msg = insert_category_between(
+                                            client, user_id, target_category_id, name, description
                                         )
                                         
                                         if success:
