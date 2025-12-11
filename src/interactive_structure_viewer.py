@@ -2,9 +2,16 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-11 10:00 UTC
+Last Modified: 2025-12-11 11:00 UTC
 Python: 3.11
-Version: 1.12.0 - FIX: Filter synchronization + Form Discard buttons + Insert Category
+Version: 1.12.1 - HOTFIX: Fixed .clear() call on non-cached function
+
+CHANGELOG v1.12.1 (HOTFIX):
+- 🐛 FIXED: "function object has no attribute 'clear'" error in Insert Category Between
+  - ROOT CAUSE: load_structure_as_dataframe() is NOT decorated with @st.cache_data
+  - Only load_all_structure_data() has the cache decorator
+  - SOLUTION: Removed redundant .clear() calls (st.cache_data.clear() already clears everything)
+  - Fixed in: insert_category_between(), remove_category_between(), UI handlers
 
 CHANGELOG v1.12.0 (CRITICAL - 5 Bug Fixes):
 - 🐛 BUG #1 FIXED: Filters not disabling after 2nd+ edit operation
@@ -1656,8 +1663,8 @@ def insert_category_between(
         result = client.table('categories').insert(new_category).execute()
         
         if result.data and len(result.data) > 0:
-            # Clear cache
-            load_structure_as_dataframe.clear()
+            # Clear cache - use the actual cached function
+            load_all_structure_data.clear()
             return True, f"✅ Category '{name}' inserted successfully!"
         else:
             return False, f"❌ Failed to insert category"
@@ -1745,8 +1752,8 @@ def remove_category_between(
             .eq('user_id', user_id)\
             .execute()
         
-        # Clear cache
-        load_structure_as_dataframe.clear()
+        # Clear cache - use the actual cached function
+        load_all_structure_data.clear()
         
         msg = f"✅ Removed '{cat_name}'"
         if len(children.data) > 0:
@@ -3002,7 +3009,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                                             st.session_state.insert_between_counter += 1
                                             # Clear cache
                                             st.cache_data.clear()
-                                            load_structure_as_dataframe.clear()
                                             st.session_state.original_df = None
                                             st.session_state.edited_df = None
                                             state_mgr.submit_form()
@@ -3122,7 +3128,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                                                 st.success(msg)
                                                 # Clear state
                                                 st.cache_data.clear()
-                                                load_structure_as_dataframe.clear()
                                                 st.session_state.original_df = None
                                                 st.session_state.edited_df = None
                                                 state_mgr.submit_form()
