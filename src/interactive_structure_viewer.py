@@ -2,9 +2,22 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-11 20:00 UTC
+Last Modified: 2025-12-11 21:00 UTC
 Python: 3.11
-Version: 1.12.5 - FIX: Remove Category Between unique identification
+Version: 1.12.6 - FIX: Remove Category Between widget reset
+
+CHANGELOG v1.12.6 (Remove Category Between - Widget Reset Fix):
+- 🐛 CRITICAL FIX: Prevent accidental deletion of next category after successful removal
+  - ROOT CAUSE: After st.rerun(), text_input retained "REMOVE" value (fixed key)
+  - Selectbox automatically selected first option (different category)
+  - If user double-clicked or race condition, wrong category could be deleted
+  - SOLUTION: Dynamic keys for ALL widgets in Remove Between section:
+    - selectbox: key=f"select_remove_between_{counter}"
+    - text_input: key=f"confirm_remove_between_{counter}"
+    - Remove button: key=f"btn_remove_between_{counter}"
+- ✅ After successful operation, submit_form() increments counter
+- ✅ New keys force fresh widget instances with empty/default values
+- ✅ No more accidental cascading deletions
 
 CHANGELOG v1.12.5 (Remove Category Between - Critical Fix):
 - 🐛 CRITICAL FIX: Remove Category Between now uses Category_Path for unique identification
@@ -3191,9 +3204,11 @@ def render_interactive_structure_viewer(client, user_id: str):
                         st.warning("⚠️ No valid categories found.")
                     else:
                         # Let user select which category to remove
+                        # v1.12.6: Dynamic key ensures widget resets after successful operation
                         category_to_remove = st.selectbox(
                             "Select Category to Remove",
                             category_options,
+                            key=f"select_remove_between_{st.session_state.editor_reset_counter}",
                             help="Select by full path to ensure correct category is removed"
                         )
                         
@@ -3268,13 +3283,15 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     
                                     col1, col2, col3 = st.columns([3, 1, 1])
                                     with col1:
+                                        # v1.12.6: Dynamic key resets text input after successful operation
                                         confirmation = st.text_input(
                                             "Confirm",
-                                            key="confirm_remove_between",
+                                            key=f"confirm_remove_between_{st.session_state.editor_reset_counter}",
                                             placeholder="Type REMOVE"
                                         )
                                     with col2:
-                                        if st.button("🗑️ Remove", type="primary", disabled=(confirmation != "REMOVE"), use_container_width=True):
+                                        # v1.12.6: Dynamic key prevents accidental re-execution after rerun
+                                        if st.button("🗑️ Remove", type="primary", disabled=(confirmation != "REMOVE"), use_container_width=True, key=f"btn_remove_between_{st.session_state.editor_reset_counter}"):
                                             with st.spinner(f"Removing '{cat_name_display}'..."):
                                                 success, msg = remove_category_between(client, user_id, category_id)
                                                 if success:
