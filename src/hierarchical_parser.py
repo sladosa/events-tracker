@@ -10,9 +10,15 @@ Features:
 - Create hierarchical structure from Category_Path
 - Show detailed diff of changes
 - Apply changes atomically to database
+- **v2.1:** Batch inserts for improved performance
+- **v2.2:** Enhanced validation with common mistake detection:
+  - Category name must match last part of Category_Path
+  - Attribute's Category must match parent category name  
+  - Duplicate Category_Path detection in upload file
+  - Clear error messages with fix suggestions
 
 Dependencies: pandas, openpyxl, supabase
-Last Modified: 2025-11-22 12:00 UTC
+Last Modified: 2025-12-12 12:45 UTC
 """
 
 import pandas as pd
@@ -245,7 +251,14 @@ class HierarchicalParser:
             return ""
     
     def _validate_data_format(self):
-        """Validate data format and required columns."""
+        """
+        Validate data format and required columns.
+        
+        v2.1: Enhanced with common mistake detection:
+        - Category name must match last part of Category_Path
+        - Attribute's Category must match parent category name
+        - Duplicate Category_Path detection
+        """
         required_columns = ['Type', 'Category_Path', 'Level', 'Sort_Order']
         
         # Check required columns exist
@@ -256,6 +269,9 @@ class HierarchicalParser:
             )
             # Don't continue if columns are missing - can't validate rows
             return
+        
+        # Track Category_Paths for duplicate detection
+        seen_paths: Dict[str, int] = {}  # path_lower -> first_row
         
         # Validate each row (up to MAX_ERRORS)
         for idx, row in self.df.iterrows():
@@ -294,6 +310,24 @@ class HierarchicalParser:
                 self.changes.validation_errors.append(
                     ValidationError(excel_row, "Category_Path", "Category_Path is required", "error")
                 )
+                continue
+            
+            # COMMON MISTAKE #4: Duplicate Category_Path in upload
+            path_key = cat_path.lower()
+            if row_type in ('Area', 'Category'):  # Only check for areas and categories, not attributes
+                if path_key in seen_paths:
+                    first_row = seen_paths[path_key]
+                    self.changes.validation_errors.append(
+                        ValidationError(excel_row, "Category_Path", 
+                                      f"Duplicate Category_Path! Same path already exists in row {first_row}. "
+                                      f"Each Area/Category path must be unique.", "error")
+                    )
+                else:
+                    seen_paths[path_key] = excel_row
+            
+            # Parse path parts for validation
+            path_parts = [p.strip() for p in cat_path.split('>')]
+            path_last_part = path_parts[-1] if path_parts else ''
             
             # Validate by Type
             if row_type == 'Attribute':
@@ -324,6 +358,15 @@ class HierarchicalParser:
                             ValidationError(excel_row, "Is_Required", 
                                           f"Invalid Is_Required '{is_req}'. Must be: TRUE or FALSE", "error")
                         )
+                
+                # COMMON MISTAKE #5: Attribute's Category must match parent category name
+                cat_name = str(row.get('Category', '')).strip() if pd.notna(row.get('Category')) else ''
+                if cat_name and cat_name != path_last_part:
+                    self.changes.validation_errors.append(
+                        ValidationError(excel_row, "Category", 
+                                      f"Category mismatch! Category column is '{cat_name}' but Category_Path ends with '{path_last_part}'. "
+                                      f"For Attributes, Category must match the parent category (last part of path).", "error")
+                    )
             
             elif row_type == 'Category':
                 # Categories must have Category name
@@ -331,6 +374,15 @@ class HierarchicalParser:
                 if not cat_name:
                     self.changes.validation_errors.append(
                         ValidationError(excel_row, "Category", "Category name is required for Categories", "error")
+                    )
+                
+                # COMMON MISTAKE #1: Category name must match last part of Category_Path
+                elif cat_name != path_last_part:
+                    self.changes.validation_errors.append(
+                        ValidationError(excel_row, "Category", 
+                                      f"Category mismatch! Category column is '{cat_name}' but Category_Path ends with '{path_last_part}'. "
+                                      f"The Category name MUST match the last part of the Category_Path. "
+                                      f"To fix: Either change Category to '{path_last_part}' OR update the Category_Path to end with '{cat_name}'.", "error")
                     )
     
     def _detect_changes(self):
@@ -669,7 +721,9 @@ class HierarchicalParser:
     
     def apply_changes(self) -> Tuple[bool, str]:
         """
-        Apply all changes to database.
+        Apply all changes to database using batch operations for better performance.
+        
+        v2.1: Optimized with batch inserts instead of individual inserts.
         
         Returns:
             (success: bool, message: str)
@@ -682,11 +736,11 @@ class HierarchicalParser:
         
         try:
             # Apply in order: Areas -> Categories -> Attributes
-            # Then updates
+            # Then updates (updates still individual due to different conditions)
             
-            # 1. Insert new Areas
-            for area in self.changes.new_areas:
-                self.client.table('areas').insert({
+            # 1. Insert new Areas (BATCH)
+            if self.changes.new_areas:
+                areas_to_insert = [{
                     'id': area['uuid'],
                     'user_id': self.user_id,
                     'name': area['name'],
@@ -695,11 +749,13 @@ class HierarchicalParser:
                     'sort_order': area['sort_order'],
                     'description': area['description'],
                     'slug': area['name'].lower().replace(' ', '-')
-                }).execute()
+                } for area in self.changes.new_areas]
+                
+                self.client.table('areas').insert(areas_to_insert).execute()
             
-            # 2. Insert new Categories
-            for cat in self.changes.new_categories:
-                self.client.table('categories').insert({
+            # 2. Insert new Categories (BATCH)
+            if self.changes.new_categories:
+                categories_to_insert = [{
                     'id': cat['uuid'],
                     'user_id': self.user_id,
                     'area_id': cat['area_id'],
@@ -709,11 +765,13 @@ class HierarchicalParser:
                     'sort_order': cat['sort_order'],
                     'description': cat['description'],
                     'slug': cat['name'].lower().replace(' ', '-')
-                }).execute()
+                } for cat in self.changes.new_categories]
+                
+                self.client.table('categories').insert(categories_to_insert).execute()
             
-            # 3. Insert new Attributes
-            for attr in self.changes.new_attributes:
-                self.client.table('attribute_definitions').insert({
+            # 3. Insert new Attributes (BATCH)
+            if self.changes.new_attributes:
+                attributes_to_insert = [{
                     'id': attr['uuid'],
                     'user_id': self.user_id,
                     'category_id': attr['category_id'],
@@ -725,9 +783,11 @@ class HierarchicalParser:
                     'validation_rules': attr['validation_rules'],
                     'sort_order': attr['sort_order'],
                     'slug': attr['name'].lower().replace(' ', '-')
-                }).execute()
+                } for attr in self.changes.new_attributes]
+                
+                self.client.table('attribute_definitions').insert(attributes_to_insert).execute()
             
-            # 4. Update Areas
+            # 4. Update Areas (individual - different conditions per row)
             for area in self.changes.updated_areas:
                 self.client.table('areas') \
                     .update(area['updates']) \
@@ -735,7 +795,7 @@ class HierarchicalParser:
                     .eq('user_id', self.user_id) \
                     .execute()
             
-            # 5. Update Categories
+            # 5. Update Categories (individual - different conditions per row)
             for cat in self.changes.updated_categories:
                 self.client.table('categories') \
                     .update(cat['updates']) \
@@ -743,7 +803,7 @@ class HierarchicalParser:
                     .eq('user_id', self.user_id) \
                     .execute()
             
-            # 6. Update Attributes
+            # 6. Update Attributes (individual - different conditions per row)
             for attr in self.changes.updated_attributes:
                 self.client.table('attribute_definitions') \
                     .update(attr['updates']) \

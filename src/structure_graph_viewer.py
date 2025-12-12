@@ -2,9 +2,19 @@
 Events Tracker - Structure Graph Viewer Module
 ===============================================
 Created: 2025-12-03 13:30 UTC
-Last Modified: 2025-12-11 20:30 UTC
+Last Modified: 2025-12-12 11:00 UTC
 Python: 3.11
-Version: 1.3.1 - FIX: Graphs now work with "All Areas" filter
+Version: 1.4.0 - Enhanced hover tooltips with more entity details
+
+CHANGELOG v1.4.0 (Enhanced Hover Tooltips):
+- ✨ IMPROVED: Hover tooltips now show more details per entity type:
+  - Area: Name, Description
+  - Category: Name, Description
+  - Attribute: Name, Data_Type, Unit, Description
+  - Events: Count
+- 🔧 Added 'unit' and 'description' fields to attribute nodes in load_graph_data()
+- 🎨 Consistent tooltip format across all graph types (Treemap, Sunburst, Network)
+- 📝 Bold labels for better readability in tooltips
 
 CHANGELOG v1.3.1 (Critical Fix - All Areas Graph Display):
 - 🐛 CRITICAL FIX: Sunburst/Treemap now display correctly with "All Areas"
@@ -167,6 +177,8 @@ def load_graph_data(client, user_id: str, filter_area: Optional[str] = None, fil
             'type': 'attribute',
             'parent': parent_id,
             'data_type': attr['data_type'],
+            'unit': attr.get('unit', ''),
+            'description': attr.get('description', ''),
             'color': '#FFC000',
             'icon': '🏷️',
             'size': 15
@@ -302,13 +314,28 @@ def build_plotly_tree(graph_data: Dict) -> go.Figure:
         
         colors.append(node['color'])
         
-        # Hover text
+        # Hover text - enhanced with more details per type
         icon = node.get('icon', '')
-        hover_text = f"{icon} {node['label']}<br>Type: {node['type'].title()}"
-        if node['type'] == 'events':
-            hover_text += f"<br>Count: {node.get('count', 0)}"
-        if node.get('description'):
-            hover_text += f"<br>{node['description']}"
+        if node['type'] == 'area':
+            hover_text = f"<b>{icon} {node['label']}</b><br><b>Type:</b> Area"
+            if node.get('description'):
+                hover_text += f"<br><b>Description:</b> {node['description']}"
+        elif node['type'] == 'category':
+            hover_text = f"<b>{icon} {node['label']}</b><br><b>Type:</b> Category"
+            if node.get('description'):
+                hover_text += f"<br><b>Description:</b> {node['description']}"
+        elif node['type'] == 'attribute':
+            hover_text = f"<b>{icon} {node['label']}</b><br><b>Type:</b> Attribute"
+            if node.get('data_type'):
+                hover_text += f"<br><b>Data Type:</b> {node['data_type']}"
+            if node.get('unit'):
+                hover_text += f"<br><b>Unit:</b> {node['unit']}"
+            if node.get('description'):
+                hover_text += f"<br><b>Description:</b> {node['description']}"
+        elif node['type'] == 'events':
+            hover_text = f"<b>{icon} {node['label']}</b><br><b>Count:</b> {node.get('count', 0)}"
+        else:
+            hover_text = f"{icon} {node['label']}<br>Type: {node['type'].title()}"
         texts.append(hover_text)
     
     # Create treemap with ids parameter
@@ -397,8 +424,28 @@ def build_plotly_sunburst(graph_data: Dict) -> go.Figure:
         
         colors.append(node['color'])
         
+        # Hover text - enhanced with more details per type
         icon = node.get('icon', '')
-        hover_text = f"{icon} {node['label']}"
+        if node['type'] == 'area':
+            hover_text = f"<b>{icon} {node['label']}</b><br><b>Type:</b> Area"
+            if node.get('description'):
+                hover_text += f"<br><b>Description:</b> {node['description']}"
+        elif node['type'] == 'category':
+            hover_text = f"<b>{icon} {node['label']}</b><br><b>Type:</b> Category"
+            if node.get('description'):
+                hover_text += f"<br><b>Description:</b> {node['description']}"
+        elif node['type'] == 'attribute':
+            hover_text = f"<b>{icon} {node['label']}</b><br><b>Type:</b> Attribute"
+            if node.get('data_type'):
+                hover_text += f"<br><b>Data Type:</b> {node['data_type']}"
+            if node.get('unit'):
+                hover_text += f"<br><b>Unit:</b> {node['unit']}"
+            if node.get('description'):
+                hover_text += f"<br><b>Description:</b> {node['description']}"
+        elif node['type'] == 'events':
+            hover_text = f"<b>{icon} {node['label']}</b><br><b>Count:</b> {node.get('count', 0)}"
+        else:
+            hover_text = f"{icon} {node['label']}"
         texts.append(hover_text)
     
     # v1.3.1: Create sunburst with ids parameter for unique identification
@@ -412,7 +459,7 @@ def build_plotly_sunburst(graph_data: Dict) -> go.Figure:
             line=dict(width=2, color='white')
         ),
         text=texts,
-        hovertemplate='%{text}<br>%{label}<extra></extra>',
+        hovertemplate='%{text}<extra></extra>',
         branchvalues='remainder',
         textfont=dict(size=14, color='white')
     ))
@@ -474,12 +521,27 @@ def build_network_graph(graph_data: Dict) -> Tuple[List, List, Dict]:
         icon = node.get('icon', '')
         label = f"{icon} {node['label']}" if icon else node['label']
         
-        # Build title (tooltip)
-        title = f"<b>{node['label']}</b><br>Type: {node['type'].title()}"
-        if node['type'] == 'events':
-            title += f"<br>Count: {node.get('count', 0)}"
-        if node.get('description'):
-            title += f"<br>{node['description']}"
+        # Build title (tooltip) - enhanced with more details per type
+        if node['type'] == 'area':
+            title = f"<b>{node['label']}</b><br><b>Type:</b> Area"
+            if node.get('description'):
+                title += f"<br><b>Description:</b> {node['description']}"
+        elif node['type'] == 'category':
+            title = f"<b>{node['label']}</b><br><b>Type:</b> Category"
+            if node.get('description'):
+                title += f"<br><b>Description:</b> {node['description']}"
+        elif node['type'] == 'attribute':
+            title = f"<b>{node['label']}</b><br><b>Type:</b> Attribute"
+            if node.get('data_type'):
+                title += f"<br><b>Data Type:</b> {node['data_type']}"
+            if node.get('unit'):
+                title += f"<br><b>Unit:</b> {node['unit']}"
+            if node.get('description'):
+                title += f"<br><b>Description:</b> {node['description']}"
+        elif node['type'] == 'events':
+            title = f"<b>{node['label']}</b><br><b>Count:</b> {node.get('count', 0)}"
+        else:
+            title = f"<b>{node['label']}</b><br>Type: {node['type'].title()}"
         
         nodes_list.append(Node(
             id=node['id'],

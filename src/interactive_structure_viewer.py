@@ -2,9 +2,23 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-11 21:00 UTC
+Last Modified: 2025-12-12 13:00 UTC
 Python: 3.11
-Version: 1.12.6 - FIX: Remove Category Between widget reset
+Version: 1.12.8 - Enhanced Upload page with 3-color system and common mistakes
+
+CHANGELOG v1.12.8 (Upload Page Improvements):
+- ✨ NEW: 3-color system explanation (Pink, Yellow, Blue)
+- ✨ NEW: Incremental upload notice
+- ✨ NEW: Common mistakes warnings with clear explanations
+- ✨ NEW: Column reference table
+- 🔧 Updated Adding New Items section with ⚠️ markers for Category field
+
+CHANGELOG v1.12.7 (Auto-refresh After Apply):
+- ✨ NEW: Auto-refresh after Apply Changes in Upload Excel tab
+  - No more manual "Refresh Now" button needed
+  - Cache cleared automatically
+  - Brief pause shows success message before rerun
+- 🔧 IMPORT: Added 'import time' for sleep functionality
 
 CHANGELOG v1.12.6 (Remove Category Between - Widget Reset Fix):
 - 🐛 CRITICAL FIX: Prevent accidental deletion of next category after successful removal
@@ -3698,6 +3712,15 @@ def render_interactive_structure_viewer(client, user_id: str):
         # ============================================
         with tab4:
             st.markdown("#### 📤 Upload Hierarchical Excel")
+            
+            # Incremental upload notice
+            st.success("""
+            **✅ INCREMENTAL UPLOAD SUPPORTED!**
+            
+            You don't need to upload the entire structure - just the rows you want to **ADD** or **MODIFY**.
+            Parent elements must already exist in the database.
+            """)
+            
             st.info("""
             **Update your structure by uploading an edited Hierarchical_View Excel**
             - ✅ **Add new rows** for Areas, Categories, Attributes
@@ -3717,6 +3740,33 @@ def render_interactive_structure_viewer(client, user_id: str):
             )
             
             if not uploaded_file:
+                # 3-Color system explanation
+                st.markdown("### 🎨 Color Coding (3 Colors)")
+                col_colors = st.columns(3)
+                with col_colors[0]:
+                    st.markdown("""
+                    **🟪 PINK = Read-Only**
+                    - Type, Level, Area
+                    - Auto-calculated
+                    - DO NOT edit
+                    """)
+                with col_colors[1]:
+                    st.markdown("""
+                    **🟨 YELLOW = Key ID**
+                    - Sort_Order, Category_Path
+                    - Edit ONLY for NEW rows
+                    - ⚠️ Don't change existing!
+                    """)
+                with col_colors[2]:
+                    st.markdown("""
+                    **🟦 BLUE = Editable**
+                    - Category, Attribute_Name
+                    - Data_Type, Unit, etc.
+                    - Edit freely
+                    """)
+                
+                st.markdown("---")
+                
                 st.markdown("### 📋 How to Use Upload")
                 
                 col1, col2 = st.columns(2)
@@ -3764,19 +3814,28 @@ def render_interactive_structure_viewer(client, user_id: str):
                 
                 st.markdown("---")
                 
+                # Common mistakes warning
+                st.markdown("### ⚠️ Common Mistakes to Avoid")
+                st.warning("""
+**#1 Category ≠ Path End:** If Category_Path is `'Area > Cat > SubCat'`, Category MUST be `'SubCat'`
+
+**#2 Changing Existing Path:** This creates a DUPLICATE! Only set path for NEW rows.
+
+**#3 Missing Parent:** Can't add `'A > B > C'` if `'A > B'` doesn't exist in database.
+
+**#4 Duplicate Paths:** Each Category_Path must be unique in the upload file.
+                """)
+                
+                st.markdown("---")
+                
                 st.markdown("""
-                ### ✏️ Editable Fields (BLUE columns)
-                - **Category**, **Attribute_Name**
-                - **Data_Type**: number, text, datetime, boolean, link, image
-                - **Unit**, **Is_Required**, **Default_Value**
-                - **Validation_Min**, **Validation_Max**
-                - **Description**
-                
-                ### 🚫 Read-Only Fields (PINK columns)
-                - **Type**, **Level**, **Sort_Order**
-                - **Area**, **Category_Path** (path structure)
-                
-                ⚠️ **Important:** Don't change PINK columns - they're auto-calculated!
+### 🎨 Column Reference
+
+| Color | Columns | Action |
+|-------|---------|--------|
+| 🟪 PINK | Type, Level, Area | Don't edit |
+| 🟨 YELLOW | Sort_Order, Category_Path | Edit for NEW only |
+| 🟦 BLUE | Category, Attribute_Name, Data_Type, Unit, etc. | Edit freely |
                 """)
             
             else:
@@ -3999,14 +4058,16 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     st.success(f"✅ {message}")
                                     st.balloons()
                                     
-                                    st.info("🔄 Changes applied successfully! Refresh to see updates.")
+                                    # Auto-refresh: Clear cache and reload
+                                    st.cache_data.clear()
+                                    st.session_state.original_df = None
+                                    st.session_state.edited_df = None
                                     
-                                    # Clear cache to reload fresh data
-                                    if st.button("🔄 Refresh Now", type="primary", key="isv_refresh_after_upload"):
-                                        st.cache_data.clear()
-                                        st.session_state.original_df = None
-                                        st.session_state.edited_df = None
-                                        st.rerun()
+                                    # Show success message and auto-rerun
+                                    st.info("🔄 Refreshing to show updated data...")
+                                    import time
+                                    time.sleep(1)  # Brief pause so user sees success message
+                                    st.rerun()
                                 else:
                                     st.error(f"❌ {message}")
                                     st.warning("Please check the errors and try again.")

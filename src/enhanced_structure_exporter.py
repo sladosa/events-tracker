@@ -2,25 +2,26 @@
 Enhanced Structure Exporter - Excel with validation, formulas, and grouping
 
 Features:
-- Color-coded columns (Pink=auto-calculated, Blue=user-editable)
+- 3-color system: Pink (read-only), Yellow (key identifiers), Blue (editable)
 - Drop-down validation for Type, Data_Type, Is_Required
-- Auto-calculated formulas for Level, Area, Category_Path
-- Row grouping (collapsible by Area/Category)
-- Column grouping (hide attribute details)
-- Description and Validation columns added
-- Smart Category_Path handling
-- **NEW:** Filter support - export only filtered data (by Area and/or search term)
+- Auto-calculated formulas for Level, Area
+- Row grouping (collapsible by Area/Category) - EXPANDED by default
+- Column grouping (B-C collapsed, others expanded)
+- Header comments explaining each column's purpose
+- Practical Help sheet with common scenarios and mistake avoidance
+- Incremental upload support
 
-**UPDATED:** Headers in row 2, Sort_Order moved to column C, new grouping, auto filter
+**v3.0:** 3-color system, header comments, practical Help sheet
 
 Dependencies: openpyxl, pandas, supabase
-Last Modified: 2025-12-03 11:15 UTC
+Last Modified: 2025-12-12 12:30 UTC
 """
 
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
 from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.comments import Comment
 from openpyxl.utils.dataframe import dataframe_to_rows
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -48,13 +49,35 @@ class EnhancedStructureExporter:
         self.filter_area = filter_area if filter_area != "All Areas" else None
         self.filter_category = filter_category if filter_category != "All Categories" else None
         
-        # Define colors
+        # Define colors (3-color system)
+        # PINK = Auto-calculated, read-only (Type, Level, Area)
         self.PINK_FILL = PatternFill(start_color="FFE6F0", end_color="FFE6F0", fill_type="solid")
+        # BLUE = Editable fields (Category, Attribute_Name, Data_Type, etc.)
         self.BLUE_FILL = PatternFill(start_color="E6F2FF", end_color="E6F2FF", fill_type="solid")
+        # YELLOW/GOLD = Key identifier fields - edit only for NEW rows (Sort_Order, Category_Path)
+        self.YELLOW_FILL = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
         self.HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
         
         self.BOLD_FONT = Font(bold=True, color="FFFFFF")
         self.NORMAL_FONT = Font(name='Calibri', size=11)
+        
+        # Header comments for each column
+        self.HEADER_COMMENTS = {
+            'A': "Type: Area, Category, or Attribute.\nDo NOT change for existing rows.",
+            'B': "Level: Auto-calculated from Category_Path depth.\nRead-only.",
+            'C': "Sort_Order: Position within parent element.\nCan edit to change display sequence.\nFor NEW rows: set desired position.",
+            'D': "Area: Auto-calculated from Category_Path.\nRead-only.",
+            'E': "⚠️ KEY FIELD - Category_Path\n\nUsed to IDENTIFY existing items in database.\n\n• For NEW rows: Set the full path (e.g., 'Area > Category > SubCat')\n• For EXISTING rows: DO NOT CHANGE!\n  Changing path creates a DUPLICATE instead of update.\n\n• Category (col F) must match the LAST part of this path.",
+            'F': "Category: The category name.\n\n• Must match the LAST part of Category_Path\n• Example: If path is 'Finance > Auto > Gorivo'\n  then Category must be 'Gorivo'",
+            'G': "Attribute_Name: Name of the attribute.\nRequired for Attribute type rows.",
+            'H': "Data_Type: Type of data.\nValues: number, text, datetime, boolean, link, image",
+            'I': "Unit: Unit of measurement.\nExample: kg, hours, EUR, km",
+            'J': "Is_Required: Is this attribute mandatory?\nValues: TRUE or FALSE",
+            'K': "Default_Value: Default value for new events.\nOptional.",
+            'L': "Validation_Min: Minimum allowed value.\nFor number types only.",
+            'M': "Validation_Max: Maximum allowed value.\nFor number types only.",
+            'N': "Description: Documentation and notes.\nOptional but recommended."
+        }
         
         self.THIN_BORDER = Border(
             left=Side(style='thin', color='000000'),
@@ -292,34 +315,49 @@ class EnhancedStructureExporter:
     
     def _setup_headers(self, ws):
         """
-        Setup header row with styling.
+        Setup header row with styling and comments.
         Headers start at row 2 (row 1 is blank).
+        Comments explain each column's purpose.
         """
-        # New column order: Sort_Order moved after Level
+        # Column definitions with color type:
+        # 'pink' = auto-calculated read-only
+        # 'yellow' = key identifier (edit only for new rows)
+        # 'blue' = freely editable
         headers = [
-            ('Type', False),              # A - Auto (Pink)
-            ('Level', False),             # B - Auto (Pink)
-            ('Sort_Order', False),        # C - Auto (Pink) - MOVED HERE
-            ('Area', False),              # D - Auto (Pink)
-            ('Category_Path', False),     # E - Auto (Pink)
-            ('Category', True),           # F - Editable (Blue)
-            ('Attribute_Name', True),     # G - Editable (Blue)
-            ('Data_Type', True),          # H - Editable (Blue)
-            ('Unit', True),               # I - Editable (Blue)
-            ('Is_Required', True),        # J - Editable (Blue)
-            ('Default_Value', True),      # K - Editable (Blue)
-            ('Validation_Min', True),     # L - Editable (Blue)
-            ('Validation_Max', True),     # M - Editable (Blue)
-            ('Description', True)         # N - Editable (Blue)
+            ('Type', 'pink'),              # A - Auto (Pink)
+            ('Level', 'pink'),             # B - Auto (Pink)
+            ('Sort_Order', 'yellow'),      # C - Key (Yellow) - position identifier
+            ('Area', 'pink'),              # D - Auto (Pink)
+            ('Category_Path', 'yellow'),   # E - Key (Yellow) - main identifier
+            ('Category', 'blue'),          # F - Editable (Blue)
+            ('Attribute_Name', 'blue'),    # G - Editable (Blue)
+            ('Data_Type', 'blue'),         # H - Editable (Blue)
+            ('Unit', 'blue'),              # I - Editable (Blue)
+            ('Is_Required', 'blue'),       # J - Editable (Blue)
+            ('Default_Value', 'blue'),     # K - Editable (Blue)
+            ('Validation_Min', 'blue'),    # L - Editable (Blue)
+            ('Validation_Max', 'blue'),    # M - Editable (Blue)
+            ('Description', 'blue')        # N - Editable (Blue)
         ]
         
+        # Column letters for comments
+        col_letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N']
+        
         # Headers in row 2 (row 1 is blank)
-        for col_idx, (header, is_editable) in enumerate(headers, start=1):
+        for col_idx, (header, color_type) in enumerate(headers, start=1):
             cell = ws.cell(2, col_idx, header)  # Row 2, not 1
             cell.font = self.BOLD_FONT
             cell.fill = self.HEADER_FILL
             cell.alignment = self.CENTER_ALIGN
             cell.border = self.THIN_BORDER
+            
+            # Add comment to header cell
+            col_letter = col_letters[col_idx - 1]
+            if col_letter in self.HEADER_COMMENTS:
+                comment = Comment(self.HEADER_COMMENTS[col_letter], "Events Tracker")
+                comment.width = 300
+                comment.height = 150
+                cell.comment = comment
     
     
     def _populate_data(self, ws, df: pd.DataFrame):
@@ -357,9 +395,9 @@ class EnhancedStructureExporter:
             cell_b.border = self.THIN_BORDER
             cell_b.alignment = self.CENTER_ALIGN
             
-            # C: Sort_Order (from data)
+            # C: Sort_Order (from data) - YELLOW: key identifier, editable for new rows
             cell_c = ws.cell(row_idx, 3, row.Sort_Order)
-            cell_c.fill = self.PINK_FILL
+            cell_c.fill = self.YELLOW_FILL
             cell_c.border = self.THIN_BORDER
             cell_c.alignment = self.CENTER_ALIGN
             
@@ -371,9 +409,9 @@ class EnhancedStructureExporter:
             cell_d.border = self.THIN_BORDER
             cell_d.alignment = self.LEFT_ALIGN
             
-            # E: Category_Path (from data)
+            # E: Category_Path (from data) - YELLOW: KEY identifier, DO NOT change for existing rows!
             cell_e = ws.cell(row_idx, 5, row.Category_Path)
-            cell_e.fill = self.PINK_FILL
+            cell_e.fill = self.YELLOW_FILL
             cell_e.border = self.THIN_BORDER
             cell_e.alignment = self.LEFT_ALIGN
             
@@ -472,7 +510,9 @@ class EnhancedStructureExporter:
     def _add_row_grouping(self, ws, df: pd.DataFrame):
         """
         Add row grouping for collapsible Areas and Categories.
-        All groups are collapsed by default.
+        All groups are EXPANDED by default (hidden=False).
+        
+        v2.2: Changed to expanded by default per user request.
         """
         current_area_start = None
         current_cat_starts = {}  # level -> start_row
@@ -481,7 +521,7 @@ class EnhancedStructureExporter:
             if row.Type == "Area":
                 # Close previous area group if exists
                 if current_area_start and current_area_start < idx - 1:
-                    ws.row_dimensions.group(current_area_start, idx - 1, outline_level=1, hidden=True)
+                    ws.row_dimensions.group(current_area_start, idx - 1, outline_level=1, hidden=False)
                 
                 current_area_start = idx + 1  # Next row starts new group
                 current_cat_starts = {}  # Reset category tracking
@@ -493,29 +533,29 @@ class EnhancedStructureExporter:
                     if cat_level >= level:
                         start = current_cat_starts[cat_level]
                         if start < idx:
-                            ws.row_dimensions.group(start, idx - 1, outline_level=level + 1, hidden=True)
+                            ws.row_dimensions.group(start, idx - 1, outline_level=level + 1, hidden=False)
                         del current_cat_starts[cat_level]
                 
                 # Start new category group
                 current_cat_starts[level] = idx + 1
         
-        # Close remaining groups (collapsed)
+        # Close remaining groups (expanded)
         max_row = ws.max_row
         if current_area_start and current_area_start <= max_row:
-            ws.row_dimensions.group(current_area_start, max_row, outline_level=1, hidden=True)
+            ws.row_dimensions.group(current_area_start, max_row, outline_level=1, hidden=False)
         
         for level, start in current_cat_starts.items():
             if start <= max_row:
-                ws.row_dimensions.group(start, max_row, outline_level=level + 1, hidden=True)
+                ws.row_dimensions.group(start, max_row, outline_level=level + 1, hidden=False)
     
     
     def _add_column_grouping(self, ws):
         """
         Add column grouping to hide/show column groups.
         
-        New groups (all at outline_level=1):
+        v2.2: Updated group visibility per user request:
         - B:C (Level, Sort_Order) = CLOSED (hidden=True)
-        - F (Category) = CLOSED (hidden=True)
+        - F (Category) = OPEN (hidden=False)
         - H:M (Data_Type through Validation_Max) = OPEN (hidden=False)
         """
         # Group 1: B-C (Level, Sort_Order) - CLOSED
@@ -523,9 +563,9 @@ class EnhancedStructureExporter:
             ws.column_dimensions[col].outline_level = 1
             ws.column_dimensions[col].hidden = True  # Closed/collapsed
         
-        # Group 2: F (Category) - CLOSED
+        # Group 2: F (Category) - OPEN
         ws.column_dimensions['F'].outline_level = 1
-        ws.column_dimensions['F'].hidden = True  # Closed/collapsed
+        ws.column_dimensions['F'].hidden = False  # Open/visible
         
         # Group 3: H-M (Data_Type through Validation_Max) - OPEN
         for col in ['H', 'I', 'J', 'K', 'L', 'M']:
@@ -565,121 +605,131 @@ class EnhancedStructureExporter:
 
     def _add_help_sheet(self, wb):
         """
-        Add Help sheet with instructions for editing.
+        Add Help sheet with practical instructions for editing.
+        Focused on common scenarios and avoiding mistakes.
         """
         ws = wb.create_sheet("Help")
         
         # Title
-        ws.cell(1, 1, "EVENTS TRACKER - Enhanced Structure Export").font = Font(bold=True, size=14)
+        ws.cell(1, 1, "EVENTS TRACKER - Structure Import/Export Guide").font = Font(bold=True, size=14)
         ws.cell(1, 1).fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
         ws.cell(1, 1).font = Font(bold=True, size=14, color="FFFFFF")
         
-        # Content
+        # Content - practical and focused
         help_content = [
             ("", ""),
-            ("WHAT IS THIS FILE?", ""),
-            ("This Excel file contains your event tracking structure exported from the Events Tracker app.", ""),
-            ("You can VIEW and EDIT this structure, then re-import it back into the app.", ""),
+            ("🎨 COLOR CODING (3 Colors):", ""),
             ("", ""),
-            ("COLOR CODING:", ""),
-            ("PINK columns = AUTO-CALCULATED (Read-Only)", ""),
-            ("  • Type: Area, Category, or Attribute", ""),
-            ("  • Level: Calculated from Category_Path depth", ""),
-            ("  • Sort_Order: Order within parent", ""),
-            ("  • Area: Extracted from Category_Path", ""),
-            ("  • Category_Path: Full hierarchical path", ""),
+            ("🟪 PINK = Auto-calculated, READ-ONLY", ""),
+            ("   Columns: Type (A), Level (B), Area (D)", ""),
+            ("   → Do NOT edit these columns", ""),
             ("", ""),
-            ("BLUE columns = EDITABLE", ""),
-            ("  • Category: Category name", ""),
-            ("  • Attribute_Name: Attribute name", ""),
-            ("  • Data_Type: number, text, datetime, boolean, link", ""),
-            ("  • Unit: Unit of measurement (e.g., 'kg', 'hours')", ""),
-            ("  • Is_Required: TRUE or FALSE", ""),
-            ("  • Default_Value: Default value for new events", ""),
-            ("  • Validation_Min: Minimum value (for number types)", ""),
-            ("  • Validation_Max: Maximum value (for number types)", ""),
-            ("  • Description: Documentation and notes", ""),
+            ("🟨 YELLOW = KEY IDENTIFIER - Edit ONLY for NEW rows", ""),
+            ("   Columns: Sort_Order (C), Category_Path (E)", ""),
+            ("   → For EXISTING rows: DO NOT CHANGE!", ""),
+            ("   → For NEW rows: Set the values correctly", ""),
+            ("   ⚠️ Changing Category_Path for existing items creates DUPLICATES!", ""),
             ("", ""),
-            ("WHAT CAN YOU EDIT?", ""),
-            ("✅ YES - Edit these:", ""),
-            ("  • Category names (column F)", ""),
-            ("  • Attribute names (column G)", ""),
-            ("  • Data types (column H) - use dropdown", ""),
-            ("  • Units (column I)", ""),
-            ("  • Required status (column J) - use dropdown", ""),
-            ("  • Default values (column K)", ""),
-            ("  • Validation Min/Max (columns L-M)", ""),
-            ("  • Descriptions (column N)", ""),
+            ("🟦 BLUE = Freely EDITABLE", ""),
+            ("   Columns: Category (F), Attribute_Name (G), Data_Type (H),", ""),
+            ("            Unit (I), Is_Required (J), Default_Value (K),", ""),
+            ("            Validation_Min (L), Validation_Max (M), Description (N)", ""),
+            ("   → Edit these freely for existing or new rows", ""),
             ("", ""),
-            ("❌ NO - Do NOT edit:", ""),
-            ("  • PINK columns (Type, Level, Sort_Order, Area, Category_Path)", ""),
-            ("  • Row 1 (keep blank)", ""),
-            ("  • Row 2 (headers)", ""),
-            ("  • Delete rows (use app to delete instead)", ""),
-            ("  • Add rows (use app to add instead)", ""),
+            ("═══════════════════════════════════════════════════════════════════", ""),
             ("", ""),
-            ("HOW TO USE GROUPS:", ""),
-            ("Column Groups (buttons at top):", ""),
-            ("  • Click [+] button to expand collapsed groups", ""),
-            ("  • Click [-] button to collapse expanded groups", ""),
-            ("  • Group 1 (B-C): Level, Sort_Order", ""),
-            ("  • Group 2 (F): Category", ""),
-            ("  • Group 3 (H-M): Attribute details", ""),
+            ("📌 SCENARIO 1: Add New Category with Attributes", ""),
+            ("─────────────────────────────────────────────────────", ""),
+            ("You only need to add NEW rows - not the entire structure!", ""),
             ("", ""),
-            ("Row Groups (buttons at left):", ""),
-            ("  • Click [+] to expand Area or Category", ""),
-            ("  • Click [-] to collapse Area or Category", ""),
-            ("  • All groups start collapsed for cleaner view", ""),
+            ("Example - Add 'Novi auto' category under 'Finance > Domacinstvo > Automobili':", ""),
             ("", ""),
-            ("HOW TO FILTER:", ""),
-            ("Auto Filter is enabled on all columns:", ""),
-            ("  1. Click filter icon in header (row 2)", ""),
-            ("  2. Select filter criteria", ""),
-            ("  3. Click OK to apply", ""),
-            ("  4. Click 'Clear Filter' to remove", ""),
+            ("Row 1: Type=Category, Category_Path='Finance > Domacinstvo > Automobili > Novi auto',", ""),
+            ("       Category='Novi auto', Sort_Order=3", ""),
             ("", ""),
-            ("TIPS:", ""),
-            ("  • Use Freeze Panes: Columns A-F and row 2 stay visible when scrolling", ""),
-            ("  • Use Auto Filter: Quickly find specific Areas, Categories, or Attributes", ""),
-            ("  • Use Groups: Hide unnecessary details for cleaner view", ""),
-            ("  • Category_Path shows full hierarchy: 'Area > Category > Subcategory'", ""),
-            ("  • Level 0 = Area, Level 1 = Top Category, Level 2+ = Subcategories", ""),
+            ("Row 2: Type=Attribute, Category_Path='Finance > Domacinstvo > Automobili > Novi auto',", ""),
+            ("       Category='Novi auto', Attribute_Name='Registracija', Data_Type='number'", ""),
             ("", ""),
-            ("VALIDATION RULES:", ""),
-            ("Drop-down lists are provided for:", ""),
-            ("  • Type (A): Area, Category, Attribute", ""),
-            ("  • Data_Type (H): number, text, datetime, boolean, link", ""),
-            ("  • Is_Required (J): TRUE, FALSE", ""),
+            ("Row 3: Type=Attribute, Category_Path='Finance > Domacinstvo > Automobili > Novi auto',", ""),
+            ("       Category='Novi auto', Attribute_Name='Gorivo', Data_Type='number'", ""),
             ("", ""),
-            ("FORMULAS:", ""),
-            ("These columns use formulas (don't edit):", ""),
-            ("  • Level (B): =LEN(E3)-LEN(SUBSTITUTE(E3,">",""))", ""),
-            ("  • Area (D): =TRIM(LEFT(E3,IFERROR(FIND(">",E3)-1,LEN(E3))))", ""),
+            ("⚠️ IMPORTANT: Category column (F) MUST match the LAST part of Category_Path!", ""),
             ("", ""),
-            ("RE-IMPORTING:", ""),
-            ("After editing, you can re-import this file:", ""),
-            ("  1. Save your changes in Excel", ""),
-            ("  2. Go to Events Tracker app", ""),
-            ("  3. Navigate to 'Upload Template'", ""),
-            ("  4. Upload this edited file", ""),
-            ("  5. Review detected changes", ""),
-            ("  6. Confirm to apply changes", ""),
+            ("═══════════════════════════════════════════════════════════════════", ""),
             ("", ""),
-            ("IMPORTANT NOTES:", ""),
-            ("  • Always keep the structure intact (don't delete columns)", ""),
-            ("  • Don't change PINK column values", ""),
-            ("  • Use app features to add/delete Areas, Categories, Attributes", ""),
-            ("  • This file is for viewing and light editing only", ""),
-            ("  • For major changes, use the app interface", ""),
+            ("📌 SCENARIO 2: Edit Existing Item Properties", ""),
+            ("─────────────────────────────────────────────────────", ""),
+            ("1. Find the row by Category_Path", ""),
+            ("2. Edit ONLY the BLUE columns (Description, Unit, Data_Type, etc.)", ""),
+            ("3. DO NOT change Category_Path or Sort_Order!", ""),
+            ("4. Upload the file", ""),
             ("", ""),
-            ("SUPPORT:", ""),
-            ("If you have questions or issues:", ""),
-            ("  • Check the app Help section", ""),
-            ("  • Review this Help sheet", ""),
-            ("  • Contact support if needed", ""),
+            ("═══════════════════════════════════════════════════════════════════", ""),
+            ("", ""),
+            ("📌 SCENARIO 3: Change Display Order", ""),
+            ("─────────────────────────────────────────────────────", ""),
+            ("To reorder items within the same parent:", ""),
+            ("1. Edit the Sort_Order values (column C)", ""),
+            ("2. Use consecutive numbers (1, 2, 3...)", ""),
+            ("3. Items with lower Sort_Order appear first", ""),
+            ("", ""),
+            ("═══════════════════════════════════════════════════════════════════", ""),
+            ("", ""),
+            ("⚠️ COMMON MISTAKES TO AVOID:", ""),
+            ("─────────────────────────────────────────────────────", ""),
+            ("", ""),
+            ("❌ MISTAKE 1: Category doesn't match Category_Path", ""),
+            ("   Wrong: Path='Area > Cat > SubCat', Category='DifferentName'", ""),
+            ("   Right: Path='Area > Cat > SubCat', Category='SubCat'", ""),
+            ("   → Category MUST be the LAST part of the path!", ""),
+            ("", ""),
+            ("❌ MISTAKE 2: Changing Category_Path for existing item", ""),
+            ("   This creates a NEW item instead of updating the existing one!", ""),
+            ("   → To rename: Edit Category column (F), keep path unchanged", ""),
+            ("   → To move: Use app UI instead (safer)", ""),
+            ("", ""),
+            ("❌ MISTAKE 3: Missing parent in hierarchy", ""),
+            ("   Can't add 'Area > Cat > SubCat' if 'Area > Cat' doesn't exist!", ""),
+            ("   → Add parent categories first, or use existing parents", ""),
+            ("", ""),
+            ("❌ MISTAKE 4: Duplicate Category_Path in upload", ""),
+            ("   Each path must be unique in the file!", ""),
+            ("", ""),
+            ("❌ MISTAKE 5: Wrong Attribute parent reference", ""),
+            ("   Attribute's Category_Path and Category must match its parent Category", ""),
+            ("", ""),
+            ("═══════════════════════════════════════════════════════════════════", ""),
+            ("", ""),
+            ("💡 TIPS:", ""),
+            ("─────────────────────────────────────────────────────", ""),
+            ("• Hover over column headers to see detailed explanations", ""),
+            ("• You can upload ONLY new/changed rows - incremental upload works!", ""),
+            ("• Parent elements must exist in database before adding children", ""),
+            ("• Use Copy-Paste to duplicate rows, then modify the paths", ""),
+            ("• For renaming categories, use the app UI - it's safer", ""),
+            ("• For deleting items, use the app UI - Excel upload can't delete", ""),
+            ("", ""),
+            ("═══════════════════════════════════════════════════════════════════", ""),
+            ("", ""),
+            ("📋 COLUMN REFERENCE:", ""),
+            ("─────────────────────────────────────────────────────", ""),
+            ("A - Type: Area, Category, or Attribute", ""),
+            ("B - Level: Hierarchy depth (0=Area, 1+=Categories)", ""),
+            ("C - Sort_Order: Display position within parent", ""),
+            ("D - Area: Auto-extracted from path", ""),
+            ("E - Category_Path: Full hierarchy path (KEY IDENTIFIER)", ""),
+            ("F - Category: Category name (must match end of path)", ""),
+            ("G - Attribute_Name: Name for Attribute rows", ""),
+            ("H - Data_Type: number, text, datetime, boolean, link, image", ""),
+            ("I - Unit: Measurement unit (kg, EUR, hours, etc.)", ""),
+            ("J - Is_Required: TRUE or FALSE", ""),
+            ("K - Default_Value: Default for new events", ""),
+            ("L - Validation_Min: Minimum value (numbers only)", ""),
+            ("M - Validation_Max: Maximum value (numbers only)", ""),
+            ("N - Description: Notes and documentation", ""),
             ("", ""),
             ("VERSION:", ""),
-            ("Enhanced Structure Export v2.1", ""),
+            ("Enhanced Structure Export v3.0 (3-color system)", ""),
             ("Generated: " + datetime.now().strftime('%Y-%m-%d %H:%M:%S'), ""),
         ]
         
@@ -687,15 +737,26 @@ class EnhancedStructureExporter:
         for row_idx, (text, extra) in enumerate(help_content, start=2):
             cell = ws.cell(row_idx, 1, text)
             
-            # Format sections - ensure text is a string before calling string methods
+            # Format sections based on content type
             if text and isinstance(text, str):
-                if text.isupper() and text.endswith(':'): 
+                # Section headers with emoji
+                if text.startswith('🎨') or text.startswith('📌') or text.startswith('⚠️') or text.startswith('💡') or text.startswith('📋'):
                     cell.font = Font(bold=True, size=12)
                     cell.fill = PatternFill(start_color="E6F2FF", end_color="E6F2FF", fill_type="solid")
-                elif text.startswith('✅') or text.startswith('❌'):
-                    cell.font = Font(bold=True)
-                elif text.startswith('  •'):
-                    cell.alignment = Alignment(indent=1)
+                # Color coding headers
+                elif text.startswith('🟪') or text.startswith('🟨') or text.startswith('🟦'):
+                    cell.font = Font(bold=True, size=11)
+                # Divider lines
+                elif text.startswith('═') or text.startswith('─'):
+                    cell.font = Font(color="888888")
+                # Mistake items
+                elif text.startswith('❌'):
+                    cell.font = Font(bold=True, color="CC0000")
+                # Version info
+                elif text.startswith('VERSION:'):
+                    cell.font = Font(bold=True, size=10)
+                    cell.fill = PatternFill(start_color="F0F0F0", end_color="F0F0F0", fill_type="solid")
+        
         ws.column_dimensions['A'].width = 100
         
         # Freeze first row
