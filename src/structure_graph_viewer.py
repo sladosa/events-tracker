@@ -2,7 +2,7 @@
 Events Tracker - Structure Graph Viewer Module
 ===============================================
 Created: 2025-12-03 13:30 UTC
-Last Modified: 2025-12-13 14:00 UTC
+Last Modified: 2025-12-13 16:00 UTC
 Python: 3.11
 Version: 1.4.1 - Fixed Network Graph tooltips (plain text format)
 

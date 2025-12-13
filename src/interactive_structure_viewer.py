@@ -2,9 +2,16 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-12 13:00 UTC
+Last Modified: 2025-12-13 16:00 UTC
 Python: 3.11
-Version: 1.12.8 - Enhanced Upload page with 3-color system and common mistakes
+Version: 1.12.9 - Added Cancel button to Upload Excel flow
+
+CHANGELOG v1.12.9 (Upload Cancel Button):
+- ✨ NEW: Cancel button in Upload Excel confirmation section
+  - Allows user to explicitly abort upload after seeing preview
+  - Clears uploaded file and shows confirmation message
+  - Provides clear UX alternative to just navigating away
+- 🎯 UX: User no longer needs to guess how to abort upload
 
 CHANGELOG v1.12.8 (Upload Page Improvements):
 - ✨ NEW: 3-color system explanation (Pink, Yellow, Blue)
@@ -4030,7 +4037,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                         st.markdown("### ✅ Confirm Changes")
                         st.warning("⚠️ **Important:** Once you confirm, these changes will be applied to your database immediately.")
                         
-                        col1, col2 = st.columns([3, 1])
+                        col1, col2, col3 = st.columns([3, 1, 1])
                         
                         with col1:
                             confirm_text = st.text_input(
@@ -4049,6 +4056,20 @@ def render_interactive_structure_viewer(client, user_id: str):
                                 use_container_width=True,
                                 key="isv_apply_button"
                             )
+                        
+                        with col3:
+                            st.markdown("<br>", unsafe_allow_html=True)  # Spacing
+                            cancel_button = st.button(
+                                "❌ Cancel",
+                                type="secondary",
+                                use_container_width=True,
+                                key="isv_cancel_upload"
+                            )
+                        
+                        # Handle Cancel - just show message and rerun to clear file
+                        if cancel_button:
+                            st.info("📤 Upload cancelled. You can upload a different file or switch modes.")
+                            st.rerun()
                         
                         if apply_button and confirm_text == "CONFIRM":
                             with st.spinner("💾 Applying changes to database..."):
