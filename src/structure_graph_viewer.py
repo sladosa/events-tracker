@@ -2,9 +2,17 @@
 Events Tracker - Structure Graph Viewer Module
 ===============================================
 Created: 2025-12-03 13:30 UTC
-Last Modified: 2025-12-12 11:00 UTC
+Last Modified: 2025-12-13 14:00 UTC
 Python: 3.11
-Version: 1.4.0 - Enhanced hover tooltips with more entity details
+Version: 1.4.1 - Fixed Network Graph tooltips (plain text format)
+
+CHANGELOG v1.4.1 (Network Graph Tooltip Fix):
+- 🐛 FIXED: Network Graph tooltips now display properly formatted text
+  - ROOT CAUSE: vis.js (used by streamlit-agraph) doesn't render HTML in tooltips
+  - HTML tags like <b> and <br> were displayed as raw text
+  - SOLUTION: Replaced HTML with plain text using \n for line breaks
+- 🎨 Tooltips now show: icon + name, Type, and relevant details per entity type
+- ✅ Sunburst/Treemap tooltips unchanged (Plotly supports HTML)
 
 CHANGELOG v1.4.0 (Enhanced Hover Tooltips):
 - ✨ IMPROVED: Hover tooltips now show more details per entity type:
@@ -521,27 +529,28 @@ def build_network_graph(graph_data: Dict) -> Tuple[List, List, Dict]:
         icon = node.get('icon', '')
         label = f"{icon} {node['label']}" if icon else node['label']
         
-        # Build title (tooltip) - enhanced with more details per type
+        # Build title (tooltip) - plain text format for vis.js compatibility
+        # Note: streamlit-agraph uses vis.js which doesn't render HTML in tooltips
         if node['type'] == 'area':
-            title = f"<b>{node['label']}</b><br><b>Type:</b> Area"
+            title = f"{icon} {node['label']}\nType: Area"
             if node.get('description'):
-                title += f"<br><b>Description:</b> {node['description']}"
+                title += f"\nDescription: {node['description']}"
         elif node['type'] == 'category':
-            title = f"<b>{node['label']}</b><br><b>Type:</b> Category"
+            title = f"{icon} {node['label']}\nType: Category"
             if node.get('description'):
-                title += f"<br><b>Description:</b> {node['description']}"
+                title += f"\nDescription: {node['description']}"
         elif node['type'] == 'attribute':
-            title = f"<b>{node['label']}</b><br><b>Type:</b> Attribute"
+            title = f"{icon} {node['label']}\nType: Attribute"
             if node.get('data_type'):
-                title += f"<br><b>Data Type:</b> {node['data_type']}"
+                title += f"\nData Type: {node['data_type']}"
             if node.get('unit'):
-                title += f"<br><b>Unit:</b> {node['unit']}"
+                title += f"\nUnit: {node['unit']}"
             if node.get('description'):
-                title += f"<br><b>Description:</b> {node['description']}"
+                title += f"\nDescription: {node['description']}"
         elif node['type'] == 'events':
-            title = f"<b>{node['label']}</b><br><b>Count:</b> {node.get('count', 0)}"
+            title = f"{icon} {node['label']}\nCount: {node.get('count', 0)}"
         else:
-            title = f"<b>{node['label']}</b><br>Type: {node['type'].title()}"
+            title = f"{icon} {node['label']}\nType: {node['type'].title()}"
         
         nodes_list.append(Node(
             id=node['id'],
