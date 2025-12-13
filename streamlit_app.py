@@ -2,14 +2,20 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-12-01 13:00 UTC
+Last Modified: 2025-12-13 15:30 UTC
 Python: 3.11
-Version: 1.6.1 - Production Release (Clean)
+Version: 1.7.0 - Added Add Activity module (mobile-optimized)
 
 Description:
 Main Streamlit application with authentication and multiple pages.
 Core modules: Interactive Structure Viewer (main hub), event entry, 
 bulk import, view data export/import.
+
+NEW in v1.7.0:
+- 🏋️ Add Activity page - mobile-optimized workout/activity entry
+- Support for multiple sessions per day (triathlete workflow)
+- Session grouping by start time
+- Hierarchical category selection with parent attribute inheritance
 
 REMOVED in v1.6.1:
 - View Structure page (deprecated → removed)
@@ -20,7 +26,8 @@ All functionality consolidated in Interactive Structure Viewer.
 Modules:
 - auth: User authentication
 - structure_viewer: Browse hierarchical structure (tree view)
-- interactive_structure_viewer: Excel-like editing interface (NEW)
+- interactive_structure_viewer: Excel-like editing interface
+- add_activity: Mobile-optimized activity entry (NEW)
 - event_entry: Add single events
 - bulk_import: Import multiple events from Excel/CSV
 - view_data_export: Export events to Excel for editing
@@ -44,6 +51,7 @@ from src import bulk_import
 from src import view_data_export
 from src import view_data_import
 from src import excel_parser_new
+from src.add_activity import render_add_activity
 
 
 # Page configuration
@@ -98,6 +106,7 @@ def main():
         "Navigation",
         [
             "📋 Interactive Structure Viewer",
+            "🏋️ Add Activity",
             "➕ Add Event",
             "📤 Bulk Import",
             "📊 View Data - Export",
@@ -139,6 +148,9 @@ def main():
     # Route to appropriate page
     if page == "📋 Interactive Structure Viewer":
         render_interactive_structure_viewer(supabase.client, user_id)
+    
+    elif page == "🏋️ Add Activity":
+        render_add_activity(supabase.client, user_id)
     
     elif page == "➕ Add Event":
         event_entry.render_event_entry(supabase.client, user_id)
