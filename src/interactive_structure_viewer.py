@@ -2,9 +2,18 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-13 16:00 UTC
+Last Modified: 2025-12-14 12:45 UTC
 Python: 3.11
-Version: 1.12.9 - Added Cancel button to Upload Excel flow
+Version: 1.12.10 - Fixed Cancel button in Upload Excel flow
+
+CHANGELOG v1.12.10 (Upload Cancel Fix):
+- 🐛 FIXED: Cancel button now properly resets file uploader
+  - ROOT CAUSE: st.rerun() didn't clear file from session state
+  - File uploader retained uploaded file after Cancel click
+  - SOLUTION: Dynamic key using upload_reset_counter
+  - Incrementing counter changes widget key, forcing fresh state
+- ✅ Cancel now immediately clears file and returns to upload prompt
+- 🔧 Added upload_reset_counter to session state initialization
 
 CHANGELOG v1.12.9 (Upload Cancel Button):
 - ✨ NEW: Cancel button in Upload Excel confirmation section
@@ -2256,6 +2265,11 @@ def render_interactive_structure_viewer(client, user_id: str):
     if 'editing_active' not in st.session_state:
         st.session_state.editing_active = False
     
+    # v1.12.10: Counter to force file_uploader reset after Cancel
+    # Incrementing this counter changes the widget key, clearing the uploaded file
+    if 'upload_reset_counter' not in st.session_state:
+        st.session_state.upload_reset_counter = 0
+    
     # Initialize State Machine (minimal integration for critical paths)
     state_mgr = StateManager(st.session_state)
     
@@ -3738,12 +3752,12 @@ def render_interactive_structure_viewer(client, user_id: str):
             
             st.markdown("---")
             
-            # File uploader
+            # File uploader - v1.12.10: Dynamic key to allow reset on Cancel
             uploaded_file = st.file_uploader(
                 "📁 Browse Files - Upload Hierarchical_View Excel",
                 type=["xlsx"],
                 help="Upload the Excel file you generated in Read-Only mode",
-                key="isv_upload_excel"
+                key=f"isv_upload_excel_{st.session_state.upload_reset_counter}"
             )
             
             if not uploaded_file:
@@ -4066,8 +4080,9 @@ def render_interactive_structure_viewer(client, user_id: str):
                                 key="isv_cancel_upload"
                             )
                         
-                        # Handle Cancel - just show message and rerun to clear file
+                        # Handle Cancel - v1.12.10: Increment counter to reset file_uploader
                         if cancel_button:
+                            st.session_state.upload_reset_counter += 1
                             st.info("📤 Upload cancelled. You can upload a different file or switch modes.")
                             st.rerun()
                         

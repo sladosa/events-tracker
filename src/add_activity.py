@@ -2,9 +2,9 @@
 Events Tracker - Add Activity Module
 =====================================
 Created: 2025-12-13 15:00 UTC
-Last Modified: 2025-12-13 15:00 UTC
+Last Modified: 2025-12-14 13:00 UTC
 Python: 3.11
-Version: 1.0.0 - Initial mobile-optimized implementation
+Version: 1.2.0 - Added photo attachment support
 
 Description:
 Mobile-first activity entry form with support for:
@@ -13,55 +13,159 @@ Mobile-first activity entry form with support for:
 - Session grouping by start time
 - Quick add workflow for repeated entries
 - Parent category attributes (summary fields)
+- Photo attachments via Supabase Storage
+
+CHANGELOG v1.2.0:
+- ✨ NEW: Photo attachment support
+  - Upload images (jpg, png, webp) up to 5MB
+  - Stored in Supabase Storage bucket "activity-attachments"
+  - Linked to events via event_attachments table
+  - Thumbnails shown in session preview
+- 🔧 IMPROVED: Session preview shows attachment indicator (📷)
+
+CHANGELOG v1.1.0:
+- 🐛 FIXED: Infinite loop when saving
+- 🐛 FIXED: Numeric attributes not saving
+- 🐛 FIXED: Session preview blocking
+- 🔧 REMOVED: Lock datetime toggle
+- 🔧 REMOVED: Session badges from preview
 
 Features:
 - 📱 Mobile-optimized touch targets (48px minimum)
-- ⏰ Session time tracking (morning/noon/evening badges)
 - 🔍 Searchable category dropdown
-- 📊 Live session preview
+- 📊 Live session preview with thumbnails
 - 💾 Save & Add Another workflow
-- 🎯 Sticky date/time header
+- 📷 Photo attachments
 
-Dependencies: streamlit, datetime, supabase
-
-Technical Notes:
-- Uses session_start (TIMESTAMPTZ) for multi-session support
-- Groups events by DATE(session_start) + hour for session separation
-- Inherits attributes from parent categories
+Dependencies: streamlit, datetime, supabase, uuid
 """
 
 import streamlit as st
 from datetime import datetime, date, time, timedelta
 from typing import Dict, List, Optional, Tuple
-import json
+import uuid
 
 
 # ============================================
 # CONSTANTS & CONFIGURATION
 # ============================================
 
-# Time slot presets with icons
+# Time slot presets (icons removed to avoid rendering issues)
 TIME_SLOTS = {
-    "🌅 Morning": time(6, 30),
-    "🌞 Midday": time(12, 0),
-    "🌆 Afternoon": time(15, 30),
-    "🌙 Evening": time(18, 30),
-    "🦉 Night": time(21, 0),
+    "Morning (6:30)": time(6, 30),
+    "Midday (12:00)": time(12, 0),
+    "Afternoon (15:30)": time(15, 30),
+    "Evening (18:30)": time(18, 30),
+    "Night (21:00)": time(21, 0),
 }
 
-# Session badge based on hour
-def get_session_badge(hour: int) -> str:
-    """Return emoji badge based on hour of day."""
-    if 5 <= hour < 10:
-        return "🌅"
-    elif 10 <= hour < 14:
-        return "🌞"
-    elif 14 <= hour < 17:
-        return "🌆"
-    elif 17 <= hour < 21:
-        return "🌙"
-    else:
-        return "🦉"
+# Storage configuration
+STORAGE_BUCKET = "activity-attachments"
+MAX_FILE_SIZE_MB = 5
+ALLOWED_IMAGE_TYPES = ["jpg", "jpeg", "png", "webp"]
+
+
+# ============================================
+# STORAGE & ATTACHMENT FUNCTIONS
+# ============================================
+
+def upload_to_storage(client, user_id: str, file_data: bytes, filename: str) -> Tuple[bool, str, str]:
+    """
+    Upload file to Supabase Storage.
+    
+    Args:
+        client: Supabase client
+        user_id: Current user's UUID
+        file_data: File bytes
+        filename: Original filename
+        
+    Returns:
+        Tuple of (success: bool, url: str, error_message: str)
+    """
+    try:
+        # Generate unique path: user_id/timestamp_filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_ext = filename.split('.')[-1].lower()
+        unique_filename = f"{timestamp}_{uuid.uuid4().hex[:8]}.{file_ext}"
+        storage_path = f"{user_id}/{unique_filename}"
+        
+        # Upload to storage
+        result = client.storage.from_(STORAGE_BUCKET).upload(
+            path=storage_path,
+            file=file_data,
+            file_options={"content-type": f"image/{file_ext}"}
+        )
+        
+        # Get public URL
+        public_url = client.storage.from_(STORAGE_BUCKET).get_public_url(storage_path)
+        
+        return True, public_url, ""
+        
+    except Exception as e:
+        return False, "", str(e)
+
+
+def save_attachment(
+    client,
+    user_id: str,
+    event_id: str,
+    url: str,
+    filename: str,
+    size_bytes: int,
+    attachment_type: str = "image"
+) -> Tuple[bool, str]:
+    """
+    Save attachment record to event_attachments table.
+    
+    Returns:
+        Tuple of (success: bool, message: str)
+    """
+    try:
+        record = {
+            'event_id': event_id,
+            'user_id': user_id,
+            'type': attachment_type,
+            'url': url,
+            'filename': filename,
+            'size_bytes': size_bytes
+        }
+        
+        client.table('event_attachments').insert(record).execute()
+        return True, "Attachment saved"
+        
+    except Exception as e:
+        return False, str(e)
+
+
+def load_attachments_for_events(client, user_id: str, event_ids: List[str]) -> Dict[str, List[Dict]]:
+    """
+    Load attachments for multiple events.
+    
+    Returns:
+        Dict mapping event_id to list of attachments
+    """
+    if not event_ids:
+        return {}
+    
+    try:
+        resp = client.table('event_attachments') \
+            .select('event_id, url, filename, type') \
+            .eq('user_id', user_id) \
+            .in_('event_id', event_ids) \
+            .execute()
+        
+        # Group by event_id
+        result = {}
+        for att in resp.data:
+            eid = att['event_id']
+            if eid not in result:
+                result[eid] = []
+            result[eid].append(att)
+        
+        return result
+        
+    except Exception:
+        return {}
 
 
 # ============================================
@@ -162,51 +266,61 @@ def load_category_chain(client, user_id: str, category_id: str, cat_tree: List[D
     return chain
 
 
-def load_todays_sessions(client, user_id: str, target_date: date) -> List[Dict]:
-    """Load all sessions for a specific date grouped by start time."""
+def load_todays_sessions(client, user_id: str, target_date: date) -> Tuple[List[Dict], List[str]]:
+    """
+    Load all sessions for a specific date.
+    
+    v1.2.0: Returns event_ids for attachment lookup.
+    
+    Returns:
+        Tuple of (events list, event_ids list)
+    """
     try:
         # Query events for this date
-        start_of_day = datetime.combine(target_date, time(0, 0))
-        end_of_day = datetime.combine(target_date + timedelta(days=1), time(0, 0))
-        
         resp = client.table('events') \
-            .select('id, category_id, session_start, comment, categories(name)') \
+            .select('id, category_id, session_start, event_date, comment, categories(name)') \
             .eq('user_id', user_id) \
-            .gte('session_start', start_of_day.isoformat()) \
-            .lt('session_start', end_of_day.isoformat()) \
-            .order('session_start') \
+            .eq('event_date', target_date.isoformat()) \
+            .order('session_start', desc=False) \
             .execute()
         
         if not resp.data:
-            return []
+            return [], []
         
-        # Group by session_start hour
-        sessions = {}
+        # Simple list of events (no complex grouping)
+        events = []
+        event_ids = []
         for event in resp.data:
+            event_ids.append(event['id'])
+            
+            # Safe datetime parsing
+            time_str = "??:??"
             if event.get('session_start'):
-                session_time = datetime.fromisoformat(event['session_start'].replace('Z', '+00:00'))
-                # Round to nearest hour for grouping
-                session_key = session_time.replace(minute=0, second=0, microsecond=0)
-                
-                if session_key not in sessions:
-                    sessions[session_key] = {
-                        'time': session_time,
-                        'badge': get_session_badge(session_time.hour),
-                        'events': []
-                    }
-                
-                sessions[session_key]['events'].append({
-                    'id': event['id'],
-                    'category_name': event.get('categories', {}).get('name', 'Unknown'),
-                    'comment': event.get('comment', '')
-                })
+                try:
+                    # Handle various datetime formats
+                    ss = event['session_start']
+                    if isinstance(ss, str):
+                        # Remove timezone suffix for parsing
+                        ss = ss.replace('Z', '+00:00')
+                        if '+' in ss:
+                            ss = ss.split('+')[0]
+                        session_dt = datetime.fromisoformat(ss)
+                        time_str = session_dt.strftime('%H:%M')
+                except Exception:
+                    time_str = "??:??"
+            
+            events.append({
+                'id': event['id'],
+                'time_str': time_str,
+                'category_name': event.get('categories', {}).get('name', 'Unknown') if event.get('categories') else 'Unknown',
+                'comment': event.get('comment', '') or ''
+            })
         
-        # Convert to sorted list
-        return sorted(sessions.values(), key=lambda x: x['time'])
+        return events, event_ids
         
     except Exception as e:
         st.error(f"Error loading sessions: {e}")
-        return []
+        return [], []
 
 
 # ============================================
@@ -220,11 +334,13 @@ def save_activity_event(
     session_start: datetime,
     comment: str,
     attributes: Dict[str, any]
-) -> Tuple[bool, str]:
+) -> Tuple[bool, str, Optional[str]]:
     """
     Save activity event with attributes.
     
-    Returns: (success: bool, message: str)
+    v1.2.0: Now returns event_id for attachment linking.
+    
+    Returns: (success: bool, message: str, event_id: Optional[str])
     """
     try:
         # 1. Create event
@@ -239,15 +355,19 @@ def save_activity_event(
         event_resp = client.table('events').insert(event_data).execute()
         
         if not event_resp.data:
-            return False, "Failed to create event"
+            return False, "Failed to create event", None
         
         event_id = event_resp.data[0]['id']
         
         # 2. Save attributes (EAV pattern)
+        saved_count = 0
         if attributes:
             attr_records = []
             for attr_def_id, value in attributes.items():
-                if value is None or value == '':
+                # Skip only None and empty string, NOT 0 or 0.0
+                if value is None:
+                    continue
+                if isinstance(value, str) and value.strip() == '':
                     continue
                     
                 record = {
@@ -260,9 +380,11 @@ def save_activity_event(
                 if isinstance(value, bool):
                     record['value_boolean'] = value
                 elif isinstance(value, (int, float)):
-                    record['value_number'] = value
+                    record['value_number'] = float(value)  # Ensure float
                 elif isinstance(value, datetime):
                     record['value_datetime'] = value.isoformat()
+                elif isinstance(value, date):
+                    record['value_datetime'] = datetime.combine(value, time(0, 0)).isoformat()
                 else:
                     record['value_text'] = str(value)
                 
@@ -270,10 +392,12 @@ def save_activity_event(
             
             if attr_records:
                 client.table('event_attributes').insert(attr_records).execute()
+                saved_count = len(attr_records)
         
-        return True, f"Activity saved! (Event ID: {event_id[:8]}...)"
+        return True, f"Activity saved! ({saved_count} attributes)", event_id
         
     except Exception as e:
+        return False, f"Error saving: {str(e)}", None
         return False, f"Error saving: {str(e)}"
 
 
@@ -281,8 +405,13 @@ def save_activity_event(
 # UI COMPONENTS
 # ============================================
 
-def render_mobile_header(selected_date: date, selected_time: time) -> Tuple[date, time]:
-    """Render sticky header with date and time selection."""
+def render_mobile_header() -> Tuple[date, time]:
+    """
+    Render header with date and time selection.
+    
+    v1.1.0: Simplified - removed lock toggle, always allows editing.
+    Quick presets now use session state properly.
+    """
     
     # Apply mobile-friendly CSS
     st.markdown("""
@@ -299,27 +428,16 @@ def render_mobile_header(selected_date: date, selected_time: time) -> Tuple[date
         font-size: 18px !important;
         min-height: 48px !important;
     }
-    /* Session card styling */
-    .session-card {
-        background: #f0f2f6;
-        border-radius: 8px;
-        padding: 12px;
-        margin: 8px 0;
-    }
-    .session-badge {
-        font-size: 24px;
-        margin-right: 8px;
-    }
-    /* Quick time buttons */
-    .time-preset-btn {
-        padding: 8px 12px;
-        margin: 4px;
-        border-radius: 20px;
-    }
     </style>
     """, unsafe_allow_html=True)
     
     st.subheader("🏋️ Add Activity")
+    
+    # Initialize session state for date/time
+    if 'activity_date' not in st.session_state:
+        st.session_state.activity_date = date.today()
+    if 'activity_time' not in st.session_state:
+        st.session_state.activity_time = datetime.now().time().replace(second=0, microsecond=0)
     
     # Date and time in two columns
     col1, col2 = st.columns(2)
@@ -327,30 +445,34 @@ def render_mobile_header(selected_date: date, selected_time: time) -> Tuple[date
     with col1:
         new_date = st.date_input(
             "📅 Date",
-            value=selected_date,
-            key="activity_date",
+            value=st.session_state.activity_date,
+            key="activity_date_input",
             help="Select activity date"
         )
+        st.session_state.activity_date = new_date
     
     with col2:
         new_time = st.time_input(
             "⏰ Time",
-            value=selected_time,
-            key="activity_time",
+            value=st.session_state.activity_time,
+            key="activity_time_input",
             step=300,  # 5 minute increments
             help="Session start time"
         )
+        st.session_state.activity_time = new_time
     
-    # Quick time presets
+    # Quick time presets - v1.1.0: Use form to avoid rerun issues
     st.caption("Quick presets:")
-    preset_cols = st.columns(len(TIME_SLOTS))
+    preset_cols = st.columns(5)
     for i, (label, preset_time) in enumerate(TIME_SLOTS.items()):
         with preset_cols[i]:
-            if st.button(label.split()[0], key=f"preset_{i}", use_container_width=True):
-                new_time = preset_time
+            # Short label for button
+            short_label = label.split('(')[0].strip()[:4]
+            if st.button(short_label, key=f"preset_{i}", use_container_width=True):
+                st.session_state.activity_time = preset_time
                 st.rerun()
     
-    return new_date, new_time
+    return st.session_state.activity_date, st.session_state.activity_time
 
 
 def render_category_selector(cat_tree: List[Dict], current_selection: Optional[str] = None) -> Optional[Dict]:
@@ -411,7 +533,7 @@ def render_attribute_input(attr: Dict, key_prefix: str) -> any:
     
     if data_type == 'number':
         # Parse default value
-        default_num = 0.0
+        default_num = None  # Use None to show empty field
         if default:
             try:
                 default_num = float(default)
@@ -422,6 +544,7 @@ def render_attribute_input(attr: Dict, key_prefix: str) -> any:
             label,
             value=default_num,
             step=1.0,
+            format="%.2f",
             key=key,
             help=attr.get('description', '')
         )
@@ -435,7 +558,7 @@ def render_attribute_input(attr: Dict, key_prefix: str) -> any:
         )
     
     elif data_type == 'boolean':
-        default_bool = default and default.lower() in ('true', '1', 'yes')
+        default_bool = default and str(default).lower() in ('true', '1', 'yes')
         return st.checkbox(
             label,
             value=default_bool,
@@ -460,74 +583,43 @@ def render_attribute_input(attr: Dict, key_prefix: str) -> any:
         )
 
 
-def render_attribute_section(
-    client, 
-    user_id: str, 
-    category: Dict, 
-    key_prefix: str,
-    expanded: bool = True,
-    show_header: bool = True
-) -> Dict[str, any]:
+def render_session_preview(events: List[Dict], attachments: Dict[str, List[Dict]] = None):
     """
-    Render attribute inputs for a category.
-    Returns dict of {attr_id: value}
+    Render today's session preview panel.
+    
+    v1.2.0: Shows 📷 indicator for events with attachments.
+    
+    Args:
+        events: List of event dicts
+        attachments: Dict mapping event_id to list of attachments
     """
-    attrs = load_attributes_for_category(client, user_id, category['id'])
     
-    if not attrs:
-        return {}
-    
-    values = {}
-    
-    if show_header:
-        with st.expander(f"**{category['name']}** attributes", expanded=expanded):
-            # Render in 2-column grid for mobile
-            for i in range(0, len(attrs), 2):
-                cols = st.columns(2)
-                for j, col in enumerate(cols):
-                    if i + j < len(attrs):
-                        with col:
-                            attr = attrs[i + j]
-                            values[attr['id']] = render_attribute_input(attr, key_prefix)
-    else:
-        for i in range(0, len(attrs), 2):
-            cols = st.columns(2)
-            for j, col in enumerate(cols):
-                if i + j < len(attrs):
-                    with col:
-                        attr = attrs[i + j]
-                        values[attr['id']] = render_attribute_input(attr, key_prefix)
-    
-    return values
-
-
-def render_session_preview(sessions: List[Dict], current_category: Optional[str] = None):
-    """Render today's session preview panel."""
-    
-    if not sessions:
+    if not events:
         st.caption("📊 No activities recorded today yet")
         return
     
-    total_events = sum(len(s['events']) for s in sessions)
-    st.caption(f"📊 Today: {len(sessions)} session(s), {total_events} activities")
+    if attachments is None:
+        attachments = {}
     
-    for session in sessions:
-        badge = session['badge']
-        time_str = session['time'].strftime('%H:%M')
-        event_count = len(session['events'])
+    st.caption(f"📊 Today: {len(events)} activities")
+    
+    # Simple table-like display
+    for event in events:
+        time_str = event.get('time_str', '??:??')
+        cat_name = event.get('category_name', 'Unknown')
+        comment = event.get('comment', '')
+        event_id = event.get('id', '')
         
-        with st.container():
-            st.markdown(f"""
-            <div style="background:#f0f2f6; border-radius:8px; padding:8px; margin:4px 0;">
-                <span style="font-size:20px;">{badge}</span>
-                <strong>{time_str}</strong> 
-                <span style="color:#666;">({event_count} activities)</span>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Show event names
-            event_names = [e['category_name'] for e in session['events']]
-            st.caption(", ".join(event_names[:5]) + ("..." if len(event_names) > 5 else ""))
+        # Check for attachments
+        has_attachment = event_id in attachments and len(attachments[event_id]) > 0
+        photo_icon = " 📷" if has_attachment else ""
+        
+        # One-line display
+        display = f"**{time_str}** - {cat_name}{photo_icon}"
+        if comment:
+            display += f" _{comment[:30]}{'...' if len(comment) > 30 else ''}_"
+        
+        st.markdown(display)
 
 
 # ============================================
@@ -538,20 +630,28 @@ def render_add_activity(client, user_id: str):
     """
     Main entry point for Add Activity page.
     
+    v1.2.0: Added photo attachment support.
+    
     Args:
         client: Supabase client
         user_id: Current user's UUID
     """
     
     # Initialize session state
-    if 'activity_selected_date' not in st.session_state:
-        st.session_state.activity_selected_date = date.today()
-    if 'activity_selected_time' not in st.session_state:
-        st.session_state.activity_selected_time = datetime.now().time().replace(second=0, microsecond=0)
     if 'activity_last_category' not in st.session_state:
         st.session_state.activity_last_category = None
-    if 'activity_lock_datetime' not in st.session_state:
-        st.session_state.activity_lock_datetime = False
+    if 'activity_save_success' not in st.session_state:
+        st.session_state.activity_save_success = False
+    if 'activity_save_message' not in st.session_state:
+        st.session_state.activity_save_message = ""
+    if 'activity_file_counter' not in st.session_state:
+        st.session_state.activity_file_counter = 0
+    
+    # Check for success message from previous save
+    if st.session_state.activity_save_success:
+        st.success(f"✅ {st.session_state.activity_save_message}")
+        st.session_state.activity_save_success = False
+        st.session_state.activity_save_message = ""
     
     # Load category tree once
     cat_tree = load_category_tree(client, user_id)
@@ -559,22 +659,7 @@ def render_add_activity(client, user_id: str):
     # ─────────────────────────────────────────
     # HEADER: Date & Time
     # ─────────────────────────────────────────
-    selected_date, selected_time = render_mobile_header(
-        st.session_state.activity_selected_date,
-        st.session_state.activity_selected_time
-    )
-    
-    # Lock checkbox
-    lock_datetime = st.checkbox(
-        "🔒 Lock date/time for session",
-        value=st.session_state.activity_lock_datetime,
-        help="Keep same date/time when adding multiple activities"
-    )
-    st.session_state.activity_lock_datetime = lock_datetime
-    
-    if not lock_datetime:
-        st.session_state.activity_selected_date = selected_date
-        st.session_state.activity_selected_time = selected_time
+    selected_date, selected_time = render_mobile_header()
     
     st.markdown("---")
     
@@ -591,8 +676,9 @@ def render_add_activity(client, user_id: str):
         
         # Still show today's sessions
         st.markdown("---")
-        sessions = load_todays_sessions(client, user_id, selected_date)
-        render_session_preview(sessions)
+        events, event_ids = load_todays_sessions(client, user_id, selected_date)
+        attachments = load_attachments_for_events(client, user_id, event_ids) if event_ids else {}
+        render_session_preview(events, attachments)
         return
     
     # Remember selection
@@ -638,6 +724,28 @@ def render_add_activity(client, user_id: str):
                             all_attributes[attr['id']] = value
     
     # ─────────────────────────────────────────
+    # PHOTO ATTACHMENT (Optional)
+    # ─────────────────────────────────────────
+    with st.expander("📷 Add Photo (optional)", expanded=False):
+        uploaded_file = st.file_uploader(
+            "Upload image",
+            type=ALLOWED_IMAGE_TYPES,
+            help=f"Max {MAX_FILE_SIZE_MB}MB. Supported: JPG, PNG, WebP",
+            key=f"activity_photo_{st.session_state.activity_file_counter}"
+        )
+        
+        if uploaded_file:
+            # Validate file size
+            file_size = len(uploaded_file.getvalue())
+            if file_size > MAX_FILE_SIZE_MB * 1024 * 1024:
+                st.error(f"❌ File too large! Max {MAX_FILE_SIZE_MB}MB")
+                uploaded_file = None
+            else:
+                # Show preview
+                st.image(uploaded_file, caption=uploaded_file.name, width=200)
+                st.caption(f"Size: {file_size / 1024:.1f} KB")
+    
+    # ─────────────────────────────────────────
     # COMMENT (Optional)
     # ─────────────────────────────────────────
     comment = st.text_area(
@@ -652,8 +760,9 @@ def render_add_activity(client, user_id: str):
     # ─────────────────────────────────────────
     # TODAY'S SESSION PREVIEW
     # ─────────────────────────────────────────
-    sessions = load_todays_sessions(client, user_id, selected_date)
-    render_session_preview(sessions, selected_cat['name'])
+    events, event_ids = load_todays_sessions(client, user_id, selected_date)
+    attachments = load_attachments_for_events(client, user_id, event_ids) if event_ids else {}
+    render_session_preview(events, attachments)
     
     st.markdown("---")
     
@@ -680,12 +789,9 @@ def render_add_activity(client, user_id: str):
     # Handle save actions
     if save_and_add or save_and_finish:
         # Combine date and time
-        session_start = datetime.combine(
-            st.session_state.activity_selected_date,
-            st.session_state.activity_selected_time
-        )
+        session_start = datetime.combine(selected_date, selected_time)
         
-        success, message = save_activity_event(
+        success, message, event_id = save_activity_event(
             client=client,
             user_id=user_id,
             category_id=selected_cat['id'],
@@ -694,18 +800,41 @@ def render_add_activity(client, user_id: str):
             attributes=all_attributes
         )
         
-        if success:
-            st.success(f"✅ {message}")
+        if success and event_id:
+            # Handle photo attachment if present
+            attachment_msg = ""
+            if uploaded_file:
+                file_data = uploaded_file.getvalue()
+                upload_ok, url, error = upload_to_storage(
+                    client, user_id, file_data, uploaded_file.name
+                )
+                
+                if upload_ok:
+                    save_ok, _ = save_attachment(
+                        client, user_id, event_id, url,
+                        uploaded_file.name, len(file_data), "image"
+                    )
+                    if save_ok:
+                        attachment_msg = " + 📷 photo"
+                else:
+                    st.warning(f"⚠️ Photo upload failed: {error}")
+            
+            final_message = message + attachment_msg
             
             if save_and_add:
-                # Lock datetime for session continuity
-                st.session_state.activity_lock_datetime = True
-                # Clear form but keep category
+                # Set success message for next render
+                st.session_state.activity_save_success = True
+                st.session_state.activity_save_message = final_message
+                # Increment file counter to reset uploader
+                st.session_state.activity_file_counter += 1
+                # Keep category, reset time to now
+                st.session_state.activity_time = datetime.now().time().replace(second=0, microsecond=0)
                 st.rerun()
             else:
-                # Clear everything
+                # Save & Finish - show success and clear
+                st.success(f"✅ {final_message}")
                 st.session_state.activity_last_category = None
-                st.session_state.activity_lock_datetime = False
+                st.session_state.activity_file_counter += 1
                 st.balloons()
         else:
             st.error(f"❌ {message}")
@@ -719,7 +848,7 @@ if __name__ == "__main__":
     st.set_page_config(
         page_title="Add Activity",
         page_icon="🏋️",
-        layout="centered",  # Better for mobile
+        layout="centered",
         initial_sidebar_state="collapsed"
     )
     
