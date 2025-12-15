@@ -2,56 +2,48 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-12-13 15:30 UTC
+Last Modified: 2025-12-15 10:00 UTC
 Python: 3.11
-Version: 1.7.0 - Added Add Activity module (mobile-optimized)
+Version: 1.8.0 - Added Show Events, removed Add Event
 
 Description:
 Main Streamlit application with authentication and multiple pages.
-Core modules: Interactive Structure Viewer (main hub), event entry, 
-bulk import, view data export/import.
+Core modules: Interactive Structure Viewer (main hub), Add Activity,
+Show Events, bulk import, view data export/import.
 
-NEW in v1.7.0:
-- 🏋️ Add Activity page - mobile-optimized workout/activity entry
-- Support for multiple sessions per day (triathlete workflow)
-- Session grouping by start time
-- Hierarchical category selection with parent attribute inheritance
+NEW in v1.8.0:
+- 📋 Show Events page - view, edit, delete events with filters
+- 🗑️ Removed Add Event page (obsolete - replaced by Add Activity)
+- 🏋️ Add Activity v2.0.0 - filter-first design with shortcuts
 
-REMOVED in v1.6.1:
-- View Structure page (deprecated → removed)
-- Download Structure page (deprecated → removed)  
-- Upload Template page (deprecated → removed)
-All functionality consolidated in Interactive Structure Viewer.
+CHANGELOG:
+- v1.8.0: Show Events + Remove Add Event
+- v1.7.0: Add Activity module (mobile-optimized)
+- v1.6.1: Removed deprecated pages (View Structure, Download, Upload Template)
 
 Modules:
 - auth: User authentication
-- structure_viewer: Browse hierarchical structure (tree view)
-- interactive_structure_viewer: Excel-like editing interface
-- add_activity: Mobile-optimized activity entry (NEW)
-- event_entry: Add single events
+- interactive_structure_viewer: Excel-like editing interface (main hub)
+- add_activity: Mobile-optimized activity entry with shortcuts
+- show_events: View, edit, delete events
 - bulk_import: Import multiple events from Excel/CSV
 - view_data_export: Export events to Excel for editing
 - view_data_import: Import edited Excel with change detection
-- reverse_engineer: Download structure to Excel
-- enhanced_structure_exporter: Enhanced Excel export with validation
-- hierarchical_parser: Parse and update structure from Hierarchical_View Excel
 """
 
 import streamlit as st
 import os
-import tempfile
 from dotenv import load_dotenv
 
 # Import local modules
 from src.auth import AuthManager
 from src import supabase_client
 from src.interactive_structure_viewer import render_interactive_structure_viewer
-from src import event_entry
+from src.add_activity import render_add_activity
+from src.show_events import render_show_events
 from src import bulk_import
 from src import view_data_export
 from src import view_data_import
-from src import excel_parser_new
-from src.add_activity import render_add_activity
 
 
 # Page configuration
@@ -107,10 +99,10 @@ def main():
         [
             "📋 Interactive Structure Viewer",
             "🏋️ Add Activity",
-            "➕ Add Event",
+            "📊 Show Events",
             "📤 Bulk Import",
-            "📊 View Data - Export",
-            "📥 View Data - Import",
+            "📥 View Data - Export",
+            "📤 View Data - Import",
             "ℹ️ Help"
         ],
         label_visibility="collapsed"
@@ -152,16 +144,16 @@ def main():
     elif page == "🏋️ Add Activity":
         render_add_activity(supabase.client, user_id)
     
-    elif page == "➕ Add Event":
-        event_entry.render_event_entry(supabase.client, user_id)
+    elif page == "📊 Show Events":
+        render_show_events(supabase.client, user_id)
     
     elif page == "📤 Bulk Import":
         bulk_import.render_bulk_import(supabase.client, user_id)
     
-    elif page == "📊 View Data - Export":
+    elif page == "📥 View Data - Export":
         view_data_export.render_view_data_export(supabase.client, user_id)
     
-    elif page == "📥 View Data - Import":
+    elif page == "📤 View Data - Import":
         view_data_import.render_view_data_import(supabase.client, user_id)
     
     elif page == "ℹ️ Help":
@@ -199,11 +191,12 @@ def render_help_page():
     - Add/modify/delete items with validation
     
     **2. Event Entry**
-    - Add individual events through forms
+    - **Add Activity**: Mobile-optimized activity entry with shortcuts
     - Bulk import from Excel/CSV
     - Link events to categories with automatic attribute capture
     
     **3. Data Management**
+    - **Show Events**: View, edit, and delete your events
     - Export events to Excel for editing
     - Import edited data with change detection
     - Filter and search capabilities
@@ -217,10 +210,17 @@ def render_help_page():
     - Two modes: Read-Only (view/export) and Edit (modify/upload)
     - Detailed help available within the page
     
-    **Add Event**
-    - Quick single event entry
-    - Form-based interface
-    - Sticky mode for repeated entries
+    **Add Activity** 🏋️
+    - Mobile-optimized event entry
+    - Filter by Area → Category drill-down
+    - Save shortcuts for frequently used categories
+    - Photo attachments support
+    
+    **Show Events** 📊
+    - View all your events with filters
+    - Edit event details and attributes
+    - Delete events with confirmation
+    - Pagination for large datasets
     
     **Bulk Import**
     - Import multiple events from Excel/CSV
@@ -244,26 +244,12 @@ def render_help_page():
        - Define Attributes for each Category
     
     2. **Add some events**
-       - Use "Add Event" for individual entries
+       - Use "Add Activity" for quick entry
        - Or use "Bulk Import" for multiple events
     
-    3. **Review and export your data**
-       - Use "View Data - Export" to see your events
-       - Edit in Excel if needed
-       - Import changes back
-    
-    ---
-    
-    ### ℹ️ Page-Specific Help
-    
-    Each page in Events Tracker has its own detailed help section:
-    
-    - **Interactive Structure Viewer**: Collapsible help at top of page
-    - **Add Event**: Instructions within the form
-    - **Bulk Import**: Step-by-step guide with examples
-    - **View Data Export/Import**: Detailed workflow documentation
-    
-    💡 **Tip:** Look for expandable help sections (ℹ️) on each page for specific guidance.
+    3. **Review and manage your data**
+       - Use "Show Events" to view and edit
+       - Use "View Data - Export" for Excel export
     
     ---
     
@@ -310,15 +296,6 @@ def render_help_page():
     
     ---
     
-    ### ❓ Need More Help?
-    
-    - **Page-specific help**: Available on each page (look for ℹ️ icons)
-    - **Interactive Structure Viewer**: Most comprehensive help section
-    - **Validation messages**: Read error messages carefully - they guide you to fixes
-    - **Expander sections**: Click to view detailed error information
-    
-    ---
-    
     ### 🎉 Happy Tracking!
     
     Remember: Events Tracker is designed to be flexible. Start with basics and expand as you discover what works for your tracking needs.
@@ -326,7 +303,7 @@ def render_help_page():
     
     # Version info
     st.markdown("---")
-    st.caption("Version: 2025-12-01 12:00 UTC | Python: 3.11 | Streamlit: 1.28.0")
+    st.caption("Version: 1.8.0 | 2025-12-15 | Python: 3.11 | Streamlit: 1.28.0")
 
 
 if __name__ == "__main__":
