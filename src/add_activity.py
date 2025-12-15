@@ -2,9 +2,9 @@
 Events Tracker - Add Activity Module
 =====================================
 Created: 2025-12-13 15:00 UTC
-Last Modified: 2025-12-15 09:30 UTC
+Last Modified: 2025-12-15 10:30 UTC
 Python: 3.11
-Version: 2.0.0 - Major UI/UX overhaul
+Version: 2.0.1 - Duplicate save bugfix
 
 Description:
 Mobile-first activity entry form with:
@@ -12,6 +12,9 @@ Mobile-first activity entry form with:
 - Shortcuts for frequently used filter combinations
 - Optimized layout for minimal scrolling
 - Photo attachments via Supabase Storage
+
+CHANGELOG v2.0.1:
+- 🐛 FIXED: Duplicate entries on Save & Add Another (added save guard)
 
 CHANGELOG v2.0.0:
 - 🎯 NEW: Filter by Area + Drill-down to Category (ISV-style)
@@ -730,24 +733,32 @@ def render_add_activity(client, user_id: str):
     # ─────────────────────────────────────────
     st.markdown("---")
     
+    # Initialize save guard to prevent duplicate submissions
+    if 'aa_save_in_progress' not in st.session_state:
+        st.session_state.aa_save_in_progress = False
+    
     col1, col2 = st.columns(2)
     
     with col1:
         save_and_add = st.button(
             "💾 Save & Add Another",
             use_container_width=True,
-            type="secondary"
+            type="secondary",
+            disabled=st.session_state.aa_save_in_progress
         )
     
     with col2:
         save_and_finish = st.button(
             "✓ Save & Finish",
             use_container_width=True,
-            type="primary"
+            type="primary",
+            disabled=st.session_state.aa_save_in_progress
         )
     
-    # Handle save actions
-    if save_and_add or save_and_finish:
+    # Handle save actions (with duplicate protection)
+    if (save_and_add or save_and_finish) and not st.session_state.aa_save_in_progress:
+        # Set guard immediately
+        st.session_state.aa_save_in_progress = True
         session_start = datetime.combine(selected_date, selected_time)
         
         success, message, event_id = save_activity_event(
@@ -784,12 +795,15 @@ def render_add_activity(client, user_id: str):
                 st.session_state.aa_save_message = final_message
                 st.session_state.aa_file_counter += 1
                 st.session_state.aa_time = datetime.now().time().replace(second=0, microsecond=0)
+                st.session_state.aa_save_in_progress = False  # Reset guard
                 st.rerun()
             else:
                 st.success(f"✅ {final_message}")
                 st.session_state.aa_file_counter += 1
+                st.session_state.aa_save_in_progress = False  # Reset guard
                 st.balloons()
         else:
+            st.session_state.aa_save_in_progress = False  # Reset guard on error
             st.error(f"❌ {message}")
     
     # ─────────────────────────────────────────
