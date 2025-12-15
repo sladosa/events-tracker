@@ -2,9 +2,9 @@
 Events Tracker - Add Activity Module
 =====================================
 Created: 2025-12-13 15:00 UTC
-Last Modified: 2025-12-15 10:30 UTC
+Last Modified: 2025-12-15 11:00 UTC
 Python: 3.11
-Version: 2.0.1 - Duplicate save bugfix
+Version: 2.0.2 - Critical bugfixes
 
 Description:
 Mobile-first activity entry form with:
@@ -13,8 +13,12 @@ Mobile-first activity entry form with:
 - Optimized layout for minimal scrolling
 - Photo attachments via Supabase Storage
 
+CHANGELOG v2.0.2:
+- 🐛 FIXED: PGRST102 error with photo upload (batch insert → individual inserts)
+- 🐛 FIXED: Duplicate entries on Save & Add Another (timestamp debounce)
+
 CHANGELOG v2.0.1:
-- 🐛 FIXED: Duplicate entries on Save & Add Another (added save guard)
+- 🐛 ATTEMPTED: Duplicate entries fix (guard approach - didn't work)
 
 CHANGELOG v2.0.0:
 - 🎯 NEW: Filter by Area + Drill-down to Category (ISV-style)
@@ -352,22 +356,28 @@ def save_activity_event(client, user_id: str, category_id: str,
         
         event_id = event_resp.data[0]['id']
         
-        # Save attributes (EAV pattern)
+        # Save attributes (EAV pattern) - INSERT ONE BY ONE to avoid PGRST102
+        # (batch insert fails if records have different keys)
         saved_count = 0
         if attributes:
-            attr_records = []
             for attr_def_id, value in attributes.items():
                 if value is None:
                     continue
                 if isinstance(value, str) and value.strip() == '':
                     continue
-                    
+                
+                # Build record with ALL value columns set to None
                 record = {
                     'event_id': event_id,
                     'attribute_definition_id': attr_def_id,
-                    'user_id': user_id
+                    'user_id': user_id,
+                    'value_text': None,
+                    'value_number': None,
+                    'value_datetime': None,
+                    'value_boolean': None
                 }
                 
+                # Set the appropriate value column
                 if isinstance(value, bool):
                     record['value_boolean'] = value
                 elif isinstance(value, (int, float)):
@@ -379,11 +389,13 @@ def save_activity_event(client, user_id: str, category_id: str,
                 else:
                     record['value_text'] = str(value)
                 
-                attr_records.append(record)
-            
-            if attr_records:
-                client.table('event_attributes').insert(attr_records).execute()
-                saved_count = len(attr_records)
+                # Insert one at a time
+                try:
+                    client.table('event_attributes').insert(record).execute()
+                    saved_count += 1
+                except Exception as attr_err:
+                    # Log but continue - don't fail the whole save
+                    print(f"Warning: Failed to save attribute {attr_def_id}: {attr_err}")
         
         return True, f"Activity saved! ({saved_count} attributes)", event_id
         
@@ -733,9 +745,12 @@ def render_add_activity(client, user_id: str):
     # ─────────────────────────────────────────
     st.markdown("---")
     
-    # Initialize save guard to prevent duplicate submissions
-    if 'aa_save_in_progress' not in st.session_state:
-        st.session_state.aa_save_in_progress = False
+    # Timestamp-based debounce to prevent duplicate submissions
+    # (Streamlit buttons can trigger multiple times during slow reruns)
+    if 'aa_last_save_time' not in st.session_state:
+        st.session_state.aa_last_save_time = 0
+    
+    DEBOUNCE_SECONDS = 2  # Minimum seconds between saves
     
     col1, col2 = st.columns(2)
     
@@ -743,68 +758,72 @@ def render_add_activity(client, user_id: str):
         save_and_add = st.button(
             "💾 Save & Add Another",
             use_container_width=True,
-            type="secondary",
-            disabled=st.session_state.aa_save_in_progress
+            type="secondary"
         )
     
     with col2:
         save_and_finish = st.button(
             "✓ Save & Finish",
             use_container_width=True,
-            type="primary",
-            disabled=st.session_state.aa_save_in_progress
+            type="primary"
         )
     
-    # Handle save actions (with duplicate protection)
-    if (save_and_add or save_and_finish) and not st.session_state.aa_save_in_progress:
-        # Set guard immediately
-        st.session_state.aa_save_in_progress = True
-        session_start = datetime.combine(selected_date, selected_time)
+    # Handle save actions (with debounce protection)
+    if save_and_add or save_and_finish:
+        import time as time_module
+        current_time = time_module.time()
+        time_since_last_save = current_time - st.session_state.aa_last_save_time
         
-        success, message, event_id = save_activity_event(
-            client=client,
-            user_id=user_id,
-            category_id=selected_cat['id'],
-            session_start=session_start,
-            comment=comment,
-            attributes=all_attributes
-        )
-        
-        if success and event_id:
-            attachment_msg = ""
-            if uploaded_file:
-                file_data = uploaded_file.getvalue()
-                upload_ok, url, error = upload_to_storage(
-                    client, user_id, file_data, uploaded_file.name
-                )
-                
-                if upload_ok:
-                    save_ok, _ = save_attachment(
-                        client, user_id, event_id, url,
-                        uploaded_file.name, len(file_data)
-                    )
-                    if save_ok:
-                        attachment_msg = " + 📷 photo"
-                else:
-                    st.warning(f"⚠️ Photo upload failed: {error}")
-            
-            final_message = message + attachment_msg
-            
-            if save_and_add:
-                st.session_state.aa_save_success = True
-                st.session_state.aa_save_message = final_message
-                st.session_state.aa_file_counter += 1
-                st.session_state.aa_time = datetime.now().time().replace(second=0, microsecond=0)
-                st.session_state.aa_save_in_progress = False  # Reset guard
-                st.rerun()
-            else:
-                st.success(f"✅ {final_message}")
-                st.session_state.aa_file_counter += 1
-                st.session_state.aa_save_in_progress = False  # Reset guard
-                st.balloons()
+        # Check debounce
+        if time_since_last_save < DEBOUNCE_SECONDS:
+            st.warning(f"⏳ Please wait {DEBOUNCE_SECONDS - time_since_last_save:.1f}s before saving again")
         else:
-            st.session_state.aa_save_in_progress = False  # Reset guard on error
-            st.error(f"❌ {message}")
+            # Update timestamp BEFORE save to prevent race conditions
+            st.session_state.aa_last_save_time = current_time
+            
+            session_start = datetime.combine(selected_date, selected_time)
+            
+            success, message, event_id = save_activity_event(
+                client=client,
+                user_id=user_id,
+                category_id=selected_cat['id'],
+                session_start=session_start,
+                comment=comment,
+                attributes=all_attributes
+            )
+            
+            if success and event_id:
+                attachment_msg = ""
+                if uploaded_file:
+                    file_data = uploaded_file.getvalue()
+                    upload_ok, url, error = upload_to_storage(
+                        client, user_id, file_data, uploaded_file.name
+                    )
+                    
+                    if upload_ok:
+                        save_ok, _ = save_attachment(
+                            client, user_id, event_id, url,
+                            uploaded_file.name, len(file_data)
+                        )
+                        if save_ok:
+                            attachment_msg = " + 📷 photo"
+                    else:
+                        st.warning(f"⚠️ Photo upload failed: {error}")
+                
+                final_message = message + attachment_msg
+                
+                if save_and_add:
+                    st.session_state.aa_save_success = True
+                    st.session_state.aa_save_message = final_message
+                    st.session_state.aa_file_counter += 1
+                    st.session_state.aa_time = datetime.now().time().replace(second=0, microsecond=0)
+                    st.rerun()
+                else:
+                    st.success(f"✅ {final_message}")
+                    st.session_state.aa_file_counter += 1
+                    st.balloons()
+            else:
+                st.error(f"❌ {message}")
     
     # ─────────────────────────────────────────
     # RECENT ACTIVITIES (at bottom, max 10)
