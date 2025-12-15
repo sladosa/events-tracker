@@ -2,9 +2,9 @@
 Events Tracker - Add Activity Module
 =====================================
 Created: 2025-12-13 15:00 UTC
-Last Modified: 2025-12-15 11:00 UTC
+Last Modified: 2025-12-15 11:30 UTC
 Python: 3.11
-Version: 2.0.2 - Critical bugfixes
+Version: 2.0.3 - Callback pattern fix for duplicates
 
 Description:
 Mobile-first activity entry form with:
@@ -13,9 +13,14 @@ Mobile-first activity entry form with:
 - Optimized layout for minimal scrolling
 - Photo attachments via Supabase Storage
 
+CHANGELOG v2.0.3:
+- 🐛 FIXED: Duplicate entries - complete rewrite using callback pattern
+  - Button on_click sets pending action in session state
+  - Save executes ONCE when pending action is detected
+  - Action cleared BEFORE save to prevent re-execution
+
 CHANGELOG v2.0.2:
-- 🐛 FIXED: PGRST102 error with photo upload (batch insert → individual inserts)
-- 🐛 FIXED: Duplicate entries on Save & Add Another (timestamp debounce)
+- 🐛 ATTEMPTED: PGRST102 fix (worked) + timestamp debounce (didn't work)
 
 CHANGELOG v2.0.1:
 - 🐛 ATTEMPTED: Duplicate entries fix (guard approach - didn't work)
@@ -741,89 +746,94 @@ def render_add_activity(client, user_id: str):
     )
     
     # ─────────────────────────────────────────
-    # ACTION BUTTONS (prominent position)
+    # ACTION BUTTONS (with callback to prevent duplicates)
     # ─────────────────────────────────────────
     st.markdown("---")
     
-    # Timestamp-based debounce to prevent duplicate submissions
-    # (Streamlit buttons can trigger multiple times during slow reruns)
-    if 'aa_last_save_time' not in st.session_state:
-        st.session_state.aa_last_save_time = 0
-    
-    DEBOUNCE_SECONDS = 2  # Minimum seconds between saves
+    # Store form data in session state for callback to access
+    st.session_state.aa_form_data = {
+        'category_id': selected_cat['id'],
+        'date': selected_date,
+        'time': selected_time,
+        'comment': comment,
+        'attributes': all_attributes.copy(),
+        'uploaded_file': uploaded_file
+    }
     
     col1, col2 = st.columns(2)
     
     with col1:
-        save_and_add = st.button(
+        st.button(
             "💾 Save & Add Another",
             use_container_width=True,
-            type="secondary"
+            type="secondary",
+            key="btn_save_add",
+            on_click=lambda: setattr(st.session_state, 'aa_pending_action', 'add')
         )
     
     with col2:
-        save_and_finish = st.button(
+        st.button(
             "✓ Save & Finish",
             use_container_width=True,
-            type="primary"
+            type="primary",
+            key="btn_save_finish",
+            on_click=lambda: setattr(st.session_state, 'aa_pending_action', 'finish')
         )
     
-    # Handle save actions (with debounce protection)
-    if save_and_add or save_and_finish:
-        import time as time_module
-        current_time = time_module.time()
-        time_since_last_save = current_time - st.session_state.aa_last_save_time
+    # Process pending save action (runs ONCE after button callback)
+    if st.session_state.get('aa_pending_action') and st.session_state.get('aa_form_data'):
+        action = st.session_state.aa_pending_action
+        form_data = st.session_state.aa_form_data
         
-        # Check debounce
-        if time_since_last_save < DEBOUNCE_SECONDS:
-            st.warning(f"⏳ Please wait {DEBOUNCE_SECONDS - time_since_last_save:.1f}s before saving again")
-        else:
-            # Update timestamp BEFORE save to prevent race conditions
-            st.session_state.aa_last_save_time = current_time
-            
-            session_start = datetime.combine(selected_date, selected_time)
-            
-            success, message, event_id = save_activity_event(
-                client=client,
-                user_id=user_id,
-                category_id=selected_cat['id'],
-                session_start=session_start,
-                comment=comment,
-                attributes=all_attributes
-            )
-            
-            if success and event_id:
-                attachment_msg = ""
-                if uploaded_file:
-                    file_data = uploaded_file.getvalue()
-                    upload_ok, url, error = upload_to_storage(
-                        client, user_id, file_data, uploaded_file.name
+        # Clear pending action IMMEDIATELY to prevent re-execution
+        st.session_state.aa_pending_action = None
+        
+        # Execute save
+        session_start = datetime.combine(form_data['date'], form_data['time'])
+        
+        success, message, event_id = save_activity_event(
+            client=client,
+            user_id=user_id,
+            category_id=form_data['category_id'],
+            session_start=session_start,
+            comment=form_data['comment'],
+            attributes=form_data['attributes']
+        )
+        
+        if success and event_id:
+            attachment_msg = ""
+            if form_data['uploaded_file']:
+                file_data = form_data['uploaded_file'].getvalue()
+                upload_ok, url, error = upload_to_storage(
+                    client, user_id, file_data, form_data['uploaded_file'].name
+                )
+                
+                if upload_ok:
+                    save_ok, _ = save_attachment(
+                        client, user_id, event_id, url,
+                        form_data['uploaded_file'].name, len(file_data)
                     )
-                    
-                    if upload_ok:
-                        save_ok, _ = save_attachment(
-                            client, user_id, event_id, url,
-                            uploaded_file.name, len(file_data)
-                        )
-                        if save_ok:
-                            attachment_msg = " + 📷 photo"
-                    else:
-                        st.warning(f"⚠️ Photo upload failed: {error}")
-                
-                final_message = message + attachment_msg
-                
-                if save_and_add:
-                    st.session_state.aa_save_success = True
-                    st.session_state.aa_save_message = final_message
-                    st.session_state.aa_file_counter += 1
-                    st.session_state.aa_time = datetime.now().time().replace(second=0, microsecond=0)
-                    st.rerun()
+                    if save_ok:
+                        attachment_msg = " + 📷 photo"
                 else:
-                    st.success(f"✅ {final_message}")
-                    st.session_state.aa_file_counter += 1
-                    st.balloons()
-            else:
-                st.error(f"❌ {message}")
+                    st.warning(f"⚠️ Photo upload failed: {error}")
+            
+            final_message = message + attachment_msg
+            
+            if action == 'add':
+                st.session_state.aa_save_success = True
+                st.session_state.aa_save_message = final_message
+                st.session_state.aa_file_counter += 1
+                st.session_state.aa_time = datetime.now().time().replace(second=0, microsecond=0)
+                st.session_state.aa_form_data = None  # Clear form data
+                st.rerun()
+            else:  # finish
+                st.success(f"✅ {final_message}")
+                st.session_state.aa_file_counter += 1
+                st.session_state.aa_form_data = None
+                st.balloons()
+        else:
+            st.error(f"❌ {message}")
     
     # ─────────────────────────────────────────
     # RECENT ACTIVITIES (at bottom, max 10)
