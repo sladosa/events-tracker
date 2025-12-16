@@ -2,21 +2,29 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-12-15 10:00 UTC
+Last Modified: 2025-12-16 16:15 UTC
 Python: 3.11
-Version: 1.8.0 - Added Show Events, removed Add Event
+Version: 1.9.0 - Add Activity Workflow + Show Events Table View
 
 Description:
 Main Streamlit application with authentication and multiple pages.
 Core modules: Interactive Structure Viewer (main hub), Add Activity,
 Show Events, bulk import, view data export/import.
 
-NEW in v1.8.0:
-- 📋 Show Events page - view, edit, delete events with filters
-- 🗑️ Removed Add Event page (obsolete - replaced by Add Activity)
-- 🏋️ Add Activity v2.0.0 - filter-first design with shortcuts
+NEW in v1.9.0:
+- 🏋️ Add Activity v2.1.0 - Downstream Categories Workflow
+  - When parent category has children, shows "Start Workout" button
+  - Step through child categories with Save & Next / Save Same / Skip
+  - Progress bar and workflow summary
+- 📋 Show Events v2.0.0 - Table View Overhaul
+  - Fast table rendering with st.dataframe
+  - Checkbox column for bulk delete
+  - Category_Path column (full hierarchy)
+  - Attribute preview with smart formatting
+  - View/Edit modals for event details
 
 CHANGELOG:
+- v1.9.0: Add Activity Workflow + Show Events Table View
 - v1.8.0: Show Events + Remove Add Event
 - v1.7.0: Add Activity module (mobile-optimized)
 - v1.6.1: Removed deprecated pages (View Structure, Download, Upload Template)

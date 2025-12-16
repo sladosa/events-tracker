@@ -2,25 +2,29 @@
 Events Tracker - Show Events Module
 ====================================
 Created: 2025-12-15 09:45 UTC
-Last Modified: 2025-12-15 09:45 UTC
+Last Modified: 2025-12-16 16:00 UTC
 Python: 3.11
-Version: 1.0.0 - Initial release
+Version: 2.0.0 - Table View Overhaul
 
 Description:
 View, edit, and delete events with:
-- Filter by Area + Category drill-down (same as Add Activity)
-- Date range filter
-- Pagination (20 events per page)
-- Inline editing of event attributes
-- Delete with confirmation
-- Photo attachment preview
+- Table view using st.dataframe for fast rendering
+- Filter by Area + Category drill-down + Date range
+- Actions column with Edit/Delete/View buttons
+- Hybrid approach: event-level table + expander for attribute details
+- Bulk delete with checkbox selection
+- Category_Path display (ISV-style)
+- Attribute value formatting by type
 
-Features:
-- 🔍 Filter by Area/Category/Date range
-- ✏️ Edit event attributes inline
-- 🗑️ Delete events with confirmation
-- 📷 View attached photos
-- 📊 Pagination for large datasets
+CHANGELOG v2.0.0:
+- 🎨 NEW: Table view with st.dataframe (replaces expanders)
+- 📊 NEW: Category_Path column (full hierarchy path)
+- 🎯 NEW: Attribute preview with smart formatting by type
+- ✏️ NEW: Actions column (Edit/Delete/View)
+- ☑️ NEW: Checkbox column for bulk operations
+- 📑 NEW: Sortable by date (newest first default)
+- 🚀 IMPROVED: Much faster page rendering
+- 📱 IMPROVED: Better pagination controls
 
 Dependencies: streamlit, datetime, supabase, pandas
 """
@@ -53,6 +57,44 @@ def load_areas(client, user_id: str) -> List[Dict]:
         return resp.data or []
     except Exception:
         return []
+
+
+def load_all_categories_with_paths(client, user_id: str) -> Dict[str, Dict]:
+    """
+    Load all categories with full path information.
+    Returns dict: category_id -> {name, full_path, area_id, level}
+    """
+    try:
+        resp = client.table('categories') \
+            .select('id, name, parent_category_id, area_id, level, sort_order') \
+            .eq('user_id', user_id) \
+            .order('level') \
+            .order('sort_order') \
+            .execute()
+        
+        categories = resp.data or []
+        cat_dict = {c['id']: c for c in categories}
+        
+        result = {}
+        for cat in categories:
+            path_parts = []
+            current = cat
+            while current:
+                path_parts.insert(0, current['name'])
+                parent_id = current.get('parent_category_id')
+                current = cat_dict.get(parent_id) if parent_id else None
+            
+            result[cat['id']] = {
+                'name': cat['name'],
+                'full_path': ' > '.join(path_parts),
+                'area_id': cat.get('area_id'),
+                'level': cat.get('level', 1)
+            }
+        
+        return result
+        
+    except Exception:
+        return {}
 
 
 def load_categories_for_area(client, user_id: str, area_id: str) -> List[Dict]:
@@ -93,19 +135,7 @@ def load_categories_for_area(client, user_id: str, area_id: str) -> List[Dict]:
         return []
 
 
-def load_all_categories(client, user_id: str) -> Dict[str, str]:
-    """Load all categories as id -> name mapping."""
-    try:
-        resp = client.table('categories') \
-            .select('id, name') \
-            .eq('user_id', user_id) \
-            .execute()
-        return {c['id']: c['name'] for c in (resp.data or [])}
-    except Exception:
-        return {}
-
-
-def load_events(
+def load_events_with_attributes(
     client, 
     user_id: str, 
     area_id: Optional[str] = None,
@@ -116,15 +146,22 @@ def load_events(
     limit: int = EVENTS_PER_PAGE
 ) -> Tuple[List[Dict], int]:
     """
-    Load events with filters and pagination.
+    Load events with their attributes for table display.
     
     Returns:
-        Tuple of (events list, total count)
+        Tuple of (events list with attributes, total count)
     """
     try:
-        # Build base query
+        # Build base query - include attributes in join
         query = client.table('events') \
-            .select('id, category_id, event_date, session_start, comment, created_at, categories(id, name, area_id)') \
+            .select('''
+                id, category_id, event_date, session_start, comment, created_at,
+                categories(id, name, area_id),
+                event_attributes(
+                    id, value_text, value_number, value_datetime, value_boolean,
+                    attribute_definitions(id, name, data_type, unit, description)
+                )
+            ''') \
             .eq('user_id', user_id)
         
         # Apply date filters
@@ -141,13 +178,13 @@ def load_events(
         resp = query.execute()
         events = resp.data or []
         
-        # Filter by area/category in Python (Supabase doesn't support nested filters well)
+        # Filter by area/category in Python (Supabase nested filters limitation)
         if area_id:
             events = [e for e in events if e.get('categories', {}).get('area_id') == area_id]
         if category_id:
             events = [e for e in events if e.get('category_id') == category_id]
         
-        # Get total count (separate query)
+        # Get total count
         count_query = client.table('events') \
             .select('id', count='exact') \
             .eq('user_id', user_id)
@@ -167,19 +204,6 @@ def load_events(
         return [], 0
 
 
-def load_event_attributes(client, user_id: str, event_id: str) -> List[Dict]:
-    """Load attributes for a specific event."""
-    try:
-        resp = client.table('event_attributes') \
-            .select('id, attribute_definition_id, value_text, value_number, value_datetime, value_boolean, attribute_definitions(name, data_type, unit)') \
-            .eq('user_id', user_id) \
-            .eq('event_id', event_id) \
-            .execute()
-        return resp.data or []
-    except Exception:
-        return []
-
-
 def load_event_attachments(client, user_id: str, event_id: str) -> List[Dict]:
     """Load attachments for a specific event."""
     try:
@@ -197,7 +221,7 @@ def load_attribute_definitions(client, user_id: str, category_id: str) -> List[D
     """Load attribute definitions for a category."""
     try:
         resp = client.table('attribute_definitions') \
-            .select('id, name, data_type, unit, is_required') \
+            .select('id, name, data_type, unit, is_required, description') \
             .eq('user_id', user_id) \
             .eq('category_id', category_id) \
             .order('sort_order') \
@@ -227,15 +251,13 @@ def update_event(client, user_id: str, event_id: str, updates: Dict) -> Tuple[bo
 def update_event_attribute(client, user_id: str, attr_id: str, value: any, data_type: str) -> Tuple[bool, str]:
     """Update a single event attribute."""
     try:
-        update_data = {}
+        update_data = {
+            'value_text': None,
+            'value_number': None,
+            'value_datetime': None,
+            'value_boolean': None
+        }
         
-        # Clear all value columns first
-        update_data['value_text'] = None
-        update_data['value_number'] = None
-        update_data['value_datetime'] = None
-        update_data['value_boolean'] = None
-        
-        # Set appropriate column based on data type
         if data_type == 'number' and value is not None:
             update_data['value_number'] = float(value)
         elif data_type == 'boolean':
@@ -257,22 +279,20 @@ def update_event_attribute(client, user_id: str, attr_id: str, value: any, data_
 
 
 def delete_event(client, user_id: str, event_id: str) -> Tuple[bool, str]:
-    """Delete event and all related records (CASCADE handles attributes/attachments)."""
+    """Delete event and all related records."""
     try:
-        # Delete attachments from storage first (if any)
+        # Delete attachments from storage first
         attachments = load_event_attachments(client, user_id, event_id)
         for att in attachments:
             try:
-                # Extract path from URL
                 url = att.get('url', '')
                 if 'activity-attachments' in url:
-                    # Get path after bucket name
                     path = url.split('activity-attachments/')[-1]
                     client.storage.from_('activity-attachments').remove([path])
             except Exception:
-                pass  # Continue even if storage delete fails
+                pass
         
-        # Delete event (CASCADE will handle event_attributes and event_attachments)
+        # Delete event (CASCADE handles event_attributes and event_attachments)
         client.table('events') \
             .delete() \
             .eq('id', event_id) \
@@ -284,8 +304,26 @@ def delete_event(client, user_id: str, event_id: str) -> Tuple[bool, str]:
         return False, str(e)
 
 
+def delete_events_bulk(client, user_id: str, event_ids: List[str]) -> Tuple[int, int]:
+    """
+    Delete multiple events.
+    Returns: (success_count, error_count)
+    """
+    success = 0
+    errors = 0
+    
+    for event_id in event_ids:
+        ok, _ = delete_event(client, user_id, event_id)
+        if ok:
+            success += 1
+        else:
+            errors += 1
+    
+    return success, errors
+
+
 # ============================================
-# UI HELPER FUNCTIONS
+# FORMATTING FUNCTIONS
 # ============================================
 
 def format_time(session_start: str) -> str:
@@ -313,6 +351,88 @@ def get_attribute_value(attr: Dict) -> any:
     return None
 
 
+def format_attribute_value(attr: Dict) -> str:
+    """
+    Format attribute value based on data type for table display.
+    
+    Formats:
+    - number: value unit (e.g., "12 kg")
+    - text: first 20 chars
+    - datetime: formatted date
+    - boolean: Yes/No
+    - link: "🔗 Link"
+    - image: "📷 Image"
+    """
+    attr_def = attr.get('attribute_definitions', {})
+    data_type = attr_def.get('data_type', 'text')
+    unit = attr_def.get('unit', '')
+    value = get_attribute_value(attr)
+    
+    if value is None:
+        return "-"
+    
+    if data_type == 'number':
+        try:
+            num_val = float(value)
+            if num_val == int(num_val):
+                formatted = str(int(num_val))
+            else:
+                formatted = f"{num_val:.2f}"
+            if unit:
+                formatted += f" {unit}"
+            return formatted
+        except:
+            return str(value)
+    
+    elif data_type == 'text':
+        text = str(value)
+        if len(text) > 20:
+            return text[:20] + "..."
+        return text
+    
+    elif data_type == 'datetime':
+        try:
+            if isinstance(value, str):
+                dt = datetime.fromisoformat(value.replace('Z', '+00:00').split('+')[0])
+                return dt.strftime('%Y-%m-%d %H:%M')
+            return str(value)
+        except:
+            return str(value)
+    
+    elif data_type == 'boolean':
+        return "Yes" if value else "No"
+    
+    elif data_type == 'link':
+        return "🔗 Link"
+    
+    elif data_type == 'image':
+        return "📷 Image"
+    
+    return str(value)[:20]
+
+
+def format_attributes_preview(attributes: List[Dict]) -> str:
+    """
+    Create a condensed preview of all attributes for table display.
+    """
+    if not attributes:
+        return "-"
+    
+    parts = []
+    for attr in attributes[:3]:  # Show max 3 in preview
+        attr_def = attr.get('attribute_definitions', {})
+        name = attr_def.get('name', '?')
+        formatted_value = format_attribute_value(attr)
+        parts.append(f"{name}: {formatted_value}")
+    
+    result = " | ".join(parts)
+    
+    if len(attributes) > 3:
+        result += f" (+{len(attributes) - 3} more)"
+    
+    return result
+
+
 # ============================================
 # MAIN RENDER FUNCTION
 # ============================================
@@ -320,6 +440,8 @@ def get_attribute_value(attr: Dict) -> any:
 def render_show_events(client, user_id: str):
     """
     Main entry point for Show Events page.
+    
+    v2.0.0: Table view with hybrid approach
     """
     
     st.subheader("📋 View Events")
@@ -331,13 +453,18 @@ def render_show_events(client, user_id: str):
         st.session_state.se_category_id = None
     if 'se_page' not in st.session_state:
         st.session_state.se_page = 0
-    if 'se_editing_event' not in st.session_state:
-        st.session_state.se_editing_event = None
+    if 'se_selected_events' not in st.session_state:
+        st.session_state.se_selected_events = set()
+    if 'se_view_event' not in st.session_state:
+        st.session_state.se_view_event = None
+    if 'se_edit_event' not in st.session_state:
+        st.session_state.se_edit_event = None
     if 'se_delete_confirm' not in st.session_state:
         st.session_state.se_delete_confirm = None
     
-    # Load areas
+    # Load areas and categories
     areas = load_areas(client, user_id)
+    all_categories = load_all_categories_with_paths(client, user_id)
     
     if not areas:
         st.warning("No areas defined. Please create structure first.")
@@ -365,7 +492,10 @@ def render_show_events(client, user_id: str):
         )
         
         if selected_area == "all":
-            st.session_state.se_area_id = None
+            if st.session_state.se_area_id is not None:
+                st.session_state.se_area_id = None
+                st.session_state.se_category_id = None
+                st.session_state.se_page = 0
         elif selected_area != st.session_state.se_area_id:
             st.session_state.se_area_id = selected_area
             st.session_state.se_category_id = None
@@ -414,6 +544,44 @@ def render_show_events(client, user_id: str):
             key="se_date_to"
         )
     
+    # ─────────────────────────────────────────
+    # BULK ACTIONS ROW
+    # ─────────────────────────────────────────
+    action_col1, action_col2, action_col3 = st.columns([1, 1, 4])
+    
+    with action_col1:
+        if st.button("🔄 Refresh", use_container_width=True):
+            st.session_state.se_selected_events = set()
+            st.rerun()
+    
+    with action_col2:
+        selected_count = len(st.session_state.se_selected_events)
+        if selected_count > 0:
+            if st.button(f"🗑️ Delete ({selected_count})", use_container_width=True, type="secondary"):
+                st.session_state.se_bulk_delete_confirm = True
+    
+    # Bulk delete confirmation
+    if st.session_state.get('se_bulk_delete_confirm', False):
+        st.warning(f"⚠️ Are you sure you want to delete {selected_count} events?")
+        confirm_col1, confirm_col2, confirm_col3 = st.columns([1, 1, 4])
+        with confirm_col1:
+            if st.button("✓ Yes, Delete", type="primary"):
+                success, errors = delete_events_bulk(
+                    client, user_id, 
+                    list(st.session_state.se_selected_events)
+                )
+                st.session_state.se_selected_events = set()
+                st.session_state.se_bulk_delete_confirm = False
+                if errors == 0:
+                    st.success(f"✅ Deleted {success} events")
+                else:
+                    st.warning(f"Deleted {success}, failed {errors}")
+                st.rerun()
+        with confirm_col2:
+            if st.button("Cancel"):
+                st.session_state.se_bulk_delete_confirm = False
+                st.rerun()
+    
     st.markdown("---")
     
     # ─────────────────────────────────────────
@@ -422,7 +590,7 @@ def render_show_events(client, user_id: str):
     
     offset = st.session_state.se_page * EVENTS_PER_PAGE
     
-    events, total_count = load_events(
+    events, total_count = load_events_with_attributes(
         client, user_id,
         area_id=st.session_state.se_area_id,
         category_id=st.session_state.se_category_id,
@@ -432,73 +600,131 @@ def render_show_events(client, user_id: str):
         limit=EVENTS_PER_PAGE
     )
     
-    # All categories for display
-    all_cats = load_all_categories(client, user_id)
-    
     if not events:
         st.info("No events found matching your filters.")
         return
     
     # Stats
-    total_pages = (total_count + EVENTS_PER_PAGE - 1) // EVENTS_PER_PAGE
+    total_pages = max(1, (total_count + EVENTS_PER_PAGE - 1) // EVENTS_PER_PAGE)
     st.caption(f"Showing {len(events)} of {total_count} events (Page {st.session_state.se_page + 1} of {total_pages})")
     
     # ─────────────────────────────────────────
-    # EVENTS LIST
+    # EVENTS TABLE
     # ─────────────────────────────────────────
     
+    # Build table data
+    table_data = []
     for event in events:
         event_id = event['id']
-        cat_name = all_cats.get(event['category_id'], 'Unknown')
-        event_date = event.get('event_date', '')
-        time_str = format_time(event.get('session_start', ''))
-        comment = event.get('comment', '') or ''
+        cat_info = all_categories.get(event.get('category_id'), {})
+        cat_path = cat_info.get('full_path', 'Unknown')
         
-        # Event header
-        with st.expander(f"📌 {event_date} {time_str} - **{cat_name}**", expanded=(st.session_state.se_editing_event == event_id)):
-            
-            # Check if we're editing this event
-            is_editing = (st.session_state.se_editing_event == event_id)
-            
-            if is_editing:
-                render_event_edit_form(client, user_id, event, all_cats)
+        # Format attributes preview
+        attrs = event.get('event_attributes', [])
+        attr_preview = format_attributes_preview(attrs)
+        
+        # Format notes preview
+        comment = event.get('comment', '') or ''
+        notes_preview = comment[:30] + '...' if len(comment) > 30 else comment
+        
+        table_data.append({
+            '_id': event_id,
+            '☐': event_id in st.session_state.se_selected_events,
+            'Date': event.get('event_date', ''),
+            'Time': format_time(event.get('session_start', '')),
+            'Category_Path': cat_path,
+            'Attributes': attr_preview,
+            'Notes': notes_preview
+        })
+    
+    # Create DataFrame
+    df = pd.DataFrame(table_data)
+    
+    # Display as data editor with checkbox column
+    edited_df = st.data_editor(
+        df[['☐', 'Date', 'Time', 'Category_Path', 'Attributes', 'Notes']],
+        column_config={
+            '☐': st.column_config.CheckboxColumn(
+                'Select',
+                help="Select for bulk actions",
+                default=False
+            ),
+            'Date': st.column_config.TextColumn('Date', disabled=True),
+            'Time': st.column_config.TextColumn('Time', disabled=True),
+            'Category_Path': st.column_config.TextColumn('Category Path', disabled=True, width="medium"),
+            'Attributes': st.column_config.TextColumn('Attributes', disabled=True, width="large"),
+            'Notes': st.column_config.TextColumn('Notes', disabled=True)
+        },
+        hide_index=True,
+        use_container_width=True,
+        key="events_table"
+    )
+    
+    # Update selected events from checkbox changes
+    new_selected = set()
+    for idx, row in edited_df.iterrows():
+        if row['☐']:
+            new_selected.add(df.iloc[idx]['_id'])
+    st.session_state.se_selected_events = new_selected
+    
+    # ─────────────────────────────────────────
+    # EVENT ACTION BUTTONS (below table)
+    # ─────────────────────────────────────────
+    
+    st.markdown("**Actions:**")
+    
+    # Create action buttons for each event
+    for i, event in enumerate(events):
+        event_id = event['id']
+        cat_info = all_categories.get(event.get('category_id'), {})
+        cat_name = cat_info.get('name', 'Unknown')
+        event_date = event.get('event_date', '')
+        
+        col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 4])
+        
+        with col1:
+            st.caption(f"{event_date} - {cat_name}")
+        
+        with col2:
+            if st.button("👁️", key=f"view_{event_id}", help="View details"):
+                st.session_state.se_view_event = event_id
+        
+        with col3:
+            if st.button("✏️", key=f"edit_{event_id}", help="Edit event"):
+                st.session_state.se_edit_event = event_id
+        
+        with col4:
+            if st.session_state.se_delete_confirm == event_id:
+                if st.button("⚠️", key=f"confirm_{event_id}", help="Confirm delete"):
+                    success, msg = delete_event(client, user_id, event_id)
+                    st.session_state.se_delete_confirm = None
+                    if success:
+                        st.rerun()
+                    else:
+                        st.error(msg)
             else:
-                render_event_details(client, user_id, event, all_cats)
-            
-            # Action buttons
-            st.markdown("---")
-            btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 2])
-            
-            with btn_col1:
-                if is_editing:
-                    if st.button("✅ Done", key=f"done_{event_id}", type="primary"):
-                        st.session_state.se_editing_event = None
-                        st.rerun()
-                else:
-                    if st.button("✏️ Edit", key=f"edit_{event_id}"):
-                        st.session_state.se_editing_event = event_id
-                        st.rerun()
-            
-            with btn_col2:
-                if st.session_state.se_delete_confirm == event_id:
-                    if st.button("⚠️ CONFIRM DELETE", key=f"confirm_del_{event_id}", type="primary"):
-                        success, msg = delete_event(client, user_id, event_id)
-                        if success:
-                            st.success("Event deleted!")
-                            st.session_state.se_delete_confirm = None
-                            st.rerun()
-                        else:
-                            st.error(f"Delete failed: {msg}")
-                else:
-                    if st.button("🗑️ Delete", key=f"delete_{event_id}"):
-                        st.session_state.se_delete_confirm = event_id
-                        st.rerun()
-            
-            with btn_col3:
-                if st.session_state.se_delete_confirm == event_id:
-                    if st.button("Cancel", key=f"cancel_del_{event_id}"):
-                        st.session_state.se_delete_confirm = None
-                        st.rerun()
+                if st.button("🗑️", key=f"del_{event_id}", help="Delete event"):
+                    st.session_state.se_delete_confirm = event_id
+    
+    # ─────────────────────────────────────────
+    # VIEW DETAILS MODAL
+    # ─────────────────────────────────────────
+    if st.session_state.se_view_event:
+        event_id = st.session_state.se_view_event
+        event = next((e for e in events if e['id'] == event_id), None)
+        
+        if event:
+            render_event_details_modal(client, user_id, event, all_categories)
+    
+    # ─────────────────────────────────────────
+    # EDIT EVENT MODAL
+    # ─────────────────────────────────────────
+    if st.session_state.se_edit_event:
+        event_id = st.session_state.se_edit_event
+        event = next((e for e in events if e['id'] == event_id), None)
+        
+        if event:
+            render_event_edit_modal(client, user_id, event, all_categories)
     
     # ─────────────────────────────────────────
     # PAGINATION
@@ -509,8 +735,10 @@ def render_show_events(client, user_id: str):
     
     with page_col1:
         if st.session_state.se_page > 0:
-            if st.button("◀ Previous", key="prev_page"):
+            if st.button("◀ Previous", key="prev_page", use_container_width=True):
                 st.session_state.se_page -= 1
+                st.session_state.se_view_event = None
+                st.session_state.se_edit_event = None
                 st.rerun()
     
     with page_col2:
@@ -518,180 +746,240 @@ def render_show_events(client, user_id: str):
     
     with page_col3:
         if st.session_state.se_page < total_pages - 1:
-            if st.button("Next ▶", key="next_page"):
+            if st.button("Next ▶", key="next_page", use_container_width=True):
                 st.session_state.se_page += 1
+                st.session_state.se_view_event = None
+                st.session_state.se_edit_event = None
                 st.rerun()
 
 
-def render_event_details(client, user_id: str, event: Dict, all_cats: Dict):
-    """Render event details in read-only mode."""
+def render_event_details_modal(client, user_id: str, event: Dict, all_categories: Dict):
+    """Render event details in an expander (modal-like)."""
+    
     event_id = event['id']
+    cat_info = all_categories.get(event.get('category_id'), {})
+    cat_path = cat_info.get('full_path', 'Unknown')
     
-    # Basic info
-    col1, col2 = st.columns(2)
-    with col1:
-        st.text(f"Date: {event.get('event_date', 'N/A')}")
-        st.text(f"Time: {format_time(event.get('session_start', ''))}")
-    with col2:
-        st.text(f"Category: {all_cats.get(event['category_id'], 'Unknown')}")
-    
-    # Comment
-    if event.get('comment'):
-        st.text(f"Notes: {event['comment']}")
-    
-    # Attributes
-    attrs = load_event_attributes(client, user_id, event_id)
-    if attrs:
-        st.markdown("**Attributes:**")
-        for attr in attrs:
-            attr_def = attr.get('attribute_definitions', {})
-            name = attr_def.get('name', 'Unknown')
-            unit = attr_def.get('unit', '')
-            value = get_attribute_value(attr)
-            
-            display_val = f"{value}"
-            if unit:
-                display_val += f" {unit}"
-            
-            st.text(f"  • {name}: {display_val}")
-    
-    # Attachments
-    attachments = load_event_attachments(client, user_id, event_id)
-    if attachments:
-        st.markdown("**Attachments:**")
-        for att in attachments:
-            if att.get('type') == 'image':
-                st.image(att['url'], caption=att.get('filename', 'Image'), width=200)
-            else:
-                st.markdown(f"[{att.get('filename', 'File')}]({att['url']})")
-
-
-def render_event_edit_form(client, user_id: str, event: Dict, all_cats: Dict):
-    """Render event edit form."""
-    event_id = event['id']
-    
-    # Basic info editing
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Parse current date
-        current_date = date.today()
-        if event.get('event_date'):
-            try:
-                current_date = date.fromisoformat(event['event_date'])
-            except:
-                pass
+    with st.expander(f"👁️ Event Details: {event.get('event_date', '')} - {cat_info.get('name', '')}", expanded=True):
         
-        new_date = st.date_input(
-            "Date",
-            value=current_date,
-            key=f"edit_date_{event_id}"
-        )
-    
-    with col2:
-        # Parse current time
-        current_time = time(0, 0)
-        if event.get('session_start'):
-            try:
-                ss = event['session_start'].replace('Z', '+00:00').split('+')[0]
-                dt = datetime.fromisoformat(ss)
-                current_time = dt.time()
-            except:
-                pass
+        # Close button
+        if st.button("✕ Close", key="close_view"):
+            st.session_state.se_view_event = None
+            st.rerun()
         
-        new_time = st.time_input(
-            "Time",
-            value=current_time,
-            key=f"edit_time_{event_id}"
-        )
-    
-    # Comment
-    new_comment = st.text_area(
-        "Notes",
-        value=event.get('comment', '') or '',
-        key=f"edit_comment_{event_id}"
-    )
-    
-    # Save basic info changes
-    if st.button("💾 Save Changes", key=f"save_basic_{event_id}"):
-        new_session_start = datetime.combine(new_date, new_time)
-        updates = {
-            'event_date': new_date.isoformat(),
-            'session_start': new_session_start.isoformat(),
-            'comment': new_comment if new_comment.strip() else None,
-            'edited_at': datetime.now().isoformat()
-        }
+        st.markdown("---")
         
-        success, msg = update_event(client, user_id, event_id, updates)
-        if success:
-            st.success("✅ Event updated!")
-        else:
-            st.error(f"❌ Update failed: {msg}")
-    
-    # Attributes editing
-    attrs = load_event_attributes(client, user_id, event_id)
-    if attrs:
-        st.markdown("**Edit Attributes:**")
+        # Basic info
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"**📅 Date:** {event.get('event_date', 'N/A')}")
+            st.markdown(f"**⏰ Time:** {format_time(event.get('session_start', ''))}")
+        with col2:
+            st.markdown(f"**📂 Category Path:**")
+            st.caption(cat_path)
         
-        for attr in attrs:
-            attr_id = attr['id']
-            attr_def = attr.get('attribute_definitions', {})
-            name = attr_def.get('name', 'Unknown')
-            data_type = attr_def.get('data_type', 'text')
-            unit = attr_def.get('unit', '')
-            current_value = get_attribute_value(attr)
+        # Comment
+        comment = event.get('comment', '')
+        if comment:
+            st.markdown(f"**💬 Notes:** {comment}")
+        
+        # Attributes
+        attrs = event.get('event_attributes', [])
+        if attrs:
+            st.markdown("---")
+            st.markdown("**🏷️ Attributes:**")
             
-            label = name
-            if unit:
-                label += f" ({unit})"
-            
-            col1, col2 = st.columns([3, 1])
-            
-            with col1:
+            for attr in attrs:
+                attr_def = attr.get('attribute_definitions', {})
+                name = attr_def.get('name', 'Unknown')
+                data_type = attr_def.get('data_type', 'text')
+                unit = attr_def.get('unit', '')
+                description = attr_def.get('description', '')
+                value = get_attribute_value(attr)
+                
+                # Format based on type (per Sasa's specs)
                 if data_type == 'number':
-                    new_val = st.number_input(
-                        label,
-                        value=float(current_value) if current_value is not None else 0.0,
-                        key=f"edit_attr_{attr_id}"
-                    )
-                elif data_type == 'boolean':
-                    new_val = st.checkbox(
-                        label,
-                        value=bool(current_value),
-                        key=f"edit_attr_{attr_id}"
-                    )
+                    display = f"{value}"
+                    if unit:
+                        display = f"{unit} / {display}"
+                    if description:
+                        display += f" / {description}"
+                    st.markdown(f"- **{name}** ({data_type}): {display}")
+                
+                elif data_type == 'text':
+                    text_val = str(value) if value else '-'
+                    preview = text_val[:20] + '...' if len(text_val) > 20 else text_val
+                    st.markdown(f"- **{name}** ({data_type}): {preview}")
+                
                 elif data_type == 'datetime':
-                    try:
-                        current_dt = date.fromisoformat(str(current_value)[:10]) if current_value else date.today()
-                    except:
-                        current_dt = date.today()
-                    new_val = st.date_input(
-                        label,
-                        value=current_dt,
-                        key=f"edit_attr_{attr_id}"
-                    )
+                    dt_display = format_attribute_value(attr)
+                    if description:
+                        dt_display += f" - {description}"
+                    st.markdown(f"- **{name}** ({data_type}): {dt_display}")
+                
+                elif data_type == 'boolean':
+                    bool_val = "Yes" if value else "No"
+                    if description:
+                        bool_val += f" - {description}"
+                    st.markdown(f"- **{name}** ({data_type}): {bool_val}")
+                
+                elif data_type == 'link':
+                    link_val = str(value) if value else '-'
+                    desc_part = f"{description} / " if description else ""
+                    st.markdown(f"- **{name}** ({data_type}): {desc_part}[{link_val[:30]}...]({link_val})")
+                    # Copy button for link
+                    st.code(link_val, language=None)
+                
+                elif data_type == 'image':
+                    desc_part = description if description else "Image"
+                    st.markdown(f"- **{name}** ({data_type}): {desc_part}")
+                    if value:
+                        st.image(str(value), width=200)
+                
                 else:
-                    new_val = st.text_input(
-                        label,
-                        value=str(current_value) if current_value else '',
-                        key=f"edit_attr_{attr_id}"
-                    )
-            
-            with col2:
-                if st.button("💾", key=f"save_attr_{attr_id}", help="Save this attribute"):
-                    success, msg = update_event_attribute(client, user_id, attr_id, new_val, data_type)
-                    if success:
-                        st.success("✅")
-                    else:
-                        st.error(f"❌ {msg}")
+                    st.markdown(f"- **{name}** ({data_type}): {value}")
+        
+        # Attachments
+        attachments = load_event_attachments(client, user_id, event_id)
+        if attachments:
+            st.markdown("---")
+            st.markdown("**📎 Attachments:**")
+            for att in attachments:
+                if att.get('type') == 'image':
+                    st.image(att['url'], caption=att.get('filename', 'Image'), width=200)
+                else:
+                    st.markdown(f"[{att.get('filename', 'File')}]({att['url']})")
+
+
+def render_event_edit_modal(client, user_id: str, event: Dict, all_categories: Dict):
+    """Render event edit form in an expander."""
     
-    # Show attachments (read-only in edit mode)
-    attachments = load_event_attachments(client, user_id, event_id)
-    if attachments:
-        st.markdown("**Attachments:**")
-        for att in attachments:
-            if att.get('type') == 'image':
-                st.image(att['url'], caption=att.get('filename', 'Image'), width=150)
+    event_id = event['id']
+    cat_info = all_categories.get(event.get('category_id'), {})
+    
+    with st.expander(f"✏️ Edit Event: {event.get('event_date', '')} - {cat_info.get('name', '')}", expanded=True):
+        
+        # Close button
+        if st.button("✕ Close", key="close_edit"):
+            st.session_state.se_edit_event = None
+            st.rerun()
+        
+        st.markdown("---")
+        
+        # Basic info editing
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            current_date = date.today()
+            if event.get('event_date'):
+                try:
+                    current_date = date.fromisoformat(event['event_date'])
+                except:
+                    pass
+            
+            new_date = st.date_input(
+                "📅 Date",
+                value=current_date,
+                key=f"edit_date_{event_id}"
+            )
+        
+        with col2:
+            current_time = time(0, 0)
+            if event.get('session_start'):
+                try:
+                    ss = event['session_start'].replace('Z', '+00:00').split('+')[0]
+                    dt = datetime.fromisoformat(ss)
+                    current_time = dt.time()
+                except:
+                    pass
+            
+            new_time = st.time_input(
+                "⏰ Time",
+                value=current_time,
+                key=f"edit_time_{event_id}"
+            )
+        
+        # Comment
+        new_comment = st.text_area(
+            "💬 Notes",
+            value=event.get('comment', '') or '',
+            key=f"edit_comment_{event_id}"
+        )
+        
+        # Save basic info
+        if st.button("💾 Save Event Info", key=f"save_basic_{event_id}"):
+            new_session_start = datetime.combine(new_date, new_time)
+            updates = {
+                'event_date': new_date.isoformat(),
+                'session_start': new_session_start.isoformat(),
+                'comment': new_comment if new_comment.strip() else None,
+                'edited_at': datetime.now().isoformat()
+            }
+            
+            success, msg = update_event(client, user_id, event_id, updates)
+            if success:
+                st.success("✅ Event updated!")
+                st.rerun()
+            else:
+                st.error(f"❌ {msg}")
+        
+        # Attributes editing
+        attrs = event.get('event_attributes', [])
+        if attrs:
+            st.markdown("---")
+            st.markdown("**🏷️ Edit Attributes:**")
+            
+            for attr in attrs:
+                attr_id = attr['id']
+                attr_def = attr.get('attribute_definitions', {})
+                name = attr_def.get('name', 'Unknown')
+                data_type = attr_def.get('data_type', 'text')
+                unit = attr_def.get('unit', '')
+                current_value = get_attribute_value(attr)
+                
+                label = name
+                if unit:
+                    label += f" ({unit})"
+                
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    if data_type == 'number':
+                        new_val = st.number_input(
+                            label,
+                            value=float(current_value) if current_value is not None else 0.0,
+                            key=f"edit_attr_{attr_id}"
+                        )
+                    elif data_type == 'boolean':
+                        new_val = st.checkbox(
+                            label,
+                            value=bool(current_value),
+                            key=f"edit_attr_{attr_id}"
+                        )
+                    elif data_type == 'datetime':
+                        try:
+                            current_dt = date.fromisoformat(str(current_value)[:10]) if current_value else date.today()
+                        except:
+                            current_dt = date.today()
+                        new_val = st.date_input(
+                            label,
+                            value=current_dt,
+                            key=f"edit_attr_{attr_id}"
+                        )
+                    else:
+                        new_val = st.text_input(
+                            label,
+                            value=str(current_value) if current_value else '',
+                            key=f"edit_attr_{attr_id}"
+                        )
+                
+                with col2:
+                    if st.button("💾", key=f"save_attr_{attr_id}", help="Save this attribute"):
+                        success, msg = update_event_attribute(client, user_id, attr_id, new_val, data_type)
+                        if success:
+                            st.success("✅")
+                        else:
+                            st.error(f"❌ {msg}")
 
 
 # ============================================
