@@ -2,17 +2,24 @@
 Events Tracker - Add Activity Module
 =====================================
 Created: 2025-12-13 15:00 UTC
-Last Modified: 2025-12-16 15:30 UTC
+Last Modified: 2025-12-17 11:30 UTC
 Python: 3.11
-Version: 2.1.0 - Downstream Categories Workflow
+Version: 2.2.0 - Full Downstream Workflow + UI Improvements
 
 Description:
 Mobile-first activity entry form with:
 - Filter-first design (Area → Category drill-down)
 - Shortcuts for frequently used filter combinations
-- NEW: Downstream Categories Workflow for parent categories with children
+- Full Downstream Workflow: walks through ALL leaf categories in subtree
 - Optimized layout for minimal scrolling
 - Photo attachments via Supabase Storage
+
+CHANGELOG v2.2.0:
+- 🌳 IMPROVED: Workflow now traverses ALL leaf categories (not just direct children)
+- 📋 NEW: Visual tree display of workflow steps with indentation
+- 🎯 NEW: "Quick-add to parent" option alongside workflow button
+- 🔧 MOVED: "Save as Shortcut" to same row as shortcut delete button
+- ✏️ RENAMED: "Start Workout" → "Start Recording Activity"
 
 CHANGELOG v2.1.0:
 - 🎯 NEW: Downstream Categories Workflow
@@ -334,7 +341,7 @@ def load_recent_activities(client, user_id: str, target_date: date) -> Tuple[Lis
 
 
 # ============================================
-# WORKFLOW HELPER FUNCTIONS (NEW in v2.1.0)
+# WORKFLOW HELPER FUNCTIONS (Updated v2.2.0)
 # ============================================
 
 def get_direct_children(categories: List[Dict], parent_id: str) -> List[Dict]:
@@ -364,6 +371,104 @@ def get_category_by_id(categories: List[Dict], category_id: str) -> Optional[Dic
         if c['id'] == category_id:
             return c
     return None
+
+
+def get_all_leaf_categories(categories: List[Dict], parent_id: str, depth: int = 0) -> List[Dict]:
+    """
+    Recursively get ALL leaf categories (categories with no children) in a subtree.
+    
+    This traverses the entire tree starting from parent_id and returns only
+    the leaf nodes (categories that have no children).
+    
+    Args:
+        categories: List of all categories
+        parent_id: Starting parent category ID
+        depth: Current depth level (for indentation tracking)
+        
+    Returns:
+        List of leaf categories with added 'depth' field for display
+    """
+    result = []
+    direct_children = get_direct_children(categories, parent_id)
+    
+    for child in direct_children:
+        child_id = child['id']
+        if has_children(categories, child_id):
+            # This child has children, recurse deeper
+            result.extend(get_all_leaf_categories(categories, child_id, depth + 1))
+        else:
+            # This is a leaf node, add it with depth info
+            leaf = child.copy()
+            leaf['depth'] = depth
+            result.append(leaf)
+    
+    return result
+
+
+def build_workflow_tree_display(categories: List[Dict], parent_id: str, 
+                                 indent: str = "", is_last: bool = True) -> List[str]:
+    """
+    Build a tree-like text display of the workflow structure.
+    
+    Returns list of strings like:
+    ├─ Automobili
+    │   ├─ Zeljin auto ●
+    │   ├─ Kokin auto ●
+    │   └─ Test1 auto ●
+    └─ Ostali troškovi
+        └─ Komunalije ●
+    
+    ● marks leaf categories (workflow steps)
+    """
+    lines = []
+    direct_children = get_direct_children(categories, parent_id)
+    
+    for i, child in enumerate(direct_children):
+        is_last_child = (i == len(direct_children) - 1)
+        child_id = child['id']
+        child_name = child['name']
+        
+        # Determine prefix
+        if is_last_child:
+            prefix = indent + "└─ "
+            child_indent = indent + "    "
+        else:
+            prefix = indent + "├─ "
+            child_indent = indent + "│   "
+        
+        if has_children(categories, child_id):
+            # This child has children, show it and recurse
+            lines.append(f"{prefix}{child_name}")
+            lines.extend(build_workflow_tree_display(categories, child_id, child_indent, is_last_child))
+        else:
+            # This is a leaf node - mark with ●
+            lines.append(f"{prefix}{child_name} ●")
+    
+    return lines
+
+
+def count_descendants(categories: List[Dict], parent_id: str) -> Tuple[int, int]:
+    """
+    Count total descendants and leaf nodes under a parent.
+    
+    Returns:
+        Tuple of (total_descendants, leaf_count)
+    """
+    total = 0
+    leaves = 0
+    direct_children = get_direct_children(categories, parent_id)
+    
+    for child in direct_children:
+        total += 1
+        child_id = child['id']
+        if has_children(categories, child_id):
+            sub_total, sub_leaves = count_descendants(categories, child_id)
+            total += sub_total
+            leaves += sub_leaves
+        else:
+            leaves += 1
+    
+    return total, leaves
 
 
 # ============================================
@@ -844,11 +949,11 @@ def render_add_activity(client, user_id: str):
     # NORMAL MODE (not in workflow)
     # ─────────────────────────────────────────
     
-    # ROW 1: SHORTCUTS
-    if shortcuts:
-        shortcut_col, manage_col = st.columns([4, 1])
-        
-        with shortcut_col:
+    # ROW 1: SHORTCUTS + SAVE SHORTCUT
+    shortcut_col, save_sc_col, manage_col = st.columns([3, 1, 1])
+    
+    with shortcut_col:
+        if shortcuts:
             shortcut_options = ["-- Quick Select --"] + [s['name'] for s in shortcuts]
             selected_shortcut = st.selectbox(
                 "⚡ Shortcuts",
@@ -864,14 +969,54 @@ def render_add_activity(client, user_id: str):
                         st.session_state.aa_category_id = sc['category_id']
                         update_shortcut_usage(client, user_id, sc['id'])
                         break
-        
-        with manage_col:
-            st.write("")
-            if st.button("🗑️", key="manage_shortcuts", help="Delete shortcuts"):
-                st.session_state.aa_show_shortcut_manager = True
+        else:
+            st.selectbox("⚡ Shortcuts", ["No shortcuts yet"], disabled=True, key="aa_no_shortcuts")
+    
+    with save_sc_col:
+        st.write("")  # Spacing
+        save_sc_disabled = not st.session_state.aa_category_id
+        if st.button("💾", key="btn_save_shortcut", help="Save current selection as shortcut", 
+                     disabled=save_sc_disabled):
+            st.session_state.aa_show_save_shortcut = True
+    
+    with manage_col:
+        st.write("")  # Spacing
+        manage_disabled = not shortcuts
+        if st.button("🗑️", key="manage_shortcuts", help="Delete shortcuts", disabled=manage_disabled):
+            st.session_state.aa_show_shortcut_manager = True
+    
+    # Save shortcut popup
+    if st.session_state.get('aa_show_save_shortcut', False) and st.session_state.aa_category_id:
+        with st.expander("💾 Save as Shortcut", expanded=True):
+            new_shortcut_name = st.text_input(
+                "Shortcut name",
+                placeholder="e.g., Morning Run, Evening Gym",
+                key="aa_new_shortcut_name"
+            )
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Save", key="aa_save_shortcut"):
+                    if new_shortcut_name.strip():
+                        success, msg = save_shortcut(
+                            client, user_id, new_shortcut_name.strip(),
+                            st.session_state.aa_area_id,
+                            st.session_state.aa_category_id
+                        )
+                        if success:
+                            st.success(msg)
+                            st.session_state.aa_show_save_shortcut = False
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                    else:
+                        st.warning("Please enter a shortcut name")
+            with col2:
+                if st.button("Cancel", key="aa_cancel_save_shortcut"):
+                    st.session_state.aa_show_save_shortcut = False
+                    st.rerun()
     
     # Shortcut manager popup
-    if st.session_state.get('aa_show_shortcut_manager', False):
+    if st.session_state.get('aa_show_shortcut_manager', False) and shortcuts:
         with st.expander("🗑️ Manage Shortcuts", expanded=True):
             for sc in shortcuts:
                 col1, col2 = st.columns([4, 1])
@@ -940,57 +1085,64 @@ def render_add_activity(client, user_id: str):
     # ─────────────────────────────────────────
     # CHECK FOR CHILD CATEGORIES (WORKFLOW TRIGGER)
     # ─────────────────────────────────────────
-    child_categories = []
-    if st.session_state.aa_category_id and categories:
-        child_categories = get_direct_children(categories, st.session_state.aa_category_id)
+    has_downstream = False
+    leaf_categories = []
     
-    # Show workflow option if category has children
-    if child_categories:
+    if st.session_state.aa_category_id and categories:
+        # Check if this category has any descendants
+        if has_children(categories, st.session_state.aa_category_id):
+            has_downstream = True
+            # Get ALL leaf categories in the subtree
+            leaf_categories = get_all_leaf_categories(categories, st.session_state.aa_category_id)
+    
+    # Show workflow option if category has descendants with leaf nodes
+    if has_downstream and leaf_categories:
         selected_cat = get_category_by_id(categories, st.session_state.aa_category_id)
         cat_name = selected_cat['name'] if selected_cat else 'Selected'
         
-        st.info(f"📂 **{cat_name}** has {len(child_categories)} sub-categories. "
-                f"Start a workout to step through them!")
+        # Count stats
+        total_descendants, leaf_count = count_descendants(categories, st.session_state.aa_category_id)
         
-        child_names = [c['name'] for c in child_categories]
-        st.caption(f"Steps: {' → '.join(child_names)}")
+        st.info(f"📂 **{cat_name}** has {leaf_count} activity types across {total_descendants} sub-categories")
         
-        if st.button("🚀 Start Workout", use_container_width=True, type="primary"):
-            # Activate workflow
-            st.session_state.aa_workflow_active = True
-            st.session_state.aa_workflow_steps = child_categories
-            st.session_state.aa_workflow_current = 0
-            st.session_state.aa_workflow_saved = []
-            st.session_state.aa_workflow_parent_id = st.session_state.aa_category_id
-            st.rerun()
+        # Show tree structure
+        tree_lines = build_workflow_tree_display(categories, st.session_state.aa_category_id)
+        if tree_lines:
+            with st.expander("📋 Workflow Steps (● = activity types)", expanded=False):
+                tree_text = "\n".join(tree_lines)
+                st.code(tree_text, language=None)
+        
+        # Two buttons: Primary workflow + Secondary quick-add
+        btn_col1, btn_col2 = st.columns([2, 1])
+        
+        with btn_col1:
+            if st.button("🚀 Start Recording Activity", use_container_width=True, type="primary",
+                        help=f"Step through all {leaf_count} activity types"):
+                # Activate workflow with ALL leaf categories
+                st.session_state.aa_workflow_active = True
+                st.session_state.aa_workflow_steps = leaf_categories
+                st.session_state.aa_workflow_current = 0
+                st.session_state.aa_workflow_saved = []
+                st.session_state.aa_workflow_parent_id = st.session_state.aa_category_id
+                st.rerun()
+        
+        with btn_col2:
+            if st.button(f"📝 Quick-add to \"{cat_name}\"", use_container_width=True,
+                        help=f"Add single activity directly to {cat_name} without workflow"):
+                st.session_state.aa_quick_add_mode = True
         
         st.markdown("---")
-        st.caption("_Or add a single activity to the parent category below:_")
     
-    # ─────────────────────────────────────────
-    # ROW 3: SAVE SHORTCUT OPTION
-    # ─────────────────────────────────────────
-    if st.session_state.aa_category_id:
-        with st.expander("💾 Save as Shortcut", expanded=False):
-            new_shortcut_name = st.text_input(
-                "Shortcut name",
-                placeholder="e.g., Morning Run, Evening Gym",
-                key="aa_new_shortcut_name"
-            )
-            if st.button("Save Shortcut", key="aa_save_shortcut"):
-                if new_shortcut_name.strip():
-                    success, msg = save_shortcut(
-                        client, user_id, new_shortcut_name.strip(),
-                        st.session_state.aa_area_id,
-                        st.session_state.aa_category_id
-                    )
-                    if success:
-                        st.success(msg)
-                        st.rerun()
-                    else:
-                        st.error(msg)
-                else:
-                    st.warning("Please enter a shortcut name")
+    # If quick-add mode or no descendants, show normal form
+    show_normal_form = not has_downstream or st.session_state.get('aa_quick_add_mode', False)
+    
+    if not show_normal_form:
+        # Category has descendants but user hasn't chosen yet
+        return
+    
+    # Reset quick-add mode flag after showing form
+    if st.session_state.get('aa_quick_add_mode'):
+        st.session_state.aa_quick_add_mode = False
     
     st.markdown("---")
     
