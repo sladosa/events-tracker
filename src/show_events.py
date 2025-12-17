@@ -2,19 +2,27 @@
 Events Tracker - Show Events Module
 ====================================
 Created: 2025-12-15 09:45 UTC
-Last Modified: 2025-12-17 11:00 UTC
+Last Modified: 2025-12-17 14:00 UTC
 Python: 3.11
-Version: 2.1.0 - Toolbar Actions + Downstream Filter
+Version: 2.2.0 - Filter Fix + UI Improvements
 
 Description:
 View, edit, and delete events with:
 - Table view using st.dataframe for fast rendering
 - Filter by Area + Category drill-down + Date range
-- Toolbar actions (View/Edit/Delete) above table
+- Toolbar actions (Edit/Delete) above table
 - Downstream category filter (includes all sub-categories)
 - Bulk delete with checkbox selection
 - Category_Path display (ISV-style)
 - Attribute value formatting by type
+
+CHANGELOG v2.2.0:
+- 🔧 FIX P1: Area/Category filter now done in SQL (not Python after pagination)
+- 🔧 FIX P2: Added Select All/Clear buttons for better selection UX
+- 🗑️ FIX P3: Removed View button (redundant with Edit)
+- 🔧 FIX P4: Multi-event navigation now sorted by date (newest first)
+- ⚠️ FIX P5: Warning for large datasets (>100 events)
+- 📋 IMPROVED: Selection preserved across pages
 
 CHANGELOG v2.1.0:
 - 🎯 NEW: Toolbar with View/Edit/Delete above table (replaces per-row actions)
@@ -168,6 +176,19 @@ def get_downstream_category_ids(all_categories: Dict[str, Dict], category_id: st
     return result
 
 
+def get_category_ids_for_area(client, user_id: str, area_id: str) -> List[str]:
+    """Get all category IDs belonging to an area."""
+    try:
+        resp = client.table('categories') \
+            .select('id') \
+            .eq('user_id', user_id) \
+            .eq('area_id', area_id) \
+            .execute()
+        return [c['id'] for c in (resp.data or [])]
+    except Exception:
+        return []
+
+
 def load_events_with_attributes(
     client, 
     user_id: str, 
@@ -182,12 +203,24 @@ def load_events_with_attributes(
     Load events with their attributes for table display.
     
     Args:
+        area_id: Filter by area (converted to category_ids internally)
         category_ids: List of category IDs to filter (supports downstream filtering)
     
     Returns:
         Tuple of (events list with attributes, total count)
+    
+    v2.2.0: Fixed filtering - now done in SQL query, not Python (P1 fix)
     """
     try:
+        # Resolve area_id to category_ids if needed
+        effective_category_ids = category_ids
+        if area_id and not category_ids:
+            # Get all categories for this area
+            effective_category_ids = get_category_ids_for_area(client, user_id, area_id)
+            if not effective_category_ids:
+                # No categories in this area = no events
+                return [], 0
+        
         # Build base query - include attributes in join
         query = client.table('events') \
             .select('''
@@ -197,8 +230,12 @@ def load_events_with_attributes(
                     id, value_text, value_number, value_datetime, value_boolean,
                     attribute_definitions(id, name, data_type, unit, description)
                 )
-            ''') \
+            ''', count='exact') \
             .eq('user_id', user_id)
+        
+        # Apply category filter IN SQL (not Python!) - P1 fix
+        if effective_category_ids:
+            query = query.in_('category_id', effective_category_ids)
         
         # Apply date filters
         if date_from:
@@ -214,26 +251,8 @@ def load_events_with_attributes(
         resp = query.execute()
         events = resp.data or []
         
-        # Filter by area in Python (Supabase nested filters limitation)
-        if area_id:
-            events = [e for e in events if e.get('categories', {}).get('area_id') == area_id]
-        
-        # Filter by category IDs (downstream filter)
-        if category_ids:
-            events = [e for e in events if e.get('category_id') in category_ids]
-        
-        # Get total count
-        count_query = client.table('events') \
-            .select('id', count='exact') \
-            .eq('user_id', user_id)
-        
-        if date_from:
-            count_query = count_query.gte('event_date', date_from.isoformat())
-        if date_to:
-            count_query = count_query.lte('event_date', date_to.isoformat())
-        
-        count_resp = count_query.execute()
-        total_count = count_resp.count if hasattr(count_resp, 'count') and count_resp.count else len(events)
+        # Get total count from response (count='exact' in select)
+        total_count = resp.count if hasattr(resp, 'count') and resp.count is not None else len(events)
         
         return events, total_count
         
@@ -479,7 +498,7 @@ def render_show_events(client, user_id: str):
     """
     Main entry point for Show Events page.
     
-    v2.0.0: Table view with hybrid approach
+    v2.2.0: Removed View modal, improved selection, fixed navigation
     """
     
     st.subheader("📋 View Events")
@@ -493,10 +512,14 @@ def render_show_events(client, user_id: str):
         st.session_state.se_page = 0
     if 'se_selected_events' not in st.session_state:
         st.session_state.se_selected_events = set()
-    if 'se_view_event' not in st.session_state:
-        st.session_state.se_view_event = None
     if 'se_edit_event' not in st.session_state:
         st.session_state.se_edit_event = None
+    if 'se_edit_list' not in st.session_state:
+        st.session_state.se_edit_list = []
+    if 'se_edit_index' not in st.session_state:
+        st.session_state.se_edit_index = 0
+    if 'se_pending_edit' not in st.session_state:
+        st.session_state.se_pending_edit = False
     if 'se_delete_confirm' not in st.session_state:
         st.session_state.se_delete_confirm = None
     
@@ -583,32 +606,24 @@ def render_show_events(client, user_id: str):
         )
     
     # ─────────────────────────────────────────
-    # TOOLBAR (View/Edit/Delete actions)
+    # TOOLBAR (Edit/Delete actions) - v2.2.0: Removed View button (P3)
     # ─────────────────────────────────────────
     selected_count = len(st.session_state.se_selected_events)
     selected_list = list(st.session_state.se_selected_events)
     
-    toolbar_col1, toolbar_col2, toolbar_col3, toolbar_col4 = st.columns([1, 1, 1, 3])
+    # P4 FIX: We need events loaded first to sort selected_list by date
+    # This will be done after events are loaded below
+    
+    toolbar_col1, toolbar_col2, toolbar_col3 = st.columns([1, 1, 4])
     
     with toolbar_col1:
-        view_disabled = selected_count == 0
-        if st.button("👁️ View", use_container_width=True, disabled=view_disabled, 
-                     help="View selected event(s)"):
-            if selected_count > 0:
-                st.session_state.se_view_event = selected_list[0]
-                st.session_state.se_view_index = 0
-                st.session_state.se_view_list = selected_list
-    
-    with toolbar_col2:
         edit_disabled = selected_count == 0
         if st.button("✏️ Edit", use_container_width=True, disabled=edit_disabled,
                      help="Edit selected event(s)"):
-            if selected_count > 0:
-                st.session_state.se_edit_event = selected_list[0]
-                st.session_state.se_edit_index = 0
-                st.session_state.se_edit_list = selected_list
+            # P4: Will be handled after events are loaded with proper sorting
+            st.session_state.se_pending_edit = True
     
-    with toolbar_col3:
+    with toolbar_col2:
         delete_disabled = selected_count == 0
         if st.button(f"🗑️ Delete ({selected_count})" if selected_count > 0 else "🗑️ Delete", 
                      use_container_width=True, disabled=delete_disabled, type="secondary",
@@ -616,7 +631,7 @@ def render_show_events(client, user_id: str):
             if selected_count > 0:
                 st.session_state.se_bulk_delete_confirm = True
     
-    with toolbar_col4:
+    with toolbar_col3:
         if selected_count > 0:
             st.caption(f"📋 {selected_count} event(s) selected")
         else:
@@ -673,13 +688,71 @@ def render_show_events(client, user_id: str):
         st.info("No events found matching your filters.")
         return
     
-    # Stats
+    # P5: Warning for large datasets
     total_pages = max(1, (total_count + EVENTS_PER_PAGE - 1) // EVENTS_PER_PAGE)
+    
+    if total_count > 100:
+        st.warning(f"⚠️ Large dataset: {total_count} events. Consider narrowing your date range or using category filters for better performance.")
+    
+    # Stats
     st.caption(f"Showing {len(events)} of {total_count} events (Page {st.session_state.se_page + 1} of {total_pages})")
     
+    # P4: Handle pending edit - sort selected events by date (newest first)
+    if st.session_state.get('se_pending_edit', False) and st.session_state.se_selected_events:
+        selected_ids = st.session_state.se_selected_events
+        # Get date info for selected events to sort them
+        selected_events_info = []
+        for event in events:
+            if event['id'] in selected_ids:
+                selected_events_info.append({
+                    'id': event['id'],
+                    'date': event.get('event_date', ''),
+                    'time': event.get('session_start', '')
+                })
+        # Also check if any selected events are not on current page - load them
+        missing_ids = selected_ids - {e['id'] for e in events}
+        if missing_ids:
+            try:
+                resp = client.table('events') \
+                    .select('id, event_date, session_start') \
+                    .eq('user_id', user_id) \
+                    .in_('id', list(missing_ids)) \
+                    .execute()
+                for e in (resp.data or []):
+                    selected_events_info.append({
+                        'id': e['id'],
+                        'date': e.get('event_date', ''),
+                        'time': e.get('session_start', '')
+                    })
+            except:
+                pass
+        
+        # Sort by date desc, time desc (newest first)
+        selected_events_info.sort(key=lambda x: (x['date'], x['time']), reverse=True)
+        sorted_list = [e['id'] for e in selected_events_info]
+        
+        st.session_state.se_edit_event = sorted_list[0] if sorted_list else None
+        st.session_state.se_edit_index = 0
+        st.session_state.se_edit_list = sorted_list
+        st.session_state.se_pending_edit = False
+    
     # ─────────────────────────────────────────
-    # EVENTS TABLE
+    # EVENTS TABLE - P2: Added Select All/Clear buttons
     # ─────────────────────────────────────────
+    
+    # Select All / Clear buttons for better UX
+    sel_col1, sel_col2, sel_col3 = st.columns([1, 1, 6])
+    current_page_ids = {event['id'] for event in events}
+    
+    with sel_col1:
+        if st.button("☑️ Select All", key="select_all_page", help="Select all events on this page"):
+            st.session_state.se_selected_events = st.session_state.se_selected_events | current_page_ids
+            st.rerun()
+    
+    with sel_col2:
+        if st.button("☐ Clear", key="clear_selection", help="Clear selection"):
+            st.session_state.se_selected_events = set()
+            st.rerun()
     
     # Build table data
     table_data = []
@@ -734,38 +807,10 @@ def render_show_events(client, user_id: str):
     for idx, row in edited_df.iterrows():
         if row['☐']:
             new_selected.add(df.iloc[idx]['_id'])
-    st.session_state.se_selected_events = new_selected
     
-    # ─────────────────────────────────────────
-    # VIEW DETAILS MODAL (with multi-event navigation)
-    # ─────────────────────────────────────────
-    if st.session_state.se_view_event:
-        event_id = st.session_state.se_view_event
-        event = next((e for e in events if e['id'] == event_id), None)
-        
-        # Try to load from database if not in current page
-        if not event:
-            try:
-                resp = client.table('events') \
-                    .select('''
-                        id, category_id, event_date, session_start, comment,
-                        event_attributes(
-                            id, value_text, value_number, value_datetime, value_boolean,
-                            attribute_definitions(id, name, data_type, unit, description)
-                        )
-                    ''') \
-                    .eq('id', event_id) \
-                    .eq('user_id', user_id) \
-                    .single() \
-                    .execute()
-                event = resp.data
-            except:
-                event = None
-        
-        if event:
-            view_list = st.session_state.get('se_view_list', [event_id])
-            view_index = st.session_state.get('se_view_index', 0)
-            render_event_details_modal(client, user_id, event, all_categories, view_list, view_index)
+    # Preserve selections from other pages
+    other_page_selections = st.session_state.se_selected_events - current_page_ids
+    st.session_state.se_selected_events = new_selected | other_page_selections
     
     # ─────────────────────────────────────────
     # EDIT EVENT MODAL (with multi-event navigation)
@@ -809,7 +854,6 @@ def render_show_events(client, user_id: str):
         if st.session_state.se_page > 0:
             if st.button("◀ Previous", key="prev_page", use_container_width=True):
                 st.session_state.se_page -= 1
-                st.session_state.se_view_event = None
                 st.session_state.se_edit_event = None
                 st.rerun()
     
@@ -820,133 +864,8 @@ def render_show_events(client, user_id: str):
         if st.session_state.se_page < total_pages - 1:
             if st.button("Next ▶", key="next_page", use_container_width=True):
                 st.session_state.se_page += 1
-                st.session_state.se_view_event = None
                 st.session_state.se_edit_event = None
                 st.rerun()
-
-
-def render_event_details_modal(client, user_id: str, event: Dict, all_categories: Dict,
-                               event_list: List[str] = None, current_index: int = 0):
-    """Render event details in an expander (modal-like) with optional multi-event navigation."""
-    
-    event_id = event['id']
-    cat_info = all_categories.get(event.get('category_id'), {})
-    cat_path = cat_info.get('full_path', 'Unknown')
-    
-    # Determine if we have multiple events to navigate
-    has_navigation = event_list and len(event_list) > 1
-    nav_info = f" ({current_index + 1}/{len(event_list)})" if has_navigation else ""
-    
-    with st.expander(f"👁️ Event Details{nav_info}: {event.get('event_date', '')} - {cat_info.get('name', '')}", expanded=True):
-        
-        # Header row with Close and navigation
-        if has_navigation:
-            nav_col1, nav_col2, nav_col3, nav_col4 = st.columns([1, 1, 1, 3])
-            with nav_col1:
-                if current_index > 0:
-                    if st.button("◀ Prev", key="view_prev"):
-                        st.session_state.se_view_index = current_index - 1
-                        st.session_state.se_view_event = event_list[current_index - 1]
-                        st.rerun()
-            with nav_col2:
-                if current_index < len(event_list) - 1:
-                    if st.button("Next ▶", key="view_next"):
-                        st.session_state.se_view_index = current_index + 1
-                        st.session_state.se_view_event = event_list[current_index + 1]
-                        st.rerun()
-            with nav_col3:
-                if st.button("✕ Close", key="close_view"):
-                    st.session_state.se_view_event = None
-                    st.session_state.se_view_list = []
-                    st.session_state.se_view_index = 0
-                    st.rerun()
-        else:
-            if st.button("✕ Close", key="close_view"):
-                st.session_state.se_view_event = None
-                st.rerun()
-        
-        st.markdown("---")
-        
-        # Basic info
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown(f"**📅 Date:** {event.get('event_date', 'N/A')}")
-            st.markdown(f"**⏰ Time:** {format_time(event.get('session_start', ''))}")
-        with col2:
-            st.markdown(f"**📂 Category Path:**")
-            st.caption(cat_path)
-        
-        # Comment
-        comment = event.get('comment', '')
-        if comment:
-            st.markdown(f"**💬 Notes:** {comment}")
-        
-        # Attributes
-        attrs = event.get('event_attributes', [])
-        if attrs:
-            st.markdown("---")
-            st.markdown("**🏷️ Attributes:**")
-            
-            for attr in attrs:
-                attr_def = attr.get('attribute_definitions', {})
-                name = attr_def.get('name', 'Unknown')
-                data_type = attr_def.get('data_type', 'text')
-                unit = attr_def.get('unit', '')
-                description = attr_def.get('description', '')
-                value = get_attribute_value(attr)
-                
-                # Format based on type (per Sasa's specs)
-                if data_type == 'number':
-                    display = f"{value}"
-                    if unit:
-                        display = f"{unit} / {display}"
-                    if description:
-                        display += f" / {description}"
-                    st.markdown(f"- **{name}** ({data_type}): {display}")
-                
-                elif data_type == 'text':
-                    text_val = str(value) if value else '-'
-                    preview = text_val[:20] + '...' if len(text_val) > 20 else text_val
-                    st.markdown(f"- **{name}** ({data_type}): {preview}")
-                
-                elif data_type == 'datetime':
-                    dt_display = format_attribute_value(attr)
-                    if description:
-                        dt_display += f" - {description}"
-                    st.markdown(f"- **{name}** ({data_type}): {dt_display}")
-                
-                elif data_type == 'boolean':
-                    bool_val = "Yes" if value else "No"
-                    if description:
-                        bool_val += f" - {description}"
-                    st.markdown(f"- **{name}** ({data_type}): {bool_val}")
-                
-                elif data_type == 'link':
-                    link_val = str(value) if value else '-'
-                    desc_part = f"{description} / " if description else ""
-                    st.markdown(f"- **{name}** ({data_type}): {desc_part}[{link_val[:30]}...]({link_val})")
-                    # Copy button for link
-                    st.code(link_val, language=None)
-                
-                elif data_type == 'image':
-                    desc_part = description if description else "Image"
-                    st.markdown(f"- **{name}** ({data_type}): {desc_part}")
-                    if value:
-                        st.image(str(value), width=200)
-                
-                else:
-                    st.markdown(f"- **{name}** ({data_type}): {value}")
-        
-        # Attachments
-        attachments = load_event_attachments(client, user_id, event_id)
-        if attachments:
-            st.markdown("---")
-            st.markdown("**📎 Attachments:**")
-            for att in attachments:
-                if att.get('type') == 'image':
-                    st.image(att['url'], caption=att.get('filename', 'Image'), width=200)
-                else:
-                    st.markdown(f"[{att.get('filename', 'File')}]({att['url']})")
 
 
 def render_event_edit_modal(client, user_id: str, event: Dict, all_categories: Dict,
