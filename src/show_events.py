@@ -2,19 +2,26 @@
 Events Tracker - Show Events Module
 ====================================
 Created: 2025-12-15 09:45 UTC
-Last Modified: 2025-12-17 14:00 UTC
+Last Modified: 2025-12-17 15:00 UTC
 Python: 3.11
-Version: 2.2.0 - Filter Fix + UI Improvements
+Version: 2.3.0 - Native Row Selection
 
 Description:
 View, edit, and delete events with:
-- Table view using st.dataframe for fast rendering
+- Table view using st.dataframe with native row selection
 - Filter by Area + Category drill-down + Date range
 - Toolbar actions (Edit/Delete) above table
 - Downstream category filter (includes all sub-categories)
-- Bulk delete with checkbox selection
+- Bulk delete with row selection
 - Category_Path display (ISV-style)
 - Attribute value formatting by type
+
+CHANGELOG v2.3.0:
+- 🎯 NEW: Native row selection (st.dataframe selection_mode) - much more responsive!
+- 🗑️ REMOVED: Checkbox column (replaced by row selection)
+- 🗑️ REMOVED: Select All/Clear buttons (use Shift+Click for range selection)
+- 🔧 FIX: Selection now clears when filter changes
+- 📋 IMPROVED: Selection count always in sync with table
 
 CHANGELOG v2.2.0:
 - 🔧 FIX P1: Area/Category filter now done in SQL (not Python after pagination)
@@ -518,10 +525,10 @@ def render_show_events(client, user_id: str):
         st.session_state.se_edit_list = []
     if 'se_edit_index' not in st.session_state:
         st.session_state.se_edit_index = 0
-    if 'se_pending_edit' not in st.session_state:
-        st.session_state.se_pending_edit = False
     if 'se_delete_confirm' not in st.session_state:
         st.session_state.se_delete_confirm = None
+    if 'se_bulk_delete_confirm' not in st.session_state:
+        st.session_state.se_bulk_delete_confirm = False
     
     # Load areas and categories
     areas = load_areas(client, user_id)
@@ -557,10 +564,12 @@ def render_show_events(client, user_id: str):
                 st.session_state.se_area_id = None
                 st.session_state.se_category_id = None
                 st.session_state.se_page = 0
+                st.session_state.se_selected_events = set()  # Clear selection on filter change
         elif selected_area != st.session_state.se_area_id:
             st.session_state.se_area_id = selected_area
             st.session_state.se_category_id = None
             st.session_state.se_page = 0
+            st.session_state.se_selected_events = set()  # Clear selection on filter change
     
     # Load categories for selected area
     categories = []
@@ -585,9 +594,12 @@ def render_show_events(client, user_id: str):
             )
             
             if selected_cat == "all":
-                st.session_state.se_category_id = None
-            else:
+                if st.session_state.se_category_id is not None:
+                    st.session_state.se_category_id = None
+                    st.session_state.se_selected_events = set()  # Clear selection on filter change
+            elif selected_cat != st.session_state.se_category_id:
                 st.session_state.se_category_id = selected_cat
+                st.session_state.se_selected_events = set()  # Clear selection on filter change
         else:
             st.selectbox("📂 Category", ["Select area first"], disabled=True, key="se_cat_disabled")
     
@@ -604,60 +616,6 @@ def render_show_events(client, user_id: str):
             value=date.today(),
             key="se_date_to"
         )
-    
-    # ─────────────────────────────────────────
-    # TOOLBAR (Edit/Delete actions) - v2.2.0: Removed View button (P3)
-    # ─────────────────────────────────────────
-    selected_count = len(st.session_state.se_selected_events)
-    selected_list = list(st.session_state.se_selected_events)
-    
-    # P4 FIX: We need events loaded first to sort selected_list by date
-    # This will be done after events are loaded below
-    
-    toolbar_col1, toolbar_col2, toolbar_col3 = st.columns([1, 1, 4])
-    
-    with toolbar_col1:
-        edit_disabled = selected_count == 0
-        if st.button("✏️ Edit", use_container_width=True, disabled=edit_disabled,
-                     help="Edit selected event(s)"):
-            # P4: Will be handled after events are loaded with proper sorting
-            st.session_state.se_pending_edit = True
-    
-    with toolbar_col2:
-        delete_disabled = selected_count == 0
-        if st.button(f"🗑️ Delete ({selected_count})" if selected_count > 0 else "🗑️ Delete", 
-                     use_container_width=True, disabled=delete_disabled, type="secondary",
-                     help="Delete selected event(s)"):
-            if selected_count > 0:
-                st.session_state.se_bulk_delete_confirm = True
-    
-    with toolbar_col3:
-        if selected_count > 0:
-            st.caption(f"📋 {selected_count} event(s) selected")
-        else:
-            st.caption("☑️ Select events in table below")
-    
-    # Bulk delete confirmation
-    if st.session_state.get('se_bulk_delete_confirm', False):
-        st.warning(f"⚠️ Are you sure you want to delete {selected_count} events?")
-        confirm_col1, confirm_col2, confirm_col3 = st.columns([1, 1, 4])
-        with confirm_col1:
-            if st.button("✓ Yes, Delete", type="primary"):
-                success, errors = delete_events_bulk(
-                    client, user_id, 
-                    list(st.session_state.se_selected_events)
-                )
-                st.session_state.se_selected_events = set()
-                st.session_state.se_bulk_delete_confirm = False
-                if errors == 0:
-                    st.success(f"✅ Deleted {success} events")
-                else:
-                    st.warning(f"Deleted {success}, failed {errors}")
-                st.rerun()
-        with confirm_col2:
-            if st.button("Cancel"):
-                st.session_state.se_bulk_delete_confirm = False
-                st.rerun()
     
     st.markdown("---")
     
@@ -697,67 +655,18 @@ def render_show_events(client, user_id: str):
     # Stats
     st.caption(f"Showing {len(events)} of {total_count} events (Page {st.session_state.se_page + 1} of {total_pages})")
     
-    # P4: Handle pending edit - sort selected events by date (newest first)
-    if st.session_state.get('se_pending_edit', False) and st.session_state.se_selected_events:
-        selected_ids = st.session_state.se_selected_events
-        # Get date info for selected events to sort them
-        selected_events_info = []
-        for event in events:
-            if event['id'] in selected_ids:
-                selected_events_info.append({
-                    'id': event['id'],
-                    'date': event.get('event_date', ''),
-                    'time': event.get('session_start', '')
-                })
-        # Also check if any selected events are not on current page - load them
-        missing_ids = selected_ids - {e['id'] for e in events}
-        if missing_ids:
-            try:
-                resp = client.table('events') \
-                    .select('id, event_date, session_start') \
-                    .eq('user_id', user_id) \
-                    .in_('id', list(missing_ids)) \
-                    .execute()
-                for e in (resp.data or []):
-                    selected_events_info.append({
-                        'id': e['id'],
-                        'date': e.get('event_date', ''),
-                        'time': e.get('session_start', '')
-                    })
-            except:
-                pass
-        
-        # Sort by date desc, time desc (newest first)
-        selected_events_info.sort(key=lambda x: (x['date'], x['time']), reverse=True)
-        sorted_list = [e['id'] for e in selected_events_info]
-        
-        st.session_state.se_edit_event = sorted_list[0] if sorted_list else None
-        st.session_state.se_edit_index = 0
-        st.session_state.se_edit_list = sorted_list
-        st.session_state.se_pending_edit = False
-    
     # ─────────────────────────────────────────
-    # EVENTS TABLE - P2: Added Select All/Clear buttons
+    # EVENTS TABLE - v2.3.0: Using st.dataframe with row selection (much more responsive!)
     # ─────────────────────────────────────────
-    
-    # Select All / Clear buttons for better UX
-    sel_col1, sel_col2, sel_col3 = st.columns([1, 1, 6])
-    current_page_ids = {event['id'] for event in events}
-    
-    with sel_col1:
-        if st.button("☑️ Select All", key="select_all_page", help="Select all events on this page"):
-            st.session_state.se_selected_events = st.session_state.se_selected_events | current_page_ids
-            st.rerun()
-    
-    with sel_col2:
-        if st.button("☐ Clear", key="clear_selection", help="Clear selection"):
-            st.session_state.se_selected_events = set()
-            st.rerun()
     
     # Build table data
     table_data = []
-    for event in events:
+    event_id_map = {}  # Map row index to event_id
+    
+    for idx, event in enumerate(events):
         event_id = event['id']
+        event_id_map[idx] = event_id
+        
         cat_info = all_categories.get(event.get('category_id'), {})
         cat_path = cat_info.get('full_path', 'Unknown')
         
@@ -770,11 +679,9 @@ def render_show_events(client, user_id: str):
         notes_preview = comment[:30] + '...' if len(comment) > 30 else comment
         
         table_data.append({
-            '_id': event_id,
-            '☐': event_id in st.session_state.se_selected_events,
             'Date': event.get('event_date', ''),
             'Time': format_time(event.get('session_start', '')),
-            'Category_Path': cat_path,
+            'Category Path': cat_path,
             'Attributes': attr_preview,
             'Notes': notes_preview
         })
@@ -782,35 +689,89 @@ def render_show_events(client, user_id: str):
     # Create DataFrame
     df = pd.DataFrame(table_data)
     
-    # Display as data editor with checkbox column
-    edited_df = st.data_editor(
-        df[['☐', 'Date', 'Time', 'Category_Path', 'Attributes', 'Notes']],
+    # Display with native row selection (much more responsive than data_editor checkboxes!)
+    # Note: Selection is per-page only (use filters to narrow down results for bulk operations)
+    # Tip: Use Shift+Click to select a range of rows
+    selection = st.dataframe(
+        df,
         column_config={
-            '☐': st.column_config.CheckboxColumn(
-                'Select',
-                help="Select for bulk actions",
-                default=False
-            ),
-            'Date': st.column_config.TextColumn('Date', disabled=True),
-            'Time': st.column_config.TextColumn('Time', disabled=True),
-            'Category_Path': st.column_config.TextColumn('Category Path', disabled=True, width="medium"),
-            'Attributes': st.column_config.TextColumn('Attributes', disabled=True, width="large"),
-            'Notes': st.column_config.TextColumn('Notes', disabled=True)
+            'Date': st.column_config.TextColumn('Date', width="small"),
+            'Time': st.column_config.TextColumn('Time', width="small"),
+            'Category Path': st.column_config.TextColumn('Category Path', width="medium"),
+            'Attributes': st.column_config.TextColumn('Attributes', width="large"),
+            'Notes': st.column_config.TextColumn('Notes', width="medium")
         },
         hide_index=True,
         use_container_width=True,
+        selection_mode="multi-row",
+        on_select="rerun",
         key="events_table"
     )
     
-    # Update selected events from checkbox changes
-    new_selected = set()
-    for idx, row in edited_df.iterrows():
-        if row['☐']:
-            new_selected.add(df.iloc[idx]['_id'])
+    # Update selected events from row selection (current page only)
+    selected_rows = selection.selection.rows if selection and hasattr(selection, 'selection') else []
+    st.session_state.se_selected_events = {event_id_map[idx] for idx in selected_rows}
     
-    # Preserve selections from other pages
-    other_page_selections = st.session_state.se_selected_events - current_page_ids
-    st.session_state.se_selected_events = new_selected | other_page_selections
+    # ─────────────────────────────────────────
+    # TOOLBAR (Edit/Delete actions) - now below table for sync
+    # ─────────────────────────────────────────
+    selected_count = len(st.session_state.se_selected_events)
+    
+    toolbar_col1, toolbar_col2, toolbar_col3 = st.columns([1, 1, 4])
+    
+    with toolbar_col1:
+        edit_disabled = selected_count == 0
+        if st.button("✏️ Edit", use_container_width=True, disabled=edit_disabled,
+                     help="Edit selected event(s)"):
+            # Sort selected events by date (newest first)
+            selected_events_info = [
+                {'id': event['id'], 'date': event.get('event_date', ''), 'time': event.get('session_start', '')}
+                for event in events if event['id'] in st.session_state.se_selected_events
+            ]
+            selected_events_info.sort(key=lambda x: (x['date'], x['time']), reverse=True)
+            sorted_list = [e['id'] for e in selected_events_info]
+            
+            st.session_state.se_edit_event = sorted_list[0] if sorted_list else None
+            st.session_state.se_edit_index = 0
+            st.session_state.se_edit_list = sorted_list
+            st.rerun()
+    
+    with toolbar_col2:
+        delete_disabled = selected_count == 0
+        if st.button(f"🗑️ Delete ({selected_count})" if selected_count > 0 else "🗑️ Delete", 
+                     use_container_width=True, disabled=delete_disabled, type="secondary",
+                     help="Delete selected event(s)"):
+            if selected_count > 0:
+                st.session_state.se_bulk_delete_confirm = True
+                st.rerun()
+    
+    with toolbar_col3:
+        if selected_count > 0:
+            st.caption(f"📋 {selected_count} selected • Click row to select • Shift+Click for range")
+        else:
+            st.caption("💡 Click rows to select • Shift+Click for range")
+    
+    # Bulk delete confirmation
+    if st.session_state.get('se_bulk_delete_confirm', False):
+        st.warning(f"⚠️ Are you sure you want to delete {selected_count} events?")
+        confirm_col1, confirm_col2, confirm_col3 = st.columns([1, 1, 4])
+        with confirm_col1:
+            if st.button("✓ Yes, Delete", type="primary"):
+                success, errors = delete_events_bulk(
+                    client, user_id, 
+                    list(st.session_state.se_selected_events)
+                )
+                st.session_state.se_selected_events = set()
+                st.session_state.se_bulk_delete_confirm = False
+                if errors == 0:
+                    st.success(f"✅ Deleted {success} events")
+                else:
+                    st.warning(f"Deleted {success}, failed {errors}")
+                st.rerun()
+        with confirm_col2:
+            if st.button("Cancel"):
+                st.session_state.se_bulk_delete_confirm = False
+                st.rerun()
     
     # ─────────────────────────────────────────
     # EDIT EVENT MODAL (with multi-event navigation)
