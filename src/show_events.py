@@ -704,7 +704,24 @@ def render_show_events(client, user_id: str):
     if events:
         with st.expander("🔍 DEBUG: Raw Event Data from Database", expanded=False):
             st.json(events[0])
-            st.write(f"event_attributes: {events[0].get('event_attributes', 'NOT FOUND')}")
+            st.write(f"event_attributes in response: {events[0].get('event_attributes', 'NOT FOUND')}")
+            
+            # DEBUG: Direct query for event_attributes
+            event_id = events[0]['id']
+            st.write(f"Querying event_attributes directly for event_id: {event_id}")
+            try:
+                direct_attrs = client.table('event_attributes') \
+                    .select('*, attribute_definitions(*)') \
+                    .eq('event_id', event_id) \
+                    .eq('user_id', user_id) \
+                    .execute()
+                st.write(f"Direct query result count: {len(direct_attrs.data) if direct_attrs.data else 0}")
+                if direct_attrs.data:
+                    st.json(direct_attrs.data)
+                else:
+                    st.warning("No event_attributes found with direct query!")
+            except Exception as e:
+                st.error(f"Direct query error: {e}")
     
     # Build table data
     table_data = []
