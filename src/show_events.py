@@ -2,9 +2,9 @@
 Events Tracker - Show Events Module
 ====================================
 Created: 2025-12-15 09:45 UTC
-Last Modified: 2025-12-18 20:45 UTC
+Last Modified: 2025-12-18 21:00 UTC
 Python: 3.11
-Version: 2.4.1-DEBUG - Debugging Attribute Display
+Version: 2.4.1 - Fixed Attribute Loading
 
 Description:
 View, edit, and delete events with:
@@ -16,10 +16,12 @@ View, edit, and delete events with:
 - Category_Path display (ISV-style)
 - Attribute value formatting by type
 
-CHANGELOG v2.4.1-DEBUG:
-- 🔍 DEBUG: Added raw event data display to diagnose attribute loading issue
-- Expander shows first event's raw JSON from database
-- Used to verify if event_attributes are being returned correctly
+CHANGELOG v2.4.1:
+- 🐛 CRITICAL FIX: Attributes now load correctly in table and edit view!
+  - ROOT CAUSE: Multiline SELECT string broke PostgREST nested query parsing
+  - Nested select with newlines/whitespace was silently failing
+  - SOLUTION: Changed to single-line select string format
+  - Both main query and single-event query fixed
 
 CHANGELOG v2.4.0:
 - 🎯 T2.2 FIX: Edit modal now shows ALL defined attributes (not just saved ones)
@@ -240,15 +242,11 @@ def load_events_with_attributes(
                 return [], 0
         
         # Build base query - include attributes in join
+        # NOTE: Nested select must be on single line - multiline breaks PostgREST
+        select_fields = 'id, category_id, event_date, session_start, comment, created_at, categories(id, name, area_id), event_attributes(id, value_text, value_number, value_datetime, value_boolean, attribute_definitions(id, name, data_type, unit, description))'
+        
         query = client.table('events') \
-            .select('''
-                id, category_id, event_date, session_start, comment, created_at,
-                categories(id, name, area_id),
-                event_attributes(
-                    id, value_text, value_number, value_datetime, value_boolean,
-                    attribute_definitions(id, name, data_type, unit, description)
-                )
-            ''', count='exact') \
+            .select(select_fields, count='exact') \
             .eq('user_id', user_id)
         
         # Apply category filter IN SQL (not Python!) - P1 fix
@@ -700,29 +698,6 @@ def render_show_events(client, user_id: str):
     # EVENTS TABLE - v2.3.0: Using st.dataframe with row selection (much more responsive!)
     # ─────────────────────────────────────────
     
-    # DEBUG: Show raw event data from first event
-    if events:
-        with st.expander("🔍 DEBUG: Raw Event Data from Database", expanded=False):
-            st.json(events[0])
-            st.write(f"event_attributes in response: {events[0].get('event_attributes', 'NOT FOUND')}")
-            
-            # DEBUG: Direct query for event_attributes
-            event_id = events[0]['id']
-            st.write(f"Querying event_attributes directly for event_id: {event_id}")
-            try:
-                direct_attrs = client.table('event_attributes') \
-                    .select('*, attribute_definitions(*)') \
-                    .eq('event_id', event_id) \
-                    .eq('user_id', user_id) \
-                    .execute()
-                st.write(f"Direct query result count: {len(direct_attrs.data) if direct_attrs.data else 0}")
-                if direct_attrs.data:
-                    st.json(direct_attrs.data)
-                else:
-                    st.warning("No event_attributes found with direct query!")
-            except Exception as e:
-                st.error(f"Direct query error: {e}")
-    
     # Build table data
     table_data = []
     event_id_map = {}  # Map row index to event_id
@@ -847,14 +822,9 @@ def render_show_events(client, user_id: str):
         # Try to load from database if not in current page
         if not event:
             try:
+                single_select = 'id, category_id, event_date, session_start, comment, event_attributes(id, value_text, value_number, value_datetime, value_boolean, attribute_definitions(id, name, data_type, unit, description))'
                 resp = client.table('events') \
-                    .select('''
-                        id, category_id, event_date, session_start, comment,
-                        event_attributes(
-                            id, value_text, value_number, value_datetime, value_boolean,
-                            attribute_definitions(id, name, data_type, unit, description)
-                        )
-                    ''') \
+                    .select(single_select) \
                     .eq('id', event_id) \
                     .eq('user_id', user_id) \
                     .single() \
