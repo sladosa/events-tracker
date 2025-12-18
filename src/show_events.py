@@ -2,9 +2,9 @@
 Events Tracker - Show Events Module
 ====================================
 Created: 2025-12-15 09:45 UTC
-Last Modified: 2025-12-18 19:30 UTC
+Last Modified: 2025-12-18 20:45 UTC
 Python: 3.11
-Version: 2.4.0 - Full Attribute Editing
+Version: 2.4.1-DEBUG - Debugging Attribute Display
 
 Description:
 View, edit, and delete events with:
@@ -15,6 +15,11 @@ View, edit, and delete events with:
 - Bulk delete with row selection
 - Category_Path display (ISV-style)
 - Attribute value formatting by type
+
+CHANGELOG v2.4.1-DEBUG:
+- 🔍 DEBUG: Added raw event data display to diagnose attribute loading issue
+- Expander shows first event's raw JSON from database
+- Used to verify if event_attributes are being returned correctly
 
 CHANGELOG v2.4.0:
 - 🎯 T2.2 FIX: Edit modal now shows ALL defined attributes (not just saved ones)
@@ -694,6 +699,12 @@ def render_show_events(client, user_id: str):
     # ─────────────────────────────────────────
     # EVENTS TABLE - v2.3.0: Using st.dataframe with row selection (much more responsive!)
     # ─────────────────────────────────────────
+    
+    # DEBUG: Show raw event data from first event
+    if events:
+        with st.expander("🔍 DEBUG: Raw Event Data from Database", expanded=False):
+            st.json(events[0])
+            st.write(f"event_attributes: {events[0].get('event_attributes', 'NOT FOUND')}")
     
     # Build table data
     table_data = []
