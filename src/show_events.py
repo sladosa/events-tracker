@@ -2,9 +2,9 @@
 Events Tracker - Show Events Module
 ====================================
 Created: 2025-12-15 09:45 UTC
-Last Modified: 2025-12-17 15:00 UTC
+Last Modified: 2025-12-18 19:30 UTC
 Python: 3.11
-Version: 2.3.0 - Native Row Selection
+Version: 2.4.0 - Full Attribute Editing
 
 Description:
 View, edit, and delete events with:
@@ -15,6 +15,12 @@ View, edit, and delete events with:
 - Bulk delete with row selection
 - Category_Path display (ISV-style)
 - Attribute value formatting by type
+
+CHANGELOG v2.4.0:
+- 🎯 T2.2 FIX: Edit modal now shows ALL defined attributes (not just saved ones)
+- ➕ NEW: Can add attribute values that weren't set when event was created
+- 🗑️ T1 CLEANUP: Removed icon from Areas (simplified display)
+- 🔧 NEW: create_event_attribute() function for inserting new attribute values
 
 CHANGELOG v2.3.0:
 - 🎯 NEW: Native row selection (st.dataframe selection_mode) - much more responsive!
@@ -70,7 +76,7 @@ def load_areas(client, user_id: str) -> List[Dict]:
     """Load all areas for user."""
     try:
         resp = client.table('areas') \
-            .select('id, name, icon, sort_order') \
+            .select('id, name, sort_order') \
             .eq('user_id', user_id) \
             .order('sort_order') \
             .execute()
@@ -342,6 +348,36 @@ def update_event_attribute(client, user_id: str, attr_id: str, value: any, data_
         return False, str(e)
 
 
+def create_event_attribute(client, user_id: str, event_id: str, attr_def_id: str, 
+                          value: any, data_type: str) -> Tuple[bool, str]:
+    """Create a new event attribute."""
+    try:
+        insert_data = {
+            'event_id': event_id,
+            'attribute_definition_id': attr_def_id,
+            'user_id': user_id,
+            'value_text': None,
+            'value_number': None,
+            'value_datetime': None,
+            'value_boolean': None
+        }
+        
+        if data_type == 'number' and value is not None:
+            insert_data['value_number'] = float(value)
+        elif data_type == 'boolean':
+            insert_data['value_boolean'] = bool(value)
+        elif data_type == 'datetime' and value:
+            insert_data['value_datetime'] = value if isinstance(value, str) else value.isoformat()
+        elif value:
+            insert_data['value_text'] = str(value)
+        
+        client.table('event_attributes').insert(insert_data).execute()
+        
+        return True, "Attribute created"
+    except Exception as e:
+        return False, str(e)
+
+
 def delete_event(client, user_id: str, event_id: str) -> Tuple[bool, str]:
     """Delete event and all related records."""
     try:
@@ -544,7 +580,7 @@ def render_show_events(client, user_id: str):
     col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
     
     with col1:
-        area_options = {"all": "All Areas"} | {a['id']: f"{a.get('icon', '📦')} {a['name']}" for a in areas}
+        area_options = {"all": "All Areas"} | {a['id']: f"📦 {a['name']}" for a in areas}
         area_ids = list(area_options.keys())
         
         current_area_idx = 0
@@ -927,63 +963,104 @@ def render_event_edit_modal(client, user_id: str, event: Dict, all_categories: D
             else:
                 st.error(f"❌ {msg}")
         
-        # Attributes editing
-        attrs = event.get('event_attributes', [])
-        if attrs:
+        # ─────────────────────────────────────────
+        # ATTRIBUTES EDITING (T2.2: Show ALL defined attributes)
+        # ─────────────────────────────────────────
+        category_id = event.get('category_id')
+        
+        # Load ALL attribute definitions for this category
+        attr_definitions = load_attribute_definitions(client, user_id, category_id) if category_id else []
+        
+        # Build a map of existing event_attributes by attribute_definition_id
+        existing_attrs = event.get('event_attributes', [])
+        existing_attrs_map = {}
+        for attr in existing_attrs:
+            attr_def = attr.get('attribute_definitions', {})
+            if attr_def:
+                existing_attrs_map[attr_def.get('id')] = attr
+        
+        if attr_definitions:
             st.markdown("---")
-            st.markdown("**🏷️ Edit Attributes:**")
+            st.markdown("**🏷️ Attributes:**")
             
-            for attr in attrs:
-                attr_id = attr['id']
-                attr_def = attr.get('attribute_definitions', {})
-                name = attr_def.get('name', 'Unknown')
-                data_type = attr_def.get('data_type', 'text')
-                unit = attr_def.get('unit', '')
-                current_value = get_attribute_value(attr)
-                
-                label = name
-                if unit:
-                    label += f" ({unit})"
-                
-                col1, col2 = st.columns([3, 1])
-                
-                with col1:
-                    if data_type == 'number':
-                        new_val = st.number_input(
-                            label,
-                            value=float(current_value) if current_value is not None else 0.0,
-                            key=f"edit_attr_{attr_id}"
-                        )
-                    elif data_type == 'boolean':
-                        new_val = st.checkbox(
-                            label,
-                            value=bool(current_value),
-                            key=f"edit_attr_{attr_id}"
-                        )
-                    elif data_type == 'datetime':
-                        try:
-                            current_dt = date.fromisoformat(str(current_value)[:10]) if current_value else date.today()
-                        except:
-                            current_dt = date.today()
-                        new_val = st.date_input(
-                            label,
-                            value=current_dt,
-                            key=f"edit_attr_{attr_id}"
-                        )
-                    else:
-                        new_val = st.text_input(
-                            label,
-                            value=str(current_value) if current_value else '',
-                            key=f"edit_attr_{attr_id}"
-                        )
-                
-                with col2:
-                    if st.button("💾", key=f"save_attr_{attr_id}", help="Save this attribute"):
-                        success, msg = update_event_attribute(client, user_id, attr_id, new_val, data_type)
-                        if success:
-                            st.success("✅")
-                        else:
-                            st.error(f"❌ {msg}")
+            # Display in 2-column grid
+            for j in range(0, len(attr_definitions), 2):
+                cols = st.columns(2)
+                for k, col in enumerate(cols):
+                    if j + k < len(attr_definitions):
+                        attr_def = attr_definitions[j + k]
+                        attr_def_id = attr_def['id']
+                        name = attr_def.get('name', 'Unknown')
+                        data_type = attr_def.get('data_type', 'text')
+                        unit = attr_def.get('unit', '')
+                        is_required = attr_def.get('is_required', False)
+                        
+                        # Check if we have an existing value
+                        existing = existing_attrs_map.get(attr_def_id)
+                        existing_attr_id = existing['id'] if existing else None
+                        current_value = get_attribute_value(existing) if existing else None
+                        
+                        # Build label
+                        label = name
+                        if unit:
+                            label += f" ({unit})"
+                        if is_required:
+                            label += " *"
+                        
+                        with col:
+                            # Render input based on data type
+                            input_key = f"edit_attr_{event_id}_{attr_def_id}"
+                            
+                            if data_type == 'number':
+                                new_val = st.number_input(
+                                    label,
+                                    value=float(current_value) if current_value is not None else 0.0,
+                                    key=input_key,
+                                    help=attr_def.get('description', '')
+                                )
+                            elif data_type == 'boolean':
+                                new_val = st.checkbox(
+                                    label,
+                                    value=bool(current_value) if current_value else False,
+                                    key=input_key,
+                                    help=attr_def.get('description', '')
+                                )
+                            elif data_type == 'datetime':
+                                try:
+                                    current_dt = date.fromisoformat(str(current_value)[:10]) if current_value else date.today()
+                                except:
+                                    current_dt = date.today()
+                                new_val = st.date_input(
+                                    label,
+                                    value=current_dt,
+                                    key=input_key,
+                                    help=attr_def.get('description', '')
+                                )
+                            else:
+                                new_val = st.text_input(
+                                    label,
+                                    value=str(current_value) if current_value else '',
+                                    key=input_key,
+                                    help=attr_def.get('description', '')
+                                )
+                            
+                            # Save button for this attribute
+                            btn_key = f"save_attr_btn_{event_id}_{attr_def_id}"
+                            if st.button("💾 Save", key=btn_key, use_container_width=True):
+                                if existing_attr_id:
+                                    # Update existing
+                                    success, msg = update_event_attribute(client, user_id, existing_attr_id, new_val, data_type)
+                                else:
+                                    # Create new
+                                    success, msg = create_event_attribute(client, user_id, event_id, attr_def_id, new_val, data_type)
+                                
+                                if success:
+                                    st.success("✅ Saved!")
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ {msg}")
+        else:
+            st.info("ℹ️ No attributes defined for this category")
 
 
 # ============================================

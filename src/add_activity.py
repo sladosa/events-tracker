@@ -2,9 +2,9 @@
 Events Tracker - Add Activity Module
 =====================================
 Created: 2025-12-13 15:00 UTC
-Last Modified: 2025-12-17 11:30 UTC
+Last Modified: 2025-12-18 19:30 UTC
 Python: 3.11
-Version: 2.2.0 - Full Downstream Workflow + UI Improvements
+Version: 2.3.0 - Workflow Date/Time + Cleanup
 
 Description:
 Mobile-first activity entry form with:
@@ -13,6 +13,11 @@ Mobile-first activity entry form with:
 - Full Downstream Workflow: walks through ALL leaf categories in subtree
 - Optimized layout for minimal scrolling
 - Photo attachments via Supabase Storage
+
+CHANGELOG v2.3.0:
+- 🎯 T2.3 FIX: Added Date/Time inputs to workflow mode (was missing!)
+- 🗑️ T1 CLEANUP: Removed icon from Areas (simplified display)
+- 🔧 Date/Time now editable during workflow, persists across steps
 
 CHANGELOG v2.2.0:
 - 🌳 IMPROVED: Workflow now traverses ALL leaf categories (not just direct children)
@@ -211,7 +216,7 @@ def load_areas(client, user_id: str) -> List[Dict]:
     """Load all areas for user."""
     try:
         resp = client.table('areas') \
-            .select('id, name, icon, sort_order') \
+            .select('id, name, sort_order') \
             .eq('user_id', user_id) \
             .order('sort_order') \
             .execute()
@@ -688,6 +693,32 @@ def render_workflow_mode(client, user_id: str, categories: List[Dict],
     
     st.markdown("---")
     
+    # ─────────────────────────────────────────
+    # DATE & TIME (editable in workflow mode)
+    # ─────────────────────────────────────────
+    date_col, time_col = st.columns(2)
+    
+    with date_col:
+        workflow_date = st.date_input(
+            "📅 Date",
+            value=selected_date,
+            key=f"wf_date_{current_idx}"
+        )
+        # Update session state so it persists across steps
+        st.session_state.aa_date = workflow_date
+    
+    with time_col:
+        workflow_time = st.time_input(
+            "⏰ Time",
+            value=selected_time,
+            step=300,
+            key=f"wf_time_{current_idx}"
+        )
+        # Update session state so it persists across steps
+        st.session_state.aa_time = workflow_time
+    
+    st.markdown("---")
+    
     # Load attributes for current category
     attrs = load_attributes_for_category(client, user_id, current_cat_id)
     
@@ -733,12 +764,12 @@ def render_workflow_mode(client, user_id: str, categories: List[Dict],
         placeholder="Any notes for this activity..."
     )
     
-    # Store form data for callbacks
+    # Store form data for callbacks (use session state values for date/time)
     st.session_state.aa_workflow_form_data = {
         'category_id': current_cat_id,
         'category_name': current_cat_name,
-        'date': selected_date,
-        'time': selected_time,
+        'date': st.session_state.aa_date,
+        'time': st.session_state.aa_time,
         'comment': comment,
         'attributes': all_attributes.copy()
     }
@@ -1038,7 +1069,7 @@ def render_add_activity(client, user_id: str):
     area_col, cat_col = st.columns(2)
     
     with area_col:
-        area_options = {a['id']: f"{a.get('icon', '📦')} {a['name']}" for a in areas}
+        area_options = {a['id']: f"📦 {a['name']}" for a in areas}
         area_ids = list(area_options.keys())
         
         current_area_idx = 0

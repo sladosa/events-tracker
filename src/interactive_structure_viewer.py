@@ -2,9 +2,15 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-14 12:45 UTC
+Last Modified: 2025-12-18 19:30 UTC
 Python: 3.11
-Version: 1.12.10 - Fixed Cancel button in Upload Excel flow
+Version: 1.12.11 - T1 Cleanup: Removed icon/color from Areas
+
+CHANGELOG v1.12.11 (T1 Areas Cleanup):
+- 🗑️ REMOVED: icon and color fields from Areas
+  - No longer set when creating new areas
+  - No longer displayed in Excel upload preview
+  - Simplifies Areas management
 
 CHANGELOG v1.12.10 (Upload Cancel Fix):
 - 🐛 FIXED: Cancel button now properly resets file uploader
@@ -1513,17 +1519,14 @@ def add_new_area(client, user_id: str, name: str, description: str = "") -> Tupl
         # Get next sort_order
         sort_order = get_next_sort_order(client, 'areas', user_id)
         
-        # Prepare data
+        # Prepare data (T1: icon/color removed - no longer used)
         area_data = {
             'id': new_id,
             'user_id': user_id,
             'name': name,
             'slug': slug,
             'sort_order': sort_order,
-            'description': description if description else None,
-            'icon': None,
-            'color': None,
-            'template_id': None
+            'description': description if description else None
         }
         
         # Insert
@@ -3980,8 +3983,6 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     with st.expander(f"📁 {area['name']} (Row {area['excel_row']})"):
                                         st.json({
                                             'name': area['name'],
-                                            'icon': area['icon'],
-                                            'color': area['color'],
                                             'sort_order': area['sort_order'],
                                             'description': area['description']
                                         })
