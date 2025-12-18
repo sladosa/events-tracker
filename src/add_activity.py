@@ -2,9 +2,9 @@
 Events Tracker - Add Activity Module
 =====================================
 Created: 2025-12-13 15:00 UTC
-Last Modified: 2025-12-18 20:15 UTC
+Last Modified: 2025-12-18 20:30 UTC
 Python: 3.11
-Version: 2.3.1 - Fixed Workflow Attribute Saving
+Version: 2.3.2-DEBUG - Debugging Workflow Attribute Saving
 
 Description:
 Mobile-first activity entry form with:
@@ -13,6 +13,13 @@ Mobile-first activity entry form with:
 - Full Downstream Workflow: walks through ALL leaf categories in subtree
 - Optimized layout for minimal scrolling
 - Photo attachments via Supabase Storage
+
+CHANGELOG v2.3.2-DEBUG:
+- 🔍 DEBUG VERSION: Added extensive debug output to diagnose attribute saving issue
+- Shows all session_state keys being searched
+- Shows values found/not found
+- Pauses after save so user can review debug info
+- Click "Continue" button to proceed after reviewing
 
 CHANGELOG v2.3.1:
 - 🐛 CRITICAL FIX: Workflow mode now correctly saves attribute values!
@@ -846,17 +853,39 @@ def render_workflow_mode(client, user_id: str, categories: List[Dict],
             # This ensures we get the latest values entered by user
             fresh_attributes = {}
             
+            # DEBUG: Show what we're looking for
+            debug_info = []
+            debug_info.append(f"current_idx: {current_idx}")
+            debug_info.append(f"attrs count: {len(attrs)}")
+            debug_info.append(f"parent_attrs count: {len(parent_attrs)}")
+            
             # Collect current step attributes
             for attr in attrs:
                 attr_key = f"wf_step_{current_idx}_{attr['id']}"
+                debug_info.append(f"Looking for key: {attr_key}")
                 if attr_key in st.session_state:
-                    fresh_attributes[attr['id']] = st.session_state[attr_key]
+                    value = st.session_state[attr_key]
+                    fresh_attributes[attr['id']] = value
+                    debug_info.append(f"  FOUND: {value}")
+                else:
+                    debug_info.append(f"  NOT FOUND in session_state")
             
             # Collect parent attributes
             for attr in parent_attrs:
                 attr_key = f"wf_parent_{current_idx}_{attr['id']}"
+                debug_info.append(f"Looking for parent key: {attr_key}")
                 if attr_key in st.session_state:
-                    fresh_attributes[attr['id']] = st.session_state[attr_key]
+                    value = st.session_state[attr_key]
+                    fresh_attributes[attr['id']] = value
+                    debug_info.append(f"  FOUND: {value}")
+                else:
+                    debug_info.append(f"  NOT FOUND in session_state")
+            
+            # Show debug info
+            with st.expander("🔍 DEBUG: Attribute Collection", expanded=True):
+                for line in debug_info:
+                    st.text(line)
+                st.json(fresh_attributes)
             
             # Get comment from session state
             comment_key = f"wf_comment_{current_idx}"
@@ -873,6 +902,10 @@ def render_workflow_mode(client, user_id: str, categories: List[Dict],
                 comment=fresh_comment,
                 attributes=fresh_attributes
             )
+            
+            # Show save result
+            st.info(f"Save result: success={success}, message={message}, event_id={event_id}")
+            st.info(f"Attributes sent: {fresh_attributes}")
             
             if success:
                 # Track saved step
@@ -905,7 +938,10 @@ def render_workflow_mode(client, user_id: str, categories: List[Dict],
                     st.session_state.aa_workflow_save_success = True
                     st.session_state.aa_workflow_save_message = f"{current_cat_name} saved! (same step)"
                 
-                st.rerun()
+                # DEBUG: Stop here to see output - click Continue when ready
+                if st.button("▶️ Continue (click to proceed)", key="debug_continue"):
+                    st.rerun()
+                st.stop()  # Pause here so user can see debug info
             else:
                 st.error(f"❌ {message}")
 
