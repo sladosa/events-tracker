@@ -2,9 +2,9 @@
 Events Tracker - Add Activity Module
 =====================================
 Created: 2025-12-13 15:00 UTC
-Last Modified: 2025-12-18 19:30 UTC
+Last Modified: 2025-12-18 20:15 UTC
 Python: 3.11
-Version: 2.3.0 - Workflow Date/Time + Cleanup
+Version: 2.3.1 - Fixed Workflow Attribute Saving
 
 Description:
 Mobile-first activity entry form with:
@@ -13,6 +13,13 @@ Mobile-first activity entry form with:
 - Full Downstream Workflow: walks through ALL leaf categories in subtree
 - Optimized layout for minimal scrolling
 - Photo attachments via Supabase Storage
+
+CHANGELOG v2.3.1:
+- 🐛 CRITICAL FIX: Workflow mode now correctly saves attribute values!
+  - ROOT CAUSE: on_click callbacks execute BEFORE widget values update in session state
+  - form_data['attributes'] had stale values from previous render
+  - SOLUTION: Read attribute values directly from session state during action processing
+  - Now collects fresh values using widget keys (wf_step_{idx}_{attr_id})
 
 CHANGELOG v2.3.0:
 - 🎯 T2.3 FIX: Added Date/Time inputs to workflow mode (was missing!)
@@ -764,16 +771,6 @@ def render_workflow_mode(client, user_id: str, categories: List[Dict],
         placeholder="Any notes for this activity..."
     )
     
-    # Store form data for callbacks (use session state values for date/time)
-    st.session_state.aa_workflow_form_data = {
-        'category_id': current_cat_id,
-        'category_name': current_cat_name,
-        'date': st.session_state.aa_date,
-        'time': st.session_state.aa_time,
-        'comment': comment,
-        'attributes': all_attributes.copy()
-    }
-    
     st.markdown("---")
     
     # ─────────────────────────────────────────
@@ -833,9 +830,8 @@ def render_workflow_mode(client, user_id: str, categories: List[Dict],
     # PROCESS WORKFLOW ACTIONS
     # ─────────────────────────────────────────
     
-    if st.session_state.get('aa_workflow_action') and st.session_state.get('aa_workflow_form_data'):
+    if st.session_state.get('aa_workflow_action'):
         action = st.session_state.aa_workflow_action
-        form_data = st.session_state.aa_workflow_form_data
         
         # Clear action IMMEDIATELY
         st.session_state.aa_workflow_action = None
@@ -846,27 +842,46 @@ def render_workflow_mode(client, user_id: str, categories: List[Dict],
             st.rerun()
         
         elif action in ('next', 'same'):
-            # Save the activity
-            session_start = datetime.combine(form_data['date'], form_data['time'])
+            # Collect FRESH attribute values directly from session state
+            # This ensures we get the latest values entered by user
+            fresh_attributes = {}
+            
+            # Collect current step attributes
+            for attr in attrs:
+                attr_key = f"wf_step_{current_idx}_{attr['id']}"
+                if attr_key in st.session_state:
+                    fresh_attributes[attr['id']] = st.session_state[attr_key]
+            
+            # Collect parent attributes
+            for attr in parent_attrs:
+                attr_key = f"wf_parent_{current_idx}_{attr['id']}"
+                if attr_key in st.session_state:
+                    fresh_attributes[attr['id']] = st.session_state[attr_key]
+            
+            # Get comment from session state
+            comment_key = f"wf_comment_{current_idx}"
+            fresh_comment = st.session_state.get(comment_key, '')
+            
+            # Save the activity with fresh values
+            session_start = datetime.combine(st.session_state.aa_date, st.session_state.aa_time)
             
             success, message, event_id = save_activity_event(
                 client=client,
                 user_id=user_id,
-                category_id=form_data['category_id'],
+                category_id=current_cat_id,
                 session_start=session_start,
-                comment=form_data['comment'],
-                attributes=form_data['attributes']
+                comment=fresh_comment,
+                attributes=fresh_attributes
             )
             
             if success:
                 # Track saved step
-                cat_name = form_data['category_name']
                 saved_list = st.session_state.aa_workflow_saved
                 
                 # Check if we already have this category in saved list
                 existing = None
                 for s in saved_list:
-                    if s.get('category_id') == form_data['category_id']:
+                    if s.get('category_id') == current_cat_id:
                         existing = s
                         break
                 
@@ -874,8 +889,8 @@ def render_workflow_mode(client, user_id: str, categories: List[Dict],
                     existing['count'] = existing.get('count', 1) + 1
                 else:
                     saved_list.append({
-                        'category_id': form_data['category_id'],
-                        'category_name': cat_name,
+                        'category_id': current_cat_id,
+                        'category_name': current_cat_name,
                         'count': 1
                     })
                 
@@ -885,10 +900,10 @@ def render_workflow_mode(client, user_id: str, categories: List[Dict],
                 if action == 'next':
                     st.session_state.aa_workflow_current += 1
                     st.session_state.aa_workflow_save_success = True
-                    st.session_state.aa_workflow_save_message = f"{cat_name} saved!"
+                    st.session_state.aa_workflow_save_message = f"{current_cat_name} saved!"
                 else:  # same
                     st.session_state.aa_workflow_save_success = True
-                    st.session_state.aa_workflow_save_message = f"{cat_name} saved! (same step)"
+                    st.session_state.aa_workflow_save_message = f"{current_cat_name} saved! (same step)"
                 
                 st.rerun()
             else:
