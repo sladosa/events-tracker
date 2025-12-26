@@ -3,6 +3,7 @@
 - ✅ Uvijek provjeriti dependencies **prije** nego koristiš library
 - ✅ Uvijek updateirati Last Modified timestamp
 - ✅ Uvijek testirati sintaksu prije deploya
+
 ## Code Development Guidelines
 
 ### Code Style
@@ -118,6 +119,7 @@ def _helper_function(data: List) -> Dict:
 > 5. **Testing:** Verify all numbers are consecutive and all TOC links work
 > 
 > Read the complete instructions section in the document for details.
+
 ### Documentation
 
 - Keep documentation (.md files) in numbering style described above
@@ -125,6 +127,7 @@ def _helper_function(data: List) -> Dict:
 - Include examples in docstrings where helpful
 - Document complex algorithms or business logic
 - Add inline comments for non-obvious code
+
 ## Performance Considerations
 
 ### Database Queries
@@ -183,6 +186,88 @@ def load_structure(_client, user_id):
 ```
 
 
+## Known Gotchas & Lessons Learned
+
+### ⚠️ Supabase/PostgREST: Nested SELECT Syntax
+
+**Problem:** Multiline strings with newlines in nested selects SILENTLY FAIL - no error, just missing data!
+
+```python
+# . ❌ BROKEN - nested relations silently ignored!
+query = client.table('events') \
+    .select('''
+        id, event_date,
+        event_attributes(
+            id, value_number,
+            attribute_definitions(name)
+        )
+    ''') \
+    .execute()
+# Returns events but event_attributes is missing!
+
+# . ✅ CORRECT - single line string
+select_fields = 'id, event_date, event_attributes(id, value_number, attribute_definitions(name))'
+query = client.table('events') \
+    .select(select_fields) \
+    .execute()
+# Returns events WITH event_attributes properly nested
+```
+
+**Rule:** Always use single-line strings for `.select()` with nested relations.
+
+---
+
+### ⚠️ Streamlit: on_click Callback Timing
+
+**Problem:** `on_click` callbacks execute BEFORE widget values update in session state!
+
+```python
+# . ❌ BROKEN - values are stale (from previous render)
+def save_form():
+    value = st.session_state.my_input  # This has OLD value!
+    save_to_db(value)
+
+st.number_input("Value", key="my_input")
+st.button("Save", on_click=save_form)  # Callback runs with stale data!
+
+# . ✅ CORRECT - read directly from widget keys during action processing
+# Store action flag only in callback
+st.button("Save", on_click=lambda: setattr(st.session_state, 'action', 'save'))
+
+# Process action AFTER widgets render (values are now current)
+if st.session_state.get('action') == 'save':
+    st.session_state.action = None  # Clear immediately
+    value = st.session_state.my_input  # NOW this has current value
+    save_to_db(value)
+```
+
+**Rule:** For forms with callbacks, only set action flags in `on_click`, then read widget values during action processing in main flow.
+
+---
+
+### ⚠️ Streamlit: Dynamic Widget Keys
+
+**Problem:** Widget state persists even after `st.rerun()` - file uploaders, editors keep old values.
+
+```python
+# . ❌ BROKEN - file stays after "Cancel"
+uploaded = st.file_uploader("Upload", key="uploader")
+if st.button("Cancel"):
+    st.rerun()  # File is STILL there!
+
+# . ✅ CORRECT - use counter in key to force fresh widget
+if 'upload_counter' not in st.session_state:
+    st.session_state.upload_counter = 0
+
+uploaded = st.file_uploader("Upload", key=f"uploader_{st.session_state.upload_counter}")
+if st.button("Cancel"):
+    st.session_state.upload_counter += 1  # Changes key = fresh widget
+    st.rerun()
+```
+
+**Rule:** Use incrementing counters in widget keys when you need to force a fresh/reset state.
+
+
 ## Useful Code Snippets
 
 ### Database Operations
@@ -205,8 +290,10 @@ response = client.table('events') \
 **Join with EAV Pattern:**
 ```python
 # . SELECT with JOIN - get events with attributes and definitions
+# NOTE: Must be single-line string for nested relations!
+select_fields = '*, event_attributes(*, attribute_definitions(*))'
 events = client.table('events') \
-    .select('*, event_attributes(*, attribute_definitions(*))') \
+    .select(select_fields) \
     .eq('user_id', user_id) \
     .eq('category_id', category_id) \
     .execute()
@@ -354,22 +441,6 @@ else:
 ```
 
 ---
-
-
-### Error Handling
-
-Always wrap database operations:
-
-```python
-try:
-    result = client.table('events').insert(data).execute()
-    st.success("✅ Event saved!")
-except Exception as e:
-    st.error(f"❌ Error: {str(e)}")
-    # Log error for debugging in production
-    if DEBUG_MODE:
-        print(f"Stack trace: {traceback.format_exc()}")
-```
 
 ### RLS Requirements
 
