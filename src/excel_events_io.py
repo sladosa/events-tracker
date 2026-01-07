@@ -1,42 +1,43 @@
 """
-Events Tracker - Unified Excel Events I/O Module V2
-====================================================
+Events Tracker - Unified Excel Events I/O Module V2.1
+======================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-07 19:30 UTC
+Last Modified: 2025-01-07 21:30 UTC
 Python: 3.11
-Version: 2.0.0
+Version: 2.1.0
 
 Description:
 Unified Excel Export/Import for events with enhanced formatting:
-- ATTRIBUTE LEGEND section with title, Area column, row grouping by category
-- Column grouping for Default/Min/Max/Unit (collapsible)
-- EVENT DATA section with title and SUBTOTAL formulas
-- Yellow highlighting for non-relevant attributes per row
-- AutoFilter on Area, Category_Path, event_date
+- ATTRIBUTE LEGEND section with title, Area column, row grouping (5-7 rows each)
+- Column grouping for Default/Min/Max/Unit (F-I, collapsible)
+- EVENT DATA section with title, SUBTOTAL formulas, merged comment cells
+- Orange highlighting for non-relevant attributes per row
+- AutoFilter on all columns
 - Proper freeze panes position
-- Color coding: PINK (read-only) / BLUE (editable) / YELLOW (non-relevant)
+- Outline summary above (group +/- icons above grouped rows)
+- Color coding: PINK (read-only) / BLUE (editable) / ORANGE (non-relevant)
 
-Excel Format V2:
+Excel Format V2.1:
 ┌─────────────────────────────────────────────────────────────────┐
 │ A1: ATTRIBUTE LEGEND (bold title)                               │
 ├─────┬──────┬──────────────┬───────────┬──────┬─────┬─────┬─────┤
-│ Col │ Area │ Category_Path│ Attribute │ Type │ Def │ Min │ Max │ ← grouped
+│ Col │ Area │ Category_Path│ Attribute │ Type │ Def │ Min │ Max │ ← F-I grouped
 ├─────┴──────┴──────────────┴───────────┴──────┴─────┴─────┴─────┤
-│ (rows grouped by category, collapsed by default)                │
+│ (rows grouped in chunks of 5-7, collapsed, +/- icons ABOVE)     │
 ├─────────────────────────────────────────────────────────────────┤
 │ (empty row)                                                     │
 ├─────────────────────────────────────────────────────────────────┤
 │ EVENT DATA:    Summ (if relevant) ->    [SUBTOTAL formulas]     │
-├──────────┬──────┬──────────────┬────────────┬─────────┬─────────┤
-│ event_id │ Area │ Category_Path│ event_date │ comment │ attrs.. │
-├──────────┼──────┼──────────────┼────────────┼─────────┼─────────┤
-│ 🟣uuid   │ 🟣   │ 🟣           │ 🔵date     │ 🔵      │ 🔵/🟡   │
-└──────────┴──────┴──────────────┴────────────┴─────────┴─────────┘
+├──────────┬──────┬──────────────┬────────────┬───────────────────┤
+│ event_id │ Area │ Category_Path│ event_date │ comment (merged)  │
+├──────────┼──────┼──────────────┼────────────┼───────────────────┤
+│ 🟣uuid   │ 🟣   │ 🟣           │ 🔵date     │ 🔵 (E:I merged)   │
+└──────────┴──────┴──────────────┴────────────┴───────────────────┘
 
 Colors:
 🟣 PINK = Read-only (event_id, Area, Category_Path)
 🔵 BLUE = Editable (event_date, comment, relevant attributes)
-🟡 YELLOW = Non-relevant attribute for this event's category
+🟠 ORANGE = Non-relevant attribute for this event's category
 
 Dependencies: openpyxl, pandas, json
 """
@@ -58,7 +59,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 # Colors
 PINK_FILL = PatternFill(start_color="FFE6F0", end_color="FFE6F0", fill_type="solid")
 BLUE_FILL = PatternFill(start_color="E6F2FF", end_color="E6F2FF", fill_type="solid")
-YELLOW_FILL = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
+ORANGE_FILL = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")  # Non-relevant attributes
 HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
 LEGEND_HEADER_FILL = PatternFill(start_color="7030A0", end_color="7030A0", fill_type="solid")
 TITLE_FILL = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
@@ -268,7 +269,7 @@ def create_events_excel_v2(
             attr_by_category[cat_id] = set()
         attr_by_category[cat_id].add(attr_def['id'])
     
-    # Build category -> attr_names mapping for yellow highlighting
+    # Build category -> attr_names mapping for orange highlighting
     cat_to_attr_names = {}
     for cat_id, attr_ids in attr_by_category.items():
         cat_to_attr_names[cat_id] = {attr_info[aid]['name'] for aid in attr_ids}
@@ -276,6 +277,10 @@ def create_events_excel_v2(
     # ─────────────────────────────────────────
     # SECTION 1: ATTRIBUTE LEGEND
     # ─────────────────────────────────────────
+    
+    # Set outline settings: summary rows/columns ABOVE/LEFT (not below/right)
+    ws.sheet_properties.outlinePr.summaryBelow = False
+    ws.sheet_properties.outlinePr.summaryRight = False
     
     row = 1
     
@@ -293,12 +298,13 @@ def create_events_excel_v2(
         cell.border = BORDER
     row += 1
     
-    # Legend data rows (grouped by category)
+    # Legend data rows (grouped in chunks of ~6 rows each)
     legend_start_row = row
-    current_category = None
-    group_start_row = None
     attr_col_start = FIXED_COL_COUNT + PADDING_COLS + 1
+    GROUP_SIZE = 6  # Group every 6 attribute rows
     
+    # First pass: write all legend data
+    legend_rows = []
     for idx, attr_name in enumerate(attr_columns):
         attr_def = next((ad for ad in attribute_definitions if ad['name'] == attr_name), None)
         if not attr_def:
@@ -307,19 +313,10 @@ def create_events_excel_v2(
         info = attr_info.get(attr_def['id'], {})
         col_letter = get_column_letter(attr_col_start + idx)
         
-        # Check if category changed (for row grouping)
-        cat_path = info.get('category_path', '')
-        if current_category != cat_path:
-            # End previous group
-            if group_start_row and row > group_start_row + 1:
-                ws.row_dimensions.group(group_start_row, row - 1, hidden=True, outline_level=1)
-            current_category = cat_path
-            group_start_row = row
-        
         legend_data = [
             col_letter,
             info.get('area_name', ''),
-            cat_path,
+            info.get('category_path', ''),
             attr_name,
             info.get('data_type', 'text'),
             info.get('default_value', ''),
@@ -334,15 +331,27 @@ def create_events_excel_v2(
             cell.border = BORDER
             cell.alignment = Alignment(horizontal="left", vertical="center")
         
+        legend_rows.append(row)
         row += 1
-    
-    # Close last group
-    if group_start_row and row > group_start_row + 1:
-        ws.row_dimensions.group(group_start_row, row - 1, hidden=True, outline_level=1)
     
     legend_end_row = row - 1
     
-    # Column grouping for Default, Min, Max, Unit (columns 6-9)
+    # Second pass: create groups of ~6 rows each
+    if legend_rows:
+        num_groups = max(1, (len(legend_rows) + GROUP_SIZE - 1) // GROUP_SIZE)
+        actual_group_size = (len(legend_rows) + num_groups - 1) // num_groups
+        
+        for g in range(num_groups):
+            start_idx = g * actual_group_size
+            end_idx = min(start_idx + actual_group_size - 1, len(legend_rows) - 1)
+            
+            if start_idx <= end_idx and end_idx < len(legend_rows):
+                group_start = legend_rows[start_idx]
+                group_end = legend_rows[end_idx]
+                if group_end > group_start:
+                    ws.row_dimensions.group(group_start, group_end, hidden=True, outline_level=1)
+    
+    # Column grouping for Default, Min, Max, Unit (columns F-I)
     ws.column_dimensions.group('F', 'I', hidden=False, outline_level=1)
     
     # ─────────────────────────────────────────
@@ -416,26 +425,28 @@ def create_events_excel_v2(
             event.get('comment', '') or ''
         ]
         
-        # Write fixed columns
-        for col_idx, value in enumerate(fixed_data, start=1):
+        # Write fixed columns (A-D: event_id, Area, Category_Path, event_date)
+        for col_idx, value in enumerate(fixed_data[:4], start=1):
             cell = ws.cell(row=row, column=col_idx, value=value)
             cell.border = BORDER
             cell.alignment = Alignment(horizontal="left", vertical="center")
             
-            # Color: event_id, Area, Category_Path = PINK; event_date, comment = BLUE
+            # Color: event_id, Area, Category_Path = PINK; event_date = BLUE
             if col_idx <= 3:
                 cell.fill = PINK_FILL
             else:
                 cell.fill = BLUE_FILL
         
-        # Padding columns (empty, outer border only for comment block)
-        for padding_idx in range(PADDING_COLS):
-            col_idx = FIXED_COL_COUNT + 1 + padding_idx
-            cell = ws.cell(row=row, column=col_idx, value='')
-            cell.fill = BLUE_FILL
-            # Only outer borders for the comment+padding block
-            if padding_idx == PADDING_COLS - 1:
-                cell.border = Border(right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+        # Comment column (E) with merge to I - merged cell for comment
+        comment_value = fixed_data[4]
+        ws.merge_cells(f'E{row}:I{row}')
+        comment_cell = ws.cell(row=row, column=5, value=comment_value)
+        comment_cell.fill = BLUE_FILL
+        comment_cell.border = BORDER
+        comment_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        
+        # Apply border to merged area (right border on I)
+        ws.cell(row=row, column=9).border = Border(right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
         
         # Attribute columns
         for attr_idx, attr_name in enumerate(attr_columns):
@@ -445,11 +456,11 @@ def create_events_excel_v2(
             cell = ws.cell(row=row, column=col_idx, value=value if value is not None else '')
             cell.border = BORDER
             
-            # Color: YELLOW if not relevant, BLUE if relevant
+            # Color: ORANGE if not relevant, BLUE if relevant
             if attr_name in relevant_attrs:
                 cell.fill = BLUE_FILL
             else:
-                cell.fill = YELLOW_FILL
+                cell.fill = ORANGE_FILL
             
             if isinstance(value, (int, float)):
                 cell.alignment = Alignment(horizontal="right", vertical="center")
@@ -533,21 +544,22 @@ def create_events_excel_v2(
 
 
 def _create_help_sheet_v2(ws):
-    """Create Help sheet with V2 instructions."""
+    """Create Help sheet with V2.1 instructions."""
     instructions = [
-        ["EVENTS TRACKER - Excel Export/Import Help V2"],
+        ["EVENTS TRACKER - Excel Export/Import Help V2.1"],
         [""],
         ["FILE STRUCTURE:"],
         ["This Excel file has two main sections:"],
         [""],
         ["1. ATTRIBUTE LEGEND (top)"],
         ["   - Shows all attributes with their properties"],
-        ["   - Rows are grouped by category (click +/- to expand/collapse)"],
-        ["   - Columns Default/Min/Max/Unit can be collapsed (click +/-)"],
+        ["   - Rows are grouped in chunks (click +/- ABOVE group to expand/collapse)"],
+        ["   - Columns Default/Min/Max/Unit (F-I) can be collapsed"],
         ["   - Col column shows which Excel column contains this attribute"],
         [""],
         ["2. EVENT DATA (below)"],
         ["   - Your actual events"],
+        ["   - Comment column is merged (E:I) for more space"],
         ["   - Has AutoFilter enabled - click column headers to filter"],
         ["   - Title row shows SUMs for numeric columns (respects filters)"],
         [""],
@@ -560,10 +572,10 @@ def _create_help_sheet_v2(ws):
         [""],
         ["🔵 BLUE = EDITABLE"],
         ["   - event_date: Date of event (YYYY-MM-DD)"],
-        ["   - comment: Notes/comments"],
+        ["   - comment: Notes/comments (merged cells E:I)"],
         ["   - Attribute columns relevant for this event's category"],
         [""],
-        ["🟡 YELLOW = NOT RELEVANT"],
+        ["🟠 ORANGE = NOT RELEVANT"],
         ["   - Attribute belongs to a different category"],
         ["   - Values here will be ignored on import"],
         ["   - Helps you see which columns matter for each event"],
@@ -586,7 +598,8 @@ def _create_help_sheet_v2(ws):
         ["- Use AutoFilter to show only specific categories or dates"],
         ["- Collapse ATTRIBUTE LEGEND groups to see more EVENT DATA"],
         ["- SUM row updates automatically when you filter"],
-        ["- Yellow cells can be left empty - they're not for this category"],
+        ["- Orange cells can be left empty - they're not for this category"],
+        ["- Group +/- icons are ABOVE the grouped rows"],
         [""],
         ["IMPORTANT NOTES:"],
         ["⚠️ DO NOT delete rows - use Delete in app instead"],
