@@ -2,19 +2,27 @@
 Events Tracker - Show Events Module
 ====================================
 Created: 2025-12-15 09:45 UTC
-Last Modified: 2025-12-18 21:00 UTC
+Last Modified: 2025-01-07 17:30 UTC
 Python: 3.11
-Version: 2.4.1 - Fixed Attribute Loading
+Version: 2.5.0 - Unified Excel Export/Import
 
 Description:
 View, edit, and delete events with:
 - Table view using st.dataframe with native row selection
 - Filter by Area + Category drill-down + Date range
-- Toolbar actions (Edit/Delete) above table
+- Toolbar actions (Edit/Delete/Export/Import) above table
 - Downstream category filter (includes all sub-categories)
 - Bulk delete with row selection
 - Category_Path display (ISV-style)
 - Attribute value formatting by type
+- Excel Export/Import with unified format (Master Plan V2)
+
+CHANGELOG v2.5.0:
+- 📥 NEW: Export to Excel button - exports filtered events with attribute legend
+- 📤 NEW: Import from Excel button - create/update events from Excel
+- 📋 NEW: Unified Excel format with legend section + event data
+- 🎨 NEW: Color-coded Excel (PINK=read-only, BLUE=editable)
+- ✨ NEW: Support for CREATE (empty event_id) and UPDATE (existing event_id)
 
 CHANGELOG v2.4.1:
 - 🐛 CRITICAL FIX: Attributes now load correctly in table and edit view!
@@ -59,13 +67,24 @@ CHANGELOG v2.0.0:
 - ☑️ NEW: Checkbox column for bulk operations
 - 📑 NEW: Sortable by date (newest first default)
 
-Dependencies: streamlit, datetime, supabase, pandas
+Dependencies: streamlit, datetime, supabase, pandas, excel_events_io
 """
 
 import streamlit as st
 from datetime import datetime, date, time, timedelta
 from typing import Dict, List, Optional, Tuple
 import pandas as pd
+
+# Import Excel I/O module
+from src.excel_events_io import (
+    export_events_to_excel,
+    import_events_from_excel,
+    parse_events_excel,
+    validate_import_data,
+    apply_import_changes,
+    load_categories_dict,
+    load_attribute_definitions_for_categories
+)
 
 
 # ============================================
@@ -568,6 +587,18 @@ def render_show_events(client, user_id: str):
         st.session_state.se_delete_confirm = None
     if 'se_bulk_delete_confirm' not in st.session_state:
         st.session_state.se_bulk_delete_confirm = False
+    if 'se_import_file' not in st.session_state:
+        st.session_state.se_import_file = None
+    if 'se_import_preview' not in st.session_state:
+        st.session_state.se_import_preview = None
+    if 'se_upload_counter' not in st.session_state:
+        st.session_state.se_upload_counter = 0
+    if 'se_export_data' not in st.session_state:
+        st.session_state.se_export_data = None
+    if 'se_export_filename' not in st.session_state:
+        st.session_state.se_export_filename = None
+    if 'se_export_count' not in st.session_state:
+        st.session_state.se_export_count = None
     
     # Load areas and categories
     areas = load_areas(client, user_id)
@@ -752,11 +783,11 @@ def render_show_events(client, user_id: str):
     st.session_state.se_selected_events = {event_id_map[idx] for idx in selected_rows}
     
     # ─────────────────────────────────────────
-    # TOOLBAR (Edit/Delete actions) - now below table for sync
+    # TOOLBAR (Edit/Delete/Export/Import actions) - now below table for sync
     # ─────────────────────────────────────────
     selected_count = len(st.session_state.se_selected_events)
     
-    toolbar_col1, toolbar_col2, toolbar_col3 = st.columns([1, 1, 4])
+    toolbar_col1, toolbar_col2, toolbar_col3, toolbar_col4, toolbar_col5 = st.columns([1, 1, 1, 1, 3])
     
     with toolbar_col1:
         edit_disabled = selected_count == 0
@@ -785,8 +816,33 @@ def render_show_events(client, user_id: str):
                 st.rerun()
     
     with toolbar_col3:
+        # Export button - exports all filtered events (not just current page)
+        if st.button("📥 Export", use_container_width=True, help="Export filtered events to Excel"):
+            with st.spinner("Exporting..."):
+                excel_bytes, event_count, error = export_events_to_excel(
+                    client, user_id,
+                    category_ids=category_ids,
+                    date_from=date_from,
+                    date_to=date_to
+                )
+                
+                if error:
+                    st.error(f"❌ {error}")
+                else:
+                    filename = f"events_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                    st.session_state.se_export_data = excel_bytes
+                    st.session_state.se_export_filename = filename
+                    st.session_state.se_export_count = event_count
+                    st.rerun()
+    
+    with toolbar_col4:
+        if st.button("📤 Import", use_container_width=True, help="Import events from Excel"):
+            st.session_state.se_import_file = True
+            st.rerun()
+    
+    with toolbar_col5:
         if selected_count > 0:
-            st.caption(f"📋 {selected_count} selected • Click row to select • Shift+Click for range")
+            st.caption(f"📋 {selected_count} selected • Shift+Click for range")
         else:
             st.caption("💡 Click rows to select • Shift+Click for range")
     
@@ -810,6 +866,126 @@ def render_show_events(client, user_id: str):
         with confirm_col2:
             if st.button("Cancel"):
                 st.session_state.se_bulk_delete_confirm = False
+                st.rerun()
+    
+    # ─────────────────────────────────────────
+    # EXPORT DOWNLOAD (after Export button clicked)
+    # ─────────────────────────────────────────
+    if st.session_state.get('se_export_data'):
+        st.success(f"✅ Export ready: {st.session_state.se_export_count} events")
+        
+        col1, col2, col3 = st.columns([2, 1, 3])
+        with col1:
+            st.download_button(
+                label="📥 Download Excel",
+                data=st.session_state.se_export_data,
+                file_name=st.session_state.get('se_export_filename', 'events_export.xlsx'),
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        with col2:
+            if st.button("✕ Close", key="close_export"):
+                st.session_state.se_export_data = None
+                st.session_state.se_export_filename = None
+                st.session_state.se_export_count = None
+                st.rerun()
+        
+        st.info("💡 Edit BLUE columns in Excel, then use Import to apply changes")
+    
+    # ─────────────────────────────────────────
+    # IMPORT WORKFLOW
+    # ─────────────────────────────────────────
+    if st.session_state.get('se_import_file'):
+        st.markdown("---")
+        st.markdown("### 📤 Import Events from Excel")
+        
+        # File uploader with dynamic key to allow re-upload
+        upload_key = f"excel_import_{st.session_state.se_upload_counter}"
+        uploaded_file = st.file_uploader(
+            "Upload Excel file",
+            type=['xlsx'],
+            key=upload_key,
+            help="Upload an Excel file exported from this app or in the same format"
+        )
+        
+        if uploaded_file:
+            file_bytes = uploaded_file.read()
+            
+            # Parse and validate
+            with st.spinner("Parsing Excel file..."):
+                events_to_create, events_to_update, parse_error = parse_events_excel(file_bytes)
+            
+            if parse_error:
+                st.error(f"❌ {parse_error}")
+            else:
+                # Show preview
+                st.markdown("#### Preview")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("New Events", len(events_to_create), help="Events with empty event_id")
+                with col2:
+                    st.metric("Updates", len(events_to_update), help="Events with existing event_id")
+                
+                if events_to_create:
+                    with st.expander(f"📝 New Events ({len(events_to_create)})", expanded=False):
+                        preview_data = []
+                        for e in events_to_create[:10]:
+                            preview_data.append({
+                                'Date': e.get('event_date', ''),
+                                'Category': e.get('Category_Path', ''),
+                                'Comment': str(e.get('comment', ''))[:30]
+                            })
+                        st.dataframe(pd.DataFrame(preview_data), hide_index=True, use_container_width=True)
+                        if len(events_to_create) > 10:
+                            st.caption(f"... and {len(events_to_create) - 10} more")
+                
+                if events_to_update:
+                    with st.expander(f"✏️ Updates ({len(events_to_update)})", expanded=False):
+                        preview_data = []
+                        for e in events_to_update[:10]:
+                            preview_data.append({
+                                'Event ID': str(e.get('event_id', ''))[:8] + '...',
+                                'Date': e.get('event_date', ''),
+                                'Comment': str(e.get('comment', ''))[:30]
+                            })
+                        st.dataframe(pd.DataFrame(preview_data), hide_index=True, use_container_width=True)
+                        if len(events_to_update) > 10:
+                            st.caption(f"... and {len(events_to_update) - 10} more")
+                
+                # Action buttons
+                btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 4])
+                
+                with btn_col1:
+                    if st.button("✓ Apply Import", type="primary", use_container_width=True):
+                        with st.spinner("Importing events..."):
+                            created, updated, errors = import_events_from_excel(
+                                client, user_id, file_bytes
+                            )
+                        
+                        if errors:
+                            st.error("Import completed with errors:")
+                            for err in errors[:5]:
+                                st.error(f"• {err}")
+                            if len(errors) > 5:
+                                st.error(f"... and {len(errors) - 5} more errors")
+                        else:
+                            st.success(f"✅ Import complete: {created} created, {updated} updated")
+                        
+                        # Reset import state
+                        st.session_state.se_import_file = None
+                        st.session_state.se_upload_counter += 1
+                        st.rerun()
+                
+                with btn_col2:
+                    if st.button("✕ Cancel", use_container_width=True):
+                        st.session_state.se_import_file = None
+                        st.session_state.se_upload_counter += 1
+                        st.rerun()
+        else:
+            # Cancel button when no file uploaded
+            if st.button("✕ Cancel Import"):
+                st.session_state.se_import_file = None
                 st.rerun()
     
     # ─────────────────────────────────────────
