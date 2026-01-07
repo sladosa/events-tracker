@@ -2,28 +2,24 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-12-16 16:15 UTC
+Last Modified: 2025-01-07 17:45 UTC
 Python: 3.11
-Version: 1.9.0 - Add Activity Workflow + Show Events Table View
+Version: 2.0.0 - Unified Excel Export/Import in Show Events
 
 Description:
 Main Streamlit application with authentication and multiple pages.
 Core modules: Interactive Structure Viewer (main hub), Add Activity,
-Show Events, bulk import, view data export/import.
+Show Events (with integrated Excel Export/Import).
 
-NEW in v1.9.0:
-- 🏋️ Add Activity v2.1.0 - Downstream Categories Workflow
-  - When parent category has children, shows "Start Workout" button
-  - Step through child categories with Save & Next / Save Same / Skip
-  - Progress bar and workflow summary
-- 📋 Show Events v2.0.0 - Table View Overhaul
-  - Fast table rendering with st.dataframe
-  - Checkbox column for bulk delete
-  - Category_Path column (full hierarchy)
-  - Attribute preview with smart formatting
-  - View/Edit modals for event details
+NEW in v2.0.0:
+- 📥📤 Unified Excel Export/Import integrated into Show Events
+- 🗑️ REMOVED: Bulk Import page (obsolete)
+- 🗑️ REMOVED: View Data - Export page (merged into Show Events)
+- 🗑️ REMOVED: View Data - Import page (merged into Show Events)
+- 🎨 Show Events toolbar now has: Edit | Delete | Export | Import
 
 CHANGELOG:
+- v2.0.0: Unified Excel Export/Import, removed obsolete pages
 - v1.9.0: Add Activity Workflow + Show Events Table View
 - v1.8.0: Show Events + Remove Add Event
 - v1.7.0: Add Activity module (mobile-optimized)
@@ -33,10 +29,7 @@ Modules:
 - auth: User authentication
 - interactive_structure_viewer: Excel-like editing interface (main hub)
 - add_activity: Mobile-optimized activity entry with shortcuts
-- show_events: View, edit, delete events
-- bulk_import: Import multiple events from Excel/CSV
-- view_data_export: Export events to Excel for editing
-- view_data_import: Import edited Excel with change detection
+- show_events: View, edit, delete events + Excel Export/Import
 """
 
 import streamlit as st
@@ -49,9 +42,6 @@ from src import supabase_client
 from src.interactive_structure_viewer import render_interactive_structure_viewer
 from src.add_activity import render_add_activity
 from src.show_events import render_show_events
-from src import bulk_import
-from src import view_data_export
-from src import view_data_import
 
 
 # Page configuration
@@ -108,9 +98,6 @@ def main():
             "📋 Interactive Structure Viewer",
             "🏋️ Add Activity",
             "📊 Show Events",
-            "📤 Bulk Import",
-            "📥 View Data - Export",
-            "📤 View Data - Import",
             "ℹ️ Help"
         ],
         label_visibility="collapsed"
@@ -155,15 +142,6 @@ def main():
     elif page == "📊 Show Events":
         render_show_events(supabase.client, user_id)
     
-    elif page == "📤 Bulk Import":
-        bulk_import.render_bulk_import(supabase.client, user_id)
-    
-    elif page == "📥 View Data - Export":
-        view_data_export.render_view_data_export(supabase.client, user_id)
-    
-    elif page == "📤 View Data - Import":
-        view_data_import.render_view_data_import(supabase.client, user_id)
-    
     elif page == "ℹ️ Help":
         render_help_page()
 
@@ -200,13 +178,13 @@ def render_help_page():
     
     **2. Event Entry**
     - **Add Activity**: Mobile-optimized activity entry with shortcuts
-    - Bulk import from Excel/CSV
+    - **Show Events > Import**: Import events from Excel
     - Link events to categories with automatic attribute capture
     
     **3. Data Management**
     - **Show Events**: View, edit, and delete your events
-    - Export events to Excel for editing
-    - Import edited data with change detection
+    - **Export to Excel**: Download filtered events for editing
+    - **Import from Excel**: Create new or update existing events
     - Filter and search capabilities
     
     ---
@@ -228,17 +206,9 @@ def render_help_page():
     - View all your events with filters
     - Edit event details and attributes
     - Delete events with confirmation
-    - Pagination for large datasets
-    
-    **Bulk Import**
-    - Import multiple events from Excel/CSV
-    - Template download available
-    - Preview and validation before import
-    
-    **View Data - Export/Import**
-    - Export events to Excel for editing
-    - Import with automatic change detection
-    - Color-coded editable vs read-only fields
+    - **Export**: Download filtered events to Excel
+    - **Import**: Upload Excel to create/update events
+    - Color-coded Excel: PINK (read-only) / BLUE (editable)
     
     ---
     
@@ -253,11 +223,10 @@ def render_help_page():
     
     2. **Add some events**
        - Use "Add Activity" for quick entry
-       - Or use "Bulk Import" for multiple events
+       - Or use "Show Events > Import" for multiple events from Excel
     
     3. **Review and manage your data**
-       - Use "Show Events" to view and edit
-       - Use "View Data - Export" for Excel export
+       - Use "Show Events" to view, edit, export, and import
     
     ---
     
@@ -311,7 +280,7 @@ def render_help_page():
     
     # Version info
     st.markdown("---")
-    st.caption("Version: 1.8.0 | 2025-12-15 | Python: 3.11 | Streamlit: 1.28.0")
+    st.caption("Version: 2.0.0 | 2025-01-07 | Python: 3.11 | Streamlit: 1.28.0")
 
 
 if __name__ == "__main__":
