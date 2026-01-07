@@ -821,6 +821,7 @@ def render_show_events(client, user_id: str):
             with st.spinner("Exporting..."):
                 excel_bytes, event_count, error = export_events_to_excel(
                     client, user_id,
+                    area_id=st.session_state.se_area_id,  # Pass area_id for filtering
                     category_ids=category_ids,
                     date_from=date_from,
                     date_to=date_to

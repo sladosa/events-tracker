@@ -1,46 +1,54 @@
 """
-Events Tracker - Unified Excel Events I/O Module
-=================================================
+Events Tracker - Unified Excel Events I/O Module V2
+====================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-07 17:00 UTC
+Last Modified: 2025-01-07 19:30 UTC
 Python: 3.11
-Version: 1.0.0
+Version: 2.0.0
 
 Description:
-Unified Excel Export/Import for events with:
-- Legend section (attribute definitions) at top
-- Split line separator
-- Event data section below
-- Color coding: PINK (read-only) / BLUE (editable)
-- Support for CREATE (empty event_id) and UPDATE (existing event_id)
+Unified Excel Export/Import for events with enhanced formatting:
+- ATTRIBUTE LEGEND section with title, Area column, row grouping by category
+- Column grouping for Default/Min/Max/Unit (collapsible)
+- EVENT DATA section with title and SUBTOTAL formulas
+- Yellow highlighting for non-relevant attributes per row
+- AutoFilter on Area, Category_Path, event_date
+- Proper freeze panes position
+- Color coding: PINK (read-only) / BLUE (editable) / YELLOW (non-relevant)
 
-Excel Format (per Master Plan V2):
+Excel Format V2:
 ┌─────────────────────────────────────────────────────────────────┐
-│ TOP SECTION - Attribute Legend (scrollable if many)             │
-├─────┬──────────────────┬────────────┬──────┬─────┬─────┬───────┤
-│ Col │ Category_Path    │ Attribute  │ Type │ Def │ Min │ Max   │
-├─────┴──────────────────┴────────────┴──────┴─────┴─────┴───────┤
-│ ═══════════════════ SPLIT LINE ════════════════════════════════│
+│ A1: ATTRIBUTE LEGEND (bold title)                               │
+├─────┬──────┬──────────────┬───────────┬──────┬─────┬─────┬─────┤
+│ Col │ Area │ Category_Path│ Attribute │ Type │ Def │ Min │ Max │ ← grouped
+├─────┴──────┴──────────────┴───────────┴──────┴─────┴─────┴─────┤
+│ (rows grouped by category, collapsed by default)                │
 ├─────────────────────────────────────────────────────────────────┤
-│ BOTTOM SECTION - Event Data                                     │
-├──────────┬────────────┬─────────┬──────────────┬───────┬───────┤
-│ event_id │ event_date │ Area    │ Category_Path│comment│ attrs │
-└──────────┴────────────┴─────────┴──────────────┴───────┴───────┘
+│ (empty row)                                                     │
+├─────────────────────────────────────────────────────────────────┤
+│ EVENT DATA:    Summ (if relevant) ->    [SUBTOTAL formulas]     │
+├──────────┬──────┬──────────────┬────────────┬─────────┬─────────┤
+│ event_id │ Area │ Category_Path│ event_date │ comment │ attrs.. │
+├──────────┼──────┼──────────────┼────────────┼─────────┼─────────┤
+│ 🟣uuid   │ 🟣   │ 🟣           │ 🔵date     │ 🔵      │ 🔵/🟡   │
+└──────────┴──────┴──────────────┴────────────┴─────────┴─────────┘
 
 Colors:
-🟣 PINK = Read-only (event_id, Area, Category_Path for existing events)
-🔵 BLUE = Editable (event_date, comment, attributes, new event rows)
+🟣 PINK = Read-only (event_id, Area, Category_Path)
+🔵 BLUE = Editable (event_date, comment, relevant attributes)
+🟡 YELLOW = Non-relevant attribute for this event's category
 
-Dependencies: openpyxl, pandas
+Dependencies: openpyxl, pandas, json
 """
 
 import io
+import json
 from datetime import datetime, date
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Set
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
-import pandas as pd
+from openpyxl.worksheet.datavalidation import DataValidation
 
 
 # ============================================
@@ -48,14 +56,16 @@ import pandas as pd
 # ============================================
 
 # Colors
-PINK_FILL = PatternFill(start_color="FFE6F0", end_color="FFE6F0", fill_type="solid")  # Read-only
-BLUE_FILL = PatternFill(start_color="E6F2FF", end_color="E6F2FF", fill_type="solid")  # Editable
+PINK_FILL = PatternFill(start_color="FFE6F0", end_color="FFE6F0", fill_type="solid")
+BLUE_FILL = PatternFill(start_color="E6F2FF", end_color="E6F2FF", fill_type="solid")
+YELLOW_FILL = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
 HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-LEGEND_HEADER_FILL = PatternFill(start_color="7030A0", end_color="7030A0", fill_type="solid")  # Purple
-SPLIT_FILL = PatternFill(start_color="808080", end_color="808080", fill_type="solid")  # Gray
+LEGEND_HEADER_FILL = PatternFill(start_color="7030A0", end_color="7030A0", fill_type="solid")
+TITLE_FILL = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
 
 HEADER_FONT = Font(color="FFFFFF", bold=True)
-SPLIT_FONT = Font(color="FFFFFF", bold=True)
+TITLE_FONT = Font(bold=True, size=12)
+NORMAL_FONT = Font()
 
 BORDER = Border(
     left=Side(style='thin'),
@@ -64,12 +74,20 @@ BORDER = Border(
     bottom=Side(style='thin')
 )
 
-# Fixed columns (before attributes)
-FIXED_COLUMNS = ['event_id', 'event_date', 'Area', 'Category_Path', 'comment']
+OUTER_BORDER = Border(
+    left=Side(style='thin'),
+    right=Side(style='thin'),
+    top=Side(style='thin'),
+    bottom=Side(style='thin')
+)
+
+# Fixed columns for EVENT DATA (before attributes)
+FIXED_COLUMNS = ['event_id', 'Area', 'Category_Path', 'event_date', 'comment']
 FIXED_COL_COUNT = len(FIXED_COLUMNS)
+PADDING_COLS = 4  # Empty columns after comment for grouping padding
 
 # Legend columns
-LEGEND_COLUMNS = ['Col', 'Category_Path', 'Attribute', 'Type', 'Default', 'Min', 'Max', 'Unit']
+LEGEND_COLUMNS = ['Col', 'Area', 'Category_Path', 'Attribute', 'Type', 'Default', 'Min', 'Max', 'Unit']
 
 
 # ============================================
@@ -90,9 +108,7 @@ def load_areas_dict(client, user_id: str) -> Dict[str, Dict]:
 
 
 def load_categories_dict(client, user_id: str) -> Dict[str, Dict]:
-    """
-    Load categories as dict: category_id -> {name, full_path, area_id, area_name, ...}
-    """
+    """Load categories as dict: category_id -> {name, full_path, area_id, area_name, ...}"""
     try:
         resp = client.table('categories') \
             .select('id, name, parent_category_id, area_id, level, sort_order') \
@@ -103,13 +119,10 @@ def load_categories_dict(client, user_id: str) -> Dict[str, Dict]:
         
         categories = resp.data or []
         cat_dict = {c['id']: c for c in categories}
-        
-        # Load areas for area_name
         areas = load_areas_dict(client, user_id)
         
         result = {}
         for cat in categories:
-            # Build full path
             path_parts = []
             current = cat
             while current:
@@ -130,20 +143,27 @@ def load_categories_dict(client, user_id: str) -> Dict[str, Dict]:
             }
         
         return result
-        
     except Exception:
         return {}
 
 
+def get_category_ids_for_area(client, user_id: str, area_id: str) -> List[str]:
+    """Get all category IDs belonging to an area."""
+    try:
+        resp = client.table('categories') \
+            .select('id') \
+            .eq('user_id', user_id) \
+            .eq('area_id', area_id) \
+            .execute()
+        return [c['id'] for c in (resp.data or [])]
+    except Exception:
+        return []
+
+
 def load_attribute_definitions_for_categories(
-    client, 
-    user_id: str, 
-    category_ids: List[str]
+    client, user_id: str, category_ids: List[str]
 ) -> List[Dict]:
-    """
-    Load all attribute definitions for given categories.
-    Returns list of dicts with category info included.
-    """
+    """Load all attribute definitions for given categories."""
     if not category_ids:
         return []
     
@@ -161,16 +181,12 @@ def load_attribute_definitions_for_categories(
 
 
 def load_events_for_export(
-    client,
-    user_id: str,
+    client, user_id: str,
     category_ids: Optional[List[str]] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None
 ) -> List[Dict]:
-    """
-    Load events with their attributes for export.
-    No pagination - loads all matching events.
-    """
+    """Load events with their attributes for export."""
     try:
         select_fields = 'id, category_id, event_date, comment, event_attributes(id, attribute_definition_id, value_text, value_number, value_datetime, value_boolean)'
         
@@ -190,138 +206,165 @@ def load_events_for_export(
         
         resp = query.execute()
         return resp.data or []
-        
     except Exception:
         return []
 
 
+def parse_validation_rules(rules) -> Dict:
+    """Safely parse validation_rules which can be dict, JSON string, or None."""
+    if isinstance(rules, dict):
+        return rules
+    if isinstance(rules, str):
+        try:
+            return json.loads(rules)
+        except:
+            return {}
+    return {}
+
+
 # ============================================
-# EXCEL EXPORT
+# EXCEL EXPORT V2
 # ============================================
 
-def create_events_excel(
+def create_events_excel_v2(
     events: List[Dict],
     attribute_definitions: List[Dict],
     categories_dict: Dict[str, Dict]
 ) -> bytes:
-    """
-    Create Excel file with events in unified format.
+    """Create Excel file with enhanced V2 format."""
     
-    Args:
-        events: List of event dicts with event_attributes
-        attribute_definitions: List of attr def dicts
-        categories_dict: Dict of category_id -> {name, full_path, area_name, ...}
-    
-    Returns:
-        Excel file as bytes
-    """
     wb = Workbook()
     ws = wb.active
     ws.title = "Events"
     
-    # Build attribute info: attr_def_id -> {name, category_path, data_type, ...}
-    attr_info = {}
-    attr_columns = []  # Ordered list of attribute names for columns
+    # Build attribute info and determine columns
+    attr_info = {}  # attr_def_id -> {name, category_path, area_name, data_type, ...}
+    attr_columns = []  # Ordered list of attribute names
+    attr_by_category = {}  # category_id -> set of attr_def_ids
     
     for attr_def in attribute_definitions:
         cat_id = attr_def.get('category_id')
         cat_info = categories_dict.get(cat_id, {})
-        
-        # Handle validation_rules - can be dict, JSON string, or None
-        validation_rules = attr_def.get('validation_rules', {})
-        if isinstance(validation_rules, str):
-            try:
-                import json
-                validation_rules = json.loads(validation_rules)
-            except:
-                validation_rules = {}
-        elif not isinstance(validation_rules, dict):
-            validation_rules = {}
+        validation = parse_validation_rules(attr_def.get('validation_rules'))
         
         attr_info[attr_def['id']] = {
             'id': attr_def['id'],
             'name': attr_def['name'],
+            'category_id': cat_id,
             'category_path': cat_info.get('full_path', 'Unknown'),
+            'area_name': cat_info.get('area_name', 'Unknown'),
             'data_type': attr_def.get('data_type', 'text'),
             'unit': attr_def.get('unit', ''),
             'default_value': attr_def.get('default_value', ''),
-            'validation_rules': validation_rules
+            'min': validation.get('min', ''),
+            'max': validation.get('max', '')
         }
         
-        # Use unique column name: attr_name (if unique) or category > attr_name
         attr_name = attr_def['name']
         if attr_name not in attr_columns:
             attr_columns.append(attr_name)
+        
+        if cat_id not in attr_by_category:
+            attr_by_category[cat_id] = set()
+        attr_by_category[cat_id].add(attr_def['id'])
+    
+    # Build category -> attr_names mapping for yellow highlighting
+    cat_to_attr_names = {}
+    for cat_id, attr_ids in attr_by_category.items():
+        cat_to_attr_names[cat_id] = {attr_info[aid]['name'] for aid in attr_ids}
     
     # ─────────────────────────────────────────
     # SECTION 1: ATTRIBUTE LEGEND
     # ─────────────────────────────────────────
     
-    # Legend header row
     row = 1
+    
+    # Title row
+    ws.cell(row=row, column=1, value="ATTRIBUTE LEGEND:").font = TITLE_FONT
+    row += 1
+    
+    # Header row
+    legend_header_row = row
     for col_idx, col_name in enumerate(LEGEND_COLUMNS, start=1):
         cell = ws.cell(row=row, column=col_idx, value=col_name)
         cell.fill = LEGEND_HEADER_FILL
         cell.font = HEADER_FONT
         cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.border = BORDER
+    row += 1
     
-    # Legend data rows
-    row = 2
-    col_letter_start = get_column_letter(FIXED_COL_COUNT + 1)  # First attribute column
+    # Legend data rows (grouped by category)
+    legend_start_row = row
+    current_category = None
+    group_start_row = None
+    attr_col_start = FIXED_COL_COUNT + PADDING_COLS + 1
     
     for idx, attr_name in enumerate(attr_columns):
-        # Find the attr_def for this name
         attr_def = next((ad for ad in attribute_definitions if ad['name'] == attr_name), None)
         if not attr_def:
             continue
         
         info = attr_info.get(attr_def['id'], {})
-        validation = info.get('validation_rules', {})
+        col_letter = get_column_letter(attr_col_start + idx)
         
-        col_letter = get_column_letter(FIXED_COL_COUNT + 1 + idx)
+        # Check if category changed (for row grouping)
+        cat_path = info.get('category_path', '')
+        if current_category != cat_path:
+            # End previous group
+            if group_start_row and row > group_start_row + 1:
+                ws.row_dimensions.group(group_start_row, row - 1, hidden=True, outline_level=1)
+            current_category = cat_path
+            group_start_row = row
         
         legend_data = [
-            col_letter,  # Col
-            info.get('category_path', ''),  # Category_Path
-            attr_name,  # Attribute
-            info.get('data_type', 'text'),  # Type
-            info.get('default_value', ''),  # Default
-            validation.get('min', ''),  # Min
-            validation.get('max', ''),  # Max
-            info.get('unit', '')  # Unit
+            col_letter,
+            info.get('area_name', ''),
+            cat_path,
+            attr_name,
+            info.get('data_type', 'text'),
+            info.get('default_value', ''),
+            info.get('min', ''),
+            info.get('max', ''),
+            info.get('unit', '')
         ]
         
         for col_idx, value in enumerate(legend_data, start=1):
             cell = ws.cell(row=row, column=col_idx, value=value if value else '')
-            cell.fill = PINK_FILL  # Legend is read-only
+            cell.fill = PINK_FILL
             cell.border = BORDER
             cell.alignment = Alignment(horizontal="left", vertical="center")
         
         row += 1
     
+    # Close last group
+    if group_start_row and row > group_start_row + 1:
+        ws.row_dimensions.group(group_start_row, row - 1, hidden=True, outline_level=1)
+    
+    legend_end_row = row - 1
+    
+    # Column grouping for Default, Min, Max, Unit (columns 6-9)
+    ws.column_dimensions.group('F', 'I', hidden=False, outline_level=1)
+    
     # ─────────────────────────────────────────
-    # SECTION 2: SPLIT LINE
+    # EMPTY ROW
     # ─────────────────────────────────────────
-    
-    split_row = row
-    total_columns = FIXED_COL_COUNT + len(attr_columns)
-    
-    # Merge cells for split line
-    ws.merge_cells(start_row=split_row, start_column=1, end_row=split_row, end_column=max(total_columns, len(LEGEND_COLUMNS)))
-    split_cell = ws.cell(row=split_row, column=1, value="═══════════════════ EVENT DATA ═══════════════════")
-    split_cell.fill = SPLIT_FILL
-    split_cell.font = SPLIT_FONT
-    split_cell.alignment = Alignment(horizontal="center", vertical="center")
-    
     row += 1
     
     # ─────────────────────────────────────────
-    # SECTION 3: EVENT DATA HEADER
+    # SECTION 2: EVENT DATA
     # ─────────────────────────────────────────
     
-    data_header_row = row
-    all_columns = FIXED_COLUMNS + attr_columns
+    # Title row with SUBTOTAL placeholders
+    event_title_row = row
+    ws.cell(row=row, column=1, value="EVENT DATA:").font = TITLE_FONT
+    ws.cell(row=row, column=3, value="Summ (if relevant) ->").alignment = Alignment(horizontal="right")
+    
+    # SUBTOTAL formulas will be added after we know the data range
+    row += 1
+    
+    # Header row
+    event_header_row = row
+    all_columns = FIXED_COLUMNS + [''] * PADDING_COLS + attr_columns
     
     for col_idx, col_name in enumerate(all_columns, start=1):
         cell = ws.cell(row=row, column=col_idx, value=col_name)
@@ -331,9 +374,10 @@ def create_events_excel(
         cell.border = BORDER
     
     row += 1
+    event_data_start_row = row
     
     # ─────────────────────────────────────────
-    # SECTION 4: EVENT DATA ROWS
+    # EVENT DATA ROWS
     # ─────────────────────────────────────────
     
     for event in events:
@@ -341,7 +385,10 @@ def create_events_excel(
         cat_id = event.get('category_id')
         cat_info = categories_dict.get(cat_id, {})
         
-        # Build attribute values dict: attr_name -> value
+        # Get set of relevant attribute names for this event's category
+        relevant_attrs = cat_to_attr_names.get(cat_id, set())
+        
+        # Build attribute values dict
         attr_values = {}
         for ea in event.get('event_attributes', []):
             attr_def_id = ea.get('attribute_definition_id')
@@ -349,7 +396,6 @@ def create_events_excel(
             attr_name = attr_inf.get('name')
             
             if attr_name:
-                # Get value based on type
                 value = None
                 if ea.get('value_number') is not None:
                     value = ea['value_number']
@@ -359,16 +405,15 @@ def create_events_excel(
                     value = ea['value_datetime']
                 elif ea.get('value_text'):
                     value = ea['value_text']
-                
                 attr_values[attr_name] = value
         
         # Fixed columns
         fixed_data = [
-            event_id,  # event_id (PINK for existing)
-            event.get('event_date', ''),  # event_date (BLUE)
-            cat_info.get('area_name', ''),  # Area (PINK)
-            cat_info.get('full_path', ''),  # Category_Path (PINK)
-            event.get('comment', '') or ''  # comment (BLUE)
+            event_id,
+            cat_info.get('area_name', ''),
+            cat_info.get('full_path', ''),
+            event.get('event_date', ''),
+            event.get('comment', '') or ''
         ]
         
         # Write fixed columns
@@ -377,21 +422,35 @@ def create_events_excel(
             cell.border = BORDER
             cell.alignment = Alignment(horizontal="left", vertical="center")
             
-            # Color coding: event_id, Area, Category_Path = PINK; rest = BLUE
-            if col_idx in [1, 3, 4]:  # event_id, Area, Category_Path
+            # Color: event_id, Area, Category_Path = PINK; event_date, comment = BLUE
+            if col_idx <= 3:
                 cell.fill = PINK_FILL
             else:
                 cell.fill = BLUE_FILL
         
-        # Attribute columns (BLUE - editable)
-        for col_idx, attr_name in enumerate(attr_columns, start=FIXED_COL_COUNT + 1):
+        # Padding columns (empty, outer border only for comment block)
+        for padding_idx in range(PADDING_COLS):
+            col_idx = FIXED_COL_COUNT + 1 + padding_idx
+            cell = ws.cell(row=row, column=col_idx, value='')
+            cell.fill = BLUE_FILL
+            # Only outer borders for the comment+padding block
+            if padding_idx == PADDING_COLS - 1:
+                cell.border = Border(right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+        
+        # Attribute columns
+        for attr_idx, attr_name in enumerate(attr_columns):
+            col_idx = attr_col_start + attr_idx
             value = attr_values.get(attr_name, '')
             
             cell = ws.cell(row=row, column=col_idx, value=value if value is not None else '')
-            cell.fill = BLUE_FILL
             cell.border = BORDER
             
-            # Align numbers right
+            # Color: YELLOW if not relevant, BLUE if relevant
+            if attr_name in relevant_attrs:
+                cell.fill = BLUE_FILL
+            else:
+                cell.fill = YELLOW_FILL
+            
             if isinstance(value, (int, float)):
                 cell.alignment = Alignment(horizontal="right", vertical="center")
             else:
@@ -399,48 +458,73 @@ def create_events_excel(
         
         row += 1
     
+    event_data_end_row = row - 1
+    
+    # ─────────────────────────────────────────
+    # SUBTOTAL FORMULAS
+    # ─────────────────────────────────────────
+    
+    for attr_idx, attr_name in enumerate(attr_columns):
+        # Find attr_def to check if it's a number type
+        attr_def = next((ad for ad in attribute_definitions if ad['name'] == attr_name), None)
+        if attr_def and attr_def.get('data_type') == 'number':
+            col_idx = attr_col_start + attr_idx
+            col_letter = get_column_letter(col_idx)
+            
+            # SUBTOTAL(9, range) = SUM that respects filters
+            formula = f"=SUBTOTAL(9,{col_letter}{event_data_start_row}:{col_letter}{event_data_end_row})"
+            cell = ws.cell(row=event_title_row, column=col_idx, value=formula)
+            cell.alignment = Alignment(horizontal="right")
+    
+    # ─────────────────────────────────────────
+    # AUTOFILTER
+    # ─────────────────────────────────────────
+    
+    # AutoFilter on header row, columns A through last column
+    last_col = len(all_columns)
+    ws.auto_filter.ref = f"A{event_header_row}:{get_column_letter(last_col)}{event_data_end_row}"
+    
+    # ─────────────────────────────────────────
+    # FREEZE PANES
+    # ─────────────────────────────────────────
+    
+    # Freeze below header row, after event_date column (E = column 5)
+    ws.freeze_panes = f"E{event_data_start_row}"
+    
     # ─────────────────────────────────────────
     # COLUMN WIDTHS
     # ─────────────────────────────────────────
     
-    # event_id column: narrow (10)
-    ws.column_dimensions['A'].width = 10
+    ws.column_dimensions['A'].width = 10  # event_id (narrow)
+    ws.column_dimensions['B'].width = 12  # Area
+    ws.column_dimensions['C'].width = 30  # Category_Path
+    ws.column_dimensions['D'].width = 12  # event_date
+    ws.column_dimensions['E'].width = 30  # comment
     
-    # Other fixed columns
-    ws.column_dimensions['B'].width = 12  # event_date
-    ws.column_dimensions['C'].width = 15  # Area
-    ws.column_dimensions['D'].width = 30  # Category_Path
-    ws.column_dimensions['E'].width = 25  # comment
+    # Padding columns
+    for i in range(PADDING_COLS):
+        ws.column_dimensions[get_column_letter(FIXED_COL_COUNT + 1 + i)].width = 3
     
-    # Attribute columns: auto-size
+    # Attribute columns
     for idx in range(len(attr_columns)):
-        col_letter = get_column_letter(FIXED_COL_COUNT + 1 + idx)
+        col_letter = get_column_letter(attr_col_start + idx)
         ws.column_dimensions[col_letter].width = 12
     
-    # Legend columns width
-    legend_widths = [6, 30, 15, 10, 10, 8, 8, 10]
-    for idx, width in enumerate(legend_widths):
-        col_letter = get_column_letter(idx + 1)
-        # Only apply if not already wider
-        current = ws.column_dimensions[col_letter].width or 0
+    # Legend columns widths
+    legend_widths = {'A': 6, 'B': 12, 'C': 30, 'D': 15, 'E': 10, 'F': 10, 'G': 8, 'H': 8, 'I': 10}
+    for col, width in legend_widths.items():
+        current = ws.column_dimensions[col].width or 0
         if current < width:
-            ws.column_dimensions[col_letter].width = width
-    
-    # ─────────────────────────────────────────
-    # FREEZE PANES (Split between legend and data)
-    # ─────────────────────────────────────────
-    
-    # Freeze at data header row, after fixed columns
-    ws.freeze_panes = f"F{data_header_row + 1}"
+            ws.column_dimensions[col].width = width
     
     # ─────────────────────────────────────────
     # HELP SHEET
     # ─────────────────────────────────────────
     
     ws_help = wb.create_sheet("Help")
-    _create_help_sheet(ws_help)
+    _create_help_sheet_v2(ws_help)
     
-    # Save to bytes
+    # Save
     excel_buffer = io.BytesIO()
     wb.save(excel_buffer)
     excel_buffer.seek(0)
@@ -448,26 +532,41 @@ def create_events_excel(
     return excel_buffer.getvalue()
 
 
-def _create_help_sheet(ws):
-    """Create Help sheet with instructions."""
+def _create_help_sheet_v2(ws):
+    """Create Help sheet with V2 instructions."""
     instructions = [
-        ["EVENTS TRACKER - Excel Export/Import Help"],
+        ["EVENTS TRACKER - Excel Export/Import Help V2"],
         [""],
         ["FILE STRUCTURE:"],
-        ["This Excel file has two sections:"],
-        ["1. ATTRIBUTE LEGEND (top) - Shows which columns contain which attributes"],
-        ["2. EVENT DATA (below split line) - Your actual events"],
+        ["This Excel file has two main sections:"],
+        [""],
+        ["1. ATTRIBUTE LEGEND (top)"],
+        ["   - Shows all attributes with their properties"],
+        ["   - Rows are grouped by category (click +/- to expand/collapse)"],
+        ["   - Columns Default/Min/Max/Unit can be collapsed (click +/-)"],
+        ["   - Col column shows which Excel column contains this attribute"],
+        [""],
+        ["2. EVENT DATA (below)"],
+        ["   - Your actual events"],
+        ["   - Has AutoFilter enabled - click column headers to filter"],
+        ["   - Title row shows SUMs for numeric columns (respects filters)"],
         [""],
         ["COLOR CODING:"],
-        ["🟣 PINK columns = READ-ONLY (do not edit)"],
+        [""],
+        ["🟣 PINK = READ-ONLY (do not edit)"],
         ["   - event_id: Identifies existing events"],
         ["   - Area: Determined by Category"],
         ["   - Category_Path: Cannot change category of existing event"],
         [""],
-        ["🔵 BLUE columns = EDITABLE"],
-        ["   - event_date: Date of event"],
+        ["🔵 BLUE = EDITABLE"],
+        ["   - event_date: Date of event (YYYY-MM-DD)"],
         ["   - comment: Notes/comments"],
-        ["   - Attribute columns: Your data values"],
+        ["   - Attribute columns relevant for this event's category"],
+        [""],
+        ["🟡 YELLOW = NOT RELEVANT"],
+        ["   - Attribute belongs to a different category"],
+        ["   - Values here will be ignored on import"],
+        ["   - Helps you see which columns matter for each event"],
         [""],
         ["HOW TO EDIT EXISTING EVENTS:"],
         ["1. Find the row with the event you want to edit"],
@@ -476,32 +575,23 @@ def _create_help_sheet(ws):
         ["4. Import back in Show Events"],
         [""],
         ["HOW TO CREATE NEW EVENTS:"],
-        ["1. Add a new row at the bottom"],
+        ["1. Add a new row at the bottom of EVENT DATA"],
         ["2. Leave event_id EMPTY (this signals a new event)"],
-        ["3. Fill in event_date (required)"],
-        ["4. Fill in Area and Category_Path (must match existing structure)"],
-        ["5. Fill in attribute values"],
+        ["3. Fill in Area and Category_Path (must match existing structure)"],
+        ["4. Fill in event_date (required, format: YYYY-MM-DD)"],
+        ["5. Fill in attribute values (only relevant columns)"],
         ["6. Save and import"],
         [""],
-        ["ATTRIBUTE LEGEND EXPLAINED:"],
-        ["- Col: Excel column letter for this attribute"],
-        ["- Category_Path: Which category this attribute belongs to"],
-        ["- Attribute: Name of the attribute"],
-        ["- Type: number, text, datetime, boolean"],
-        ["- Default: Default value if not specified"],
-        ["- Min/Max: Validation rules for numbers"],
-        ["- Unit: Unit of measurement (kg, km, etc.)"],
+        ["TIPS:"],
+        ["- Use AutoFilter to show only specific categories or dates"],
+        ["- Collapse ATTRIBUTE LEGEND groups to see more EVENT DATA"],
+        ["- SUM row updates automatically when you filter"],
+        ["- Yellow cells can be left empty - they're not for this category"],
         [""],
         ["IMPORTANT NOTES:"],
         ["⚠️ DO NOT delete rows - use Delete in app instead"],
         ["⚠️ DO NOT change event_id values"],
         ["⚠️ Empty cells = no value (not zero!)"],
-        ["⚠️ Attribute columns only apply to their categories"],
-        [""],
-        ["VALIDATION:"],
-        ["- Import will validate all data before applying"],
-        ["- You'll see a preview of changes before confirming"],
-        ["- Invalid data will be highlighted with error messages"],
     ]
     
     for row_idx, row_data in enumerate(instructions, start=1):
@@ -516,47 +606,39 @@ def _create_help_sheet(ws):
 
 
 # ============================================
-# EXCEL IMPORT
+# EXCEL IMPORT (unchanged from V1)
 # ============================================
 
 def parse_events_excel(file_bytes: bytes) -> Tuple[List[Dict], List[Dict], str]:
-    """
-    Parse Excel file and extract events for import.
-    
-    Returns:
-        Tuple of (events_to_create, events_to_update, error_message)
-        - events_to_create: List of new events (empty event_id)
-        - events_to_update: List of existing events with changes
-        - error_message: Error string if parsing failed, empty if OK
-    """
+    """Parse Excel file and extract events for import."""
     try:
         wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
         ws = wb.active
         
-        # Find split row
-        split_row = None
-        for row_idx in range(1, ws.max_row + 1):
+        # Find EVENT DATA section
+        event_data_row = None
+        for row_idx in range(1, min(ws.max_row + 1, 200)):
             cell_value = ws.cell(row=row_idx, column=1).value
             if cell_value and 'EVENT DATA' in str(cell_value):
-                split_row = row_idx
+                event_data_row = row_idx
                 break
         
-        if not split_row:
-            return [], [], "Could not find EVENT DATA split line. Invalid file format."
+        if not event_data_row:
+            return [], [], "Could not find EVENT DATA section. Invalid file format."
         
-        # Header row is right after split
-        header_row = split_row + 1
+        # Header row is next row after EVENT DATA title
+        header_row = event_data_row + 1
         
         # Read headers
         headers = []
         for col_idx in range(1, ws.max_column + 1):
             val = ws.cell(row=header_row, column=col_idx).value
-            if val:
+            if val and str(val).strip():
                 headers.append(str(val).strip())
-            else:
-                break
+            elif not val:
+                headers.append(f'_empty_{col_idx}')  # Placeholder for empty columns
         
-        if not headers or 'event_id' not in headers:
+        if 'event_id' not in headers:
             return [], [], "Invalid header row. Must contain 'event_id' column."
         
         # Parse data rows
@@ -564,22 +646,22 @@ def parse_events_excel(file_bytes: bytes) -> Tuple[List[Dict], List[Dict], str]:
         events_to_update = []
         
         for row_idx in range(header_row + 1, ws.max_row + 1):
-            # Check if row is empty
             first_cell = ws.cell(row=row_idx, column=1).value
-            second_cell = ws.cell(row=row_idx, column=2).value
             
-            # Skip completely empty rows
-            if first_cell is None and second_cell is None:
+            # Check for Area in column 2 to detect data rows
+            area_cell = ws.cell(row=row_idx, column=2).value
+            if not area_cell:
                 continue
             
             row_data = {}
             for col_idx, header in enumerate(headers, start=1):
+                if header.startswith('_empty_'):
+                    continue
                 value = ws.cell(row=row_idx, column=col_idx).value
                 row_data[header] = value
             
             event_id = row_data.get('event_id')
             
-            # Determine if CREATE or UPDATE
             if event_id is None or str(event_id).strip() == '':
                 events_to_create.append(row_data)
             else:
@@ -597,34 +679,24 @@ def validate_import_data(
     categories_dict: Dict[str, Dict],
     attribute_definitions: List[Dict]
 ) -> Tuple[List[Dict], List[Dict], List[str]]:
-    """
-    Validate import data and return validated events + errors.
-    
-    Returns:
-        Tuple of (valid_creates, valid_updates, errors)
-    """
+    """Validate import data and return validated events + errors."""
     errors = []
     valid_creates = []
     valid_updates = []
     
-    # Build category lookup by full_path
     cat_by_path = {info['full_path']: cat_id for cat_id, info in categories_dict.items()}
     
-    # Build attr def lookup by category_id + name
     attr_by_cat_name = {}
     for attr_def in attribute_definitions:
         key = (attr_def['category_id'], attr_def['name'])
         attr_by_cat_name[key] = attr_def
     
-    # Validate creates
     for idx, event in enumerate(events_to_create, start=1):
         event_errors = []
         
-        # Required: event_date
         if not event.get('event_date'):
             event_errors.append(f"Row {idx}: event_date is required")
         
-        # Required: Category_Path must exist
         cat_path = event.get('Category_Path', '')
         if not cat_path:
             event_errors.append(f"Row {idx}: Category_Path is required")
@@ -634,20 +706,16 @@ def validate_import_data(
         if event_errors:
             errors.extend(event_errors)
         else:
-            # Add category_id
             event['_category_id'] = cat_by_path.get(cat_path)
             valid_creates.append(event)
     
-    # Validate updates
     for idx, event in enumerate(events_to_update, start=1):
         event_errors = []
         
-        # Required: event_id must be valid UUID format
         event_id = event.get('event_id')
         if not event_id:
             event_errors.append(f"Update row {idx}: event_id is required")
         
-        # event_date required
         if not event.get('event_date'):
             event_errors.append(f"Update row {idx}: event_date is required")
         
@@ -660,35 +728,26 @@ def validate_import_data(
 
 
 def apply_import_changes(
-    client,
-    user_id: str,
+    client, user_id: str,
     events_to_create: List[Dict],
     events_to_update: List[Dict],
     categories_dict: Dict[str, Dict],
     attribute_definitions: List[Dict]
 ) -> Tuple[int, int, List[str]]:
-    """
-    Apply import changes to database.
-    
-    Returns:
-        Tuple of (created_count, updated_count, errors)
-    """
+    """Apply import changes to database."""
     created = 0
     updated = 0
     errors = []
     
-    # Build attr def lookup
     attr_by_cat_name = {}
     for attr_def in attribute_definitions:
         key = (attr_def['category_id'], attr_def['name'])
         attr_by_cat_name[key] = attr_def
     
-    # Process creates
     for event_data in events_to_create:
         try:
             category_id = event_data.get('_category_id')
             
-            # Parse event_date
             event_date = event_data.get('event_date')
             if isinstance(event_date, datetime):
                 event_date = event_date.date().isoformat()
@@ -697,7 +756,6 @@ def apply_import_changes(
             else:
                 event_date = str(event_date)
             
-            # Create event
             new_event = {
                 'user_id': user_id,
                 'category_id': category_id,
@@ -708,23 +766,22 @@ def apply_import_changes(
             result = client.table('events').insert(new_event).execute()
             event_id = result.data[0]['id']
             
-            # Create attributes
             for key, value in event_data.items():
-                if key in FIXED_COLUMNS or key.startswith('_'):
-                    continue
-                if value is None or value == '':
+                if key in FIXED_COLUMNS or key.startswith('_') or not value:
                     continue
                 
-                # Find attribute definition
                 attr_def = attr_by_cat_name.get((category_id, key))
                 if not attr_def:
                     continue
                 
-                # Create event_attribute
                 attr_data = {
                     'event_id': event_id,
                     'attribute_definition_id': attr_def['id'],
-                    'user_id': user_id
+                    'user_id': user_id,
+                    'value_text': None,
+                    'value_number': None,
+                    'value_datetime': None,
+                    'value_boolean': None
                 }
                 
                 data_type = attr_def.get('data_type', 'text')
@@ -744,12 +801,10 @@ def apply_import_changes(
         except Exception as e:
             errors.append(f"Error creating event: {str(e)}")
     
-    # Process updates
     for event_data in events_to_update:
         try:
             event_id = event_data.get('event_id')
             
-            # Parse event_date
             event_date = event_data.get('event_date')
             if isinstance(event_date, datetime):
                 event_date = event_date.date().isoformat()
@@ -758,7 +813,6 @@ def apply_import_changes(
             else:
                 event_date = str(event_date)
             
-            # Update event basic info
             updates = {
                 'event_date': event_date,
                 'comment': event_data.get('comment', '') or None,
@@ -771,7 +825,6 @@ def apply_import_changes(
                 .eq('user_id', user_id) \
                 .execute()
             
-            # Get existing event with category
             select_fields = 'id, category_id, event_attributes(id, attribute_definition_id)'
             existing = client.table('events') \
                 .select(select_fields) \
@@ -790,12 +843,10 @@ def apply_import_changes(
                 for ea in existing.data.get('event_attributes', [])
             }
             
-            # Update/create attributes
             for key, value in event_data.items():
                 if key in FIXED_COLUMNS or key.startswith('_'):
                     continue
                 
-                # Find attribute definition
                 attr_def = attr_by_cat_name.get((category_id, key))
                 if not attr_def:
                     continue
@@ -803,7 +854,6 @@ def apply_import_changes(
                 attr_def_id = attr_def['id']
                 data_type = attr_def.get('data_type', 'text')
                 
-                # Prepare value
                 attr_update = {
                     'value_text': None,
                     'value_number': None,
@@ -822,14 +872,12 @@ def apply_import_changes(
                         attr_update['value_text'] = str(value)
                 
                 if attr_def_id in existing_attrs:
-                    # Update existing
                     client.table('event_attributes') \
                         .update(attr_update) \
                         .eq('id', existing_attrs[attr_def_id]) \
                         .eq('user_id', user_id) \
                         .execute()
                 elif value is not None and value != '':
-                    # Create new
                     attr_update['event_id'] = event_id
                     attr_update['attribute_definition_id'] = attr_def_id
                     attr_update['user_id'] = user_id
@@ -848,44 +896,36 @@ def apply_import_changes(
 # ============================================
 
 def export_events_to_excel(
-    client,
-    user_id: str,
+    client, user_id: str,
+    area_id: Optional[str] = None,
     category_ids: Optional[List[str]] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None
 ) -> Tuple[bytes, int, str]:
-    """
-    High-level function to export events to Excel.
-    
-    Args:
-        client: Supabase client
-        user_id: User ID
-        category_ids: Optional list of category IDs to filter
-        date_from: Optional start date
-        date_to: Optional end date
-    
-    Returns:
-        Tuple of (excel_bytes, event_count, error_message)
-    """
+    """High-level function to export events to Excel V2 format."""
     try:
-        # Load categories
         categories_dict = load_categories_dict(client, user_id)
         
-        # Determine which categories to include
-        if category_ids:
-            relevant_categories = category_ids
-        else:
-            relevant_categories = list(categories_dict.keys())
+        # Determine effective category_ids
+        effective_category_ids = category_ids
         
-        # Load attribute definitions for these categories
+        if not effective_category_ids and area_id:
+            # Get all categories for this area
+            effective_category_ids = get_category_ids_for_area(client, user_id, area_id)
+            if not effective_category_ids:
+                return b'', 0, "No categories found for selected area"
+        
+        if not effective_category_ids:
+            # No filter - get all categories
+            effective_category_ids = list(categories_dict.keys())
+        
         attribute_definitions = load_attribute_definitions_for_categories(
-            client, user_id, relevant_categories
+            client, user_id, effective_category_ids
         )
         
-        # Load events
         events = load_events_for_export(
-            client, user_id, 
-            category_ids=category_ids,
+            client, user_id,
+            category_ids=effective_category_ids,
             date_from=date_from,
             date_to=date_to
         )
@@ -893,8 +933,7 @@ def export_events_to_excel(
         if not events:
             return b'', 0, "No events found matching filters"
         
-        # Create Excel
-        excel_bytes = create_events_excel(events, attribute_definitions, categories_dict)
+        excel_bytes = create_events_excel_v2(events, attribute_definitions, categories_dict)
         
         return excel_bytes, len(events), ""
         
@@ -907,17 +946,9 @@ def export_events_to_excel(
 # ============================================
 
 def import_events_from_excel(
-    client,
-    user_id: str,
-    file_bytes: bytes
+    client, user_id: str, file_bytes: bytes
 ) -> Tuple[int, int, List[str]]:
-    """
-    High-level function to import events from Excel.
-    
-    Returns:
-        Tuple of (created_count, updated_count, errors)
-    """
-    # Parse file
+    """High-level function to import events from Excel."""
     events_to_create, events_to_update, parse_error = parse_events_excel(file_bytes)
     
     if parse_error:
@@ -926,16 +957,12 @@ def import_events_from_excel(
     if not events_to_create and not events_to_update:
         return 0, 0, ["No events found in file"]
     
-    # Load reference data
     categories_dict = load_categories_dict(client, user_id)
-    
-    # Get all category IDs
     all_category_ids = list(categories_dict.keys())
     attribute_definitions = load_attribute_definitions_for_categories(
         client, user_id, all_category_ids
     )
     
-    # Validate
     valid_creates, valid_updates, validation_errors = validate_import_data(
         events_to_create, events_to_update, categories_dict, attribute_definitions
     )
@@ -943,9 +970,8 @@ def import_events_from_excel(
     if validation_errors:
         return 0, 0, validation_errors
     
-    # Apply changes
     created, updated, apply_errors = apply_import_changes(
-        client, user_id, valid_creates, valid_updates, 
+        client, user_id, valid_creates, valid_updates,
         categories_dict, attribute_definitions
     )
     
