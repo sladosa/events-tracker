@@ -2,9 +2,9 @@
 Events Tracker - Add Activity Module
 =====================================
 Created: 2025-12-13 15:00 UTC
-Last Modified: 2025-12-18 20:45 UTC
+Last Modified: 2025-01-07 18:00 UTC
 Python: 3.11
-Version: 2.3.1 - Fixed Workflow Attribute Saving
+Version: 2.3.2 - Fixed Shortcut Filter Application
 
 Description:
 Mobile-first activity entry form with:
@@ -13,6 +13,11 @@ Mobile-first activity entry form with:
 - Full Downstream Workflow: walks through ALL leaf categories in subtree
 - Optimized layout for minimal scrolling
 - Photo attachments via Supabase Storage
+
+CHANGELOG v2.3.2:
+- 🐛 FIX: Shortcuts now correctly apply Area/Category filters
+  - ROOT CAUSE: Session state was set but st.rerun() was not called
+  - SOLUTION: Added st.rerun() after shortcut selection to refresh filters
 
 CHANGELOG v2.3.1:
 - 🐛 CRITICAL FIX: Workflow mode now correctly saves attribute values!
@@ -1017,9 +1022,13 @@ def render_add_activity(client, user_id: str):
             if selected_shortcut != "-- Quick Select --":
                 for sc in shortcuts:
                     if sc['name'] == selected_shortcut:
-                        st.session_state.aa_area_id = sc['area_id']
-                        st.session_state.aa_category_id = sc['category_id']
-                        update_shortcut_usage(client, user_id, sc['id'])
+                        # Only update if values actually changed
+                        if (st.session_state.aa_area_id != sc['area_id'] or 
+                            st.session_state.aa_category_id != sc['category_id']):
+                            st.session_state.aa_area_id = sc['area_id']
+                            st.session_state.aa_category_id = sc['category_id']
+                            update_shortcut_usage(client, user_id, sc['id'])
+                            st.rerun()  # Rerun to apply filter changes
                         break
         else:
             st.selectbox("⚡ Shortcuts", ["No shortcuts yet"], disabled=True, key="aa_no_shortcuts")

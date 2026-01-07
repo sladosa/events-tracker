@@ -227,6 +227,17 @@ def create_events_excel(
         cat_id = attr_def.get('category_id')
         cat_info = categories_dict.get(cat_id, {})
         
+        # Handle validation_rules - can be dict, JSON string, or None
+        validation_rules = attr_def.get('validation_rules', {})
+        if isinstance(validation_rules, str):
+            try:
+                import json
+                validation_rules = json.loads(validation_rules)
+            except:
+                validation_rules = {}
+        elif not isinstance(validation_rules, dict):
+            validation_rules = {}
+        
         attr_info[attr_def['id']] = {
             'id': attr_def['id'],
             'name': attr_def['name'],
@@ -234,7 +245,7 @@ def create_events_excel(
             'data_type': attr_def.get('data_type', 'text'),
             'unit': attr_def.get('unit', ''),
             'default_value': attr_def.get('default_value', ''),
-            'validation_rules': attr_def.get('validation_rules', {})
+            'validation_rules': validation_rules
         }
         
         # Use unique column name: attr_name (if unique) or category > attr_name
