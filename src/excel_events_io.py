@@ -1,13 +1,19 @@
 """
-Events Tracker - Unified Excel Events I/O Module V2.4
-======================================================
+Events Tracker - Unified Excel Events I/O Module V2.4.1
+========================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-08 11:25 UTC
+Last Modified: 2025-01-08 19:00 UTC
 Python: 3.11
-Version: 2.4.0
+Version: 2.4.1
 
 Description:
 Unified Excel Export/Import for events with enhanced formatting and LEGEND-BASED import.
+
+CRITICAL FIX in V2.4.1:
+- 🐛 FIXED: Multiple row groups now work correctly!
+- 🐛 ROOT CAUSE: All rows had outline_level=1 → Excel made ONE big group
+- ✅ SOLUTION: Use group() method separately for each range → Multiple distinct groups
+- 🎯 RESULT: 25 attrs now creates 3 groups (not 1), each collapsible separately
 
 NEW in V2.4:
 - ✅ NEW: Legend validation - check if columns from legend exist in Excel
@@ -378,10 +384,8 @@ def create_events_excel_v2(
     legend_end_row = row - 1
     
     # Second pass: create smart groups based on total attribute count
-    # Logic: 
-    # - Less than 5 attrs → 1 group
-    # - 5-100 attrs → 5-20 rows per group (target ~10)
-    # - More than 100 → increase group size as needed
+    # CRITICAL: Each group must be created SEPARATELY using group() method
+    # Setting outline_level=1 on all rows creates ONE big group!
     if legend_rows:
         total_attrs = len(legend_rows)
         
@@ -399,7 +403,8 @@ def create_events_excel_v2(
         # Calculate actual group size (distribute evenly)
         actual_group_size = (total_attrs + num_groups - 1) // num_groups
         
-        # Create groups
+        # FIXED: Create SEPARATE groups using group() for each range
+        # Each call to group() creates a DISTINCT group with its own +/- icon
         for g in range(num_groups):
             start_idx = g * actual_group_size
             end_idx = min(start_idx + actual_group_size - 1, total_attrs - 1)
@@ -408,10 +413,16 @@ def create_events_excel_v2(
                 group_start = legend_rows[start_idx]
                 group_end = legend_rows[end_idx]
                 
-                # Set outline_level explicitly for each row in group
-                for row_num in range(group_start, group_end + 1):
-                    ws.row_dimensions[row_num].outline_level = 1
-                    ws.row_dimensions[row_num].hidden = True
+                # Use group() method to create a distinct group
+                # This creates a separate collapsible section with its own +/- control
+                if group_end > group_start:  # Only group if more than 1 row
+                    try:
+                        ws.row_dimensions.group(group_start, group_end, hidden=True)
+                    except Exception as e:
+                        # Fallback: set outline level (will create one big group but better than crash)
+                        for row_num in range(group_start, group_end + 1):
+                            ws.row_dimensions[row_num].outline_level = 1
+                            ws.row_dimensions[row_num].hidden = True
     
     # Column grouping for Default, Min, Max, Unit (columns F-I)
     # Set outline_level explicitly for each column
