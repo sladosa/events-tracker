@@ -1,13 +1,24 @@
 """
-Events Tracker - Unified Excel Events I/O Module V2.2
+Events Tracker - Unified Excel Events I/O Module V2.4
 ======================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-08 10:30 UTC
+Last Modified: 2025-01-08 11:25 UTC
 Python: 3.11
-Version: 2.2.0
+Version: 2.4.0
 
 Description:
 Unified Excel Export/Import for events with enhanced formatting and LEGEND-BASED import.
+
+NEW in V2.4:
+- ✅ NEW: Legend validation - check if columns from legend exist in Excel
+- ✅ NEW: Auto-detect deleted columns with warnings
+- ✅ NEW: Report orphan columns (in EVENT DATA but not in legend)
+- 🛡️ IMPROVED: Safer import with validation feedback
+
+NEW in V2.3:
+- ✅ IMPROVED: Smart row grouping (5-20 rows per group based on total attributes)
+- ✅ FIXED: Merged cell formatting - consistent row height, text alignment top
+- ✅ FIXED: No more "escaped" text or random row height increases
 
 NEW in V2.2:
 - ✅ FIXED: Default/Min/Max values now properly formatted as numbers
@@ -55,7 +66,7 @@ from datetime import datetime, date
 from typing import Dict, List, Optional, Tuple, Any, Set
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, column_index_from_string
 from openpyxl.worksheet.datavalidation import DataValidation
 
 
@@ -305,10 +316,9 @@ def create_events_excel_v2(
         cell.border = BORDER
     row += 1
     
-    # Legend data rows (grouped in chunks of ~6 rows each)
+    # Legend data rows (grouped in smart chunks based on total count)
     legend_start_row = row
     attr_col_start = FIXED_COL_COUNT + PADDING_COLS + 1
-    GROUP_SIZE = 6  # Group every 6 attribute rows
     
     # First pass: write all legend data
     legend_rows = []
@@ -367,21 +377,38 @@ def create_events_excel_v2(
     
     legend_end_row = row - 1
     
-    # Second pass: create groups of ~6 rows each
-    # Set outline_level explicitly for each row in group
+    # Second pass: create smart groups based on total attribute count
+    # Logic: 
+    # - Less than 5 attrs → 1 group
+    # - 5-100 attrs → 5-20 rows per group (target ~10)
+    # - More than 100 → increase group size as needed
     if legend_rows:
-        num_groups = max(1, (len(legend_rows) + GROUP_SIZE - 1) // GROUP_SIZE)
-        actual_group_size = (len(legend_rows) + num_groups - 1) // num_groups
+        total_attrs = len(legend_rows)
         
+        if total_attrs <= 5:
+            # Single group for small datasets
+            num_groups = 1
+        elif total_attrs <= 100:
+            # Target ~10 rows per group for medium datasets
+            # This gives: 5 attrs=1 group, 10 attrs=1 group, 20 attrs=2 groups, 50 attrs=5 groups
+            num_groups = max(1, (total_attrs + 9) // 10)
+        else:
+            # Large datasets - max 20 rows per group
+            num_groups = max(5, (total_attrs + 19) // 20)
+        
+        # Calculate actual group size (distribute evenly)
+        actual_group_size = (total_attrs + num_groups - 1) // num_groups
+        
+        # Create groups
         for g in range(num_groups):
             start_idx = g * actual_group_size
-            end_idx = min(start_idx + actual_group_size - 1, len(legend_rows) - 1)
+            end_idx = min(start_idx + actual_group_size - 1, total_attrs - 1)
             
             if start_idx <= end_idx and end_idx < len(legend_rows):
                 group_start = legend_rows[start_idx]
                 group_end = legend_rows[end_idx]
                 
-                # Set outline_level explicitly for each row
+                # Set outline_level explicitly for each row in group
                 for row_num in range(group_start, group_end + 1):
                     ws.row_dimensions[row_num].outline_level = 1
                     ws.row_dimensions[row_num].hidden = True
@@ -480,7 +507,10 @@ def create_events_excel_v2(
         comment_cell = ws.cell(row=row, column=5, value=comment_value)
         comment_cell.fill = BLUE_FILL
         comment_cell.border = BORDER
-        comment_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        
+        # IMPORTANT: vertical="top" prevents text from "escaping" too high
+        # NO wrap_text by default - keeps rows consistent height
+        comment_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=False)
         
         # Apply border to ALL cells in merged range E-I
         for col_idx in range(5, 10):  # E=5, F=6, G=7, H=8, I=9
@@ -488,10 +518,17 @@ def create_events_excel_v2(
             cell.border = BORDER
             cell.fill = BLUE_FILL
         
-        # Set row height to accommodate wrapped text (approximate 15 per line, min 30)
-        if comment_value and len(str(comment_value)) > 30:
-            estimated_lines = len(str(comment_value)) // 30 + 1
-            ws.row_dimensions[row].height = max(30, min(15 * estimated_lines, 60))
+        # Set DEFAULT row height for all event data rows (consistent look)
+        # This prevents automatic height adjustment which causes inconsistent appearance
+        ws.row_dimensions[row].height = 20  # Standard row height
+        
+        # Only increase height for VERY long comments (>100 chars)
+        # and enable wrap_text only in those cases
+        if comment_value and len(str(comment_value)) > 100:
+            comment_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+            # Calculate height based on text length (more conservative than before)
+            estimated_lines = min(3, len(str(comment_value)) // 50 + 1)  # Max 3 lines
+            ws.row_dimensions[row].height = 20 + (estimated_lines - 1) * 15
         
         # Attribute columns
         for attr_idx, attr_name in enumerate(attr_columns):
@@ -749,6 +786,48 @@ def parse_events_excel_v2(file_bytes: bytes) -> Tuple[List[Dict], List[Dict], Di
             return [], [], {}, "No valid attribute mappings found in ATTRIBUTE LEGEND."
         
         # ─────────────────────────────────────────
+        # STEP 1.5: Validate LEGEND (NEW V2.4)
+        # ─────────────────────────────────────────
+        # Check if columns from legend exist in the Excel sheet
+        
+        validation_warnings = []
+        max_col_letter = get_column_letter(ws.max_column)
+        
+        for col_letter in legend_mapping.keys():
+            # Check if column exists in sheet (within max_column range)
+            try:
+                col_idx = column_index_from_string(col_letter)
+                if col_idx > ws.max_column:
+                    validation_warnings.append(
+                        f"⚠️ Column {col_letter} in LEGEND but NOT in EVENT DATA (sheet ends at {max_col_letter}). "
+                        f"Attribute '{legend_mapping[col_letter][2]}' will be ignored."
+                    )
+            except Exception:
+                validation_warnings.append(
+                    f"⚠️ Invalid column letter '{col_letter}' in LEGEND. Will be ignored."
+                )
+        
+        # Check if there are "orphan" columns in EVENT DATA (not in legend)
+        # This is less critical but good to know
+        event_data_start_col = 10  # Column J (after comment merged E-I)
+        if ws.max_column > event_data_start_col:
+            orphan_columns = []
+            for col_idx in range(event_data_start_col, ws.max_column + 1):
+                col_letter = get_column_letter(col_idx)
+                if col_letter not in legend_mapping:
+                    orphan_columns.append(col_letter)
+            
+            if orphan_columns:
+                validation_warnings.append(
+                    f"ℹ️ Columns {', '.join(orphan_columns[:5])} in EVENT DATA but NOT in LEGEND. "
+                    f"These columns will be ignored during import."
+                )
+        
+        # If there are critical validation issues, return them as error
+        # For now, we treat all as warnings and continue with import
+        validation_info = "\n".join(validation_warnings) if validation_warnings else ""
+        
+        # ─────────────────────────────────────────
         # STEP 2: Find EVENT DATA section
         # ─────────────────────────────────────────
         
@@ -812,7 +891,7 @@ def parse_events_excel_v2(file_bytes: bytes) -> Tuple[List[Dict], List[Dict], Di
             else:
                 events_to_update.append(row_data)
         
-        return events_to_create, events_to_update, legend_mapping, ""
+        return events_to_create, events_to_update, legend_mapping, validation_info
         
     except Exception as e:
         return [], [], {}, f"Error parsing Excel file: {str(e)}"

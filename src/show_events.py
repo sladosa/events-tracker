@@ -2,9 +2,9 @@
 Events Tracker - Show Events Module
 ====================================
 Created: 2025-12-15 09:45 UTC
-Last Modified: 2025-01-08 10:35 UTC
+Last Modified: 2025-01-08 11:25 UTC
 Python: 3.11
-Version: 2.5.1 - Updated for Excel V2.2 legend-based import
+Version: 2.5.2 - Validation warnings display
 
 Description:
 View, edit, and delete events with:
@@ -17,9 +17,11 @@ View, edit, and delete events with:
 - Attribute value formatting by type
 - Excel Export/Import with unified format (Master Plan V2)
 
-CHANGELOG v2.5.1:
-- ✅ UPDATED: Uses parse_events_excel_v2 for legend-based import
-- ✅ NEW: Import now supports flexible attribute removal (user can delete legend rows/columns)
+CHANGELOG v2.5.2:
+- ✅ NEW: Display validation warnings from Excel import
+- ✅ NEW: Check if legend columns exist in EVENT DATA
+- ✅ NEW: Warning for orphan columns not in legend
+- 🎯 IMPROVED: Better error handling for malformed Excel files
 
 CHANGELOG v2.5.0:
 - 📥 NEW: Export to Excel button - exports filtered events with attribute legend
@@ -920,9 +922,23 @@ def render_show_events(client, user_id: str):
             with st.spinner("Parsing Excel file..."):
                 events_to_create, events_to_update, legend_mapping, parse_error = parse_events_excel_v2(file_bytes)
             
-            if parse_error:
+            # Check for validation warnings or errors
+            if parse_error and ("⚠️" in parse_error or "ℹ️" in parse_error):
+                # Has validation warnings - show them but continue
+                st.warning("📋 Validation Notes")
+                for line in parse_error.split("\n"):
+                    if line.strip():
+                        if "⚠️" in line:
+                            st.warning(line)
+                        elif "ℹ️" in line:
+                            st.info(line)
+            elif parse_error:
+                # Critical error - stop
                 st.error(f"❌ {parse_error}")
-            else:
+                return
+            
+            # Show preview if parsing succeeded
+            if events_to_create or events_to_update:
                 # Show preview
                 st.markdown("#### Preview")
                 
@@ -987,6 +1003,13 @@ def render_show_events(client, user_id: str):
                         st.session_state.se_import_file = None
                         st.session_state.se_upload_counter += 1
                         st.rerun()
+            else:
+                # No events found in Excel
+                st.warning("⚠️ No events found in Excel file. The file may be empty or in incorrect format.")
+                if st.button("✕ Cancel", use_container_width=True):
+                    st.session_state.se_import_file = None
+                    st.session_state.se_upload_counter += 1
+                    st.rerun()
         else:
             # Cancel button when no file uploaded
             if st.button("✕ Cancel Import"):
