@@ -1,19 +1,24 @@
 """
-Events Tracker - Unified Excel Events I/O Module V2.4.1
+Events Tracker - Unified Excel Events I/O Module V2.4.2
 ========================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-08 19:00 UTC
+Last Modified: 2025-01-08 20:30 UTC
 Python: 3.11
-Version: 2.4.1
+Version: 2.4.2
 
 Description:
 Unified Excel Export/Import for events with enhanced formatting and LEGEND-BASED import.
 
-CRITICAL FIX in V2.4.1:
-- 🐛 FIXED: Multiple row groups now work correctly!
-- 🐛 ROOT CAUSE: All rows had outline_level=1 → Excel made ONE big group
-- ✅ SOLUTION: Use group() method separately for each range → Multiple distinct groups
-- 🎯 RESULT: 25 attrs now creates 3 groups (not 1), each collapsible separately
+CRITICAL FIX in V2.4.2:
+- 🎯 SOLUTION: First row of each group = SEPARATOR (outside group)
+- ✅ RESULT: Multiple DISTINCT collapsible groups in Excel!
+- 💡 HOW: Separator row stays visible, breaks group continuity
+- 🎨 VISUAL: Separator rows have BOLD text + darker pink background
+- 🚀 BENEFIT: Can collapse groups individually, see EVENT DATA header!
+
+PREVIOUS ATTEMPTS:
+- V2.4.1: Used group() but Excel merged them (no separators)
+- V2.4.0: Used outline_level=1 on all rows (created one big group)
 
 NEW in V2.4:
 - ✅ NEW: Legend validation - check if columns from legend exist in Excel
@@ -383,18 +388,17 @@ def create_events_excel_v2(
     
     legend_end_row = row - 1
     
-    # Second pass: create smart groups based on total attribute count
-    # CRITICAL: Each group must be created SEPARATELY using group() method
-    # Setting outline_level=1 on all rows creates ONE big group!
+    # Second pass: create smart groups with SEPARATORS
+    # CRITICAL: First row of each group stays OUTSIDE the group as separator
+    # This creates distinct collapsible groups in Excel!
     if legend_rows:
         total_attrs = len(legend_rows)
         
         if total_attrs <= 5:
-            # Single group for small datasets
+            # Single group for small datasets - no separators needed
             num_groups = 1
         elif total_attrs <= 100:
             # Target ~10 rows per group for medium datasets
-            # This gives: 5 attrs=1 group, 10 attrs=1 group, 20 attrs=2 groups, 50 attrs=5 groups
             num_groups = max(1, (total_attrs + 9) // 10)
         else:
             # Large datasets - max 20 rows per group
@@ -403,26 +407,36 @@ def create_events_excel_v2(
         # Calculate actual group size (distribute evenly)
         actual_group_size = (total_attrs + num_groups - 1) // num_groups
         
-        # FIXED: Create SEPARATE groups using group() for each range
-        # Each call to group() creates a DISTINCT group with its own +/- icon
+        # FIXED: Use FIRST row as separator (outside group), group the REST
+        # This creates SEPARATE groups because separators break the continuity
         for g in range(num_groups):
             start_idx = g * actual_group_size
             end_idx = min(start_idx + actual_group_size - 1, total_attrs - 1)
             
             if start_idx <= end_idx and end_idx < len(legend_rows):
-                group_start = legend_rows[start_idx]
-                group_end = legend_rows[end_idx]
+                # First row of this group = SEPARATOR (stays outside group)
+                separator_row = legend_rows[start_idx]
                 
-                # Use group() method to create a distinct group
-                # This creates a separate collapsible section with its own +/- control
-                if group_end > group_start:  # Only group if more than 1 row
-                    try:
-                        ws.row_dimensions.group(group_start, group_end, hidden=True)
-                    except Exception as e:
-                        # Fallback: set outline level (will create one big group but better than crash)
-                        for row_num in range(group_start, group_end + 1):
-                            ws.row_dimensions[row_num].outline_level = 1
-                            ws.row_dimensions[row_num].hidden = True
+                # Make separator BOLD and slightly different background for visibility
+                for col_idx in range(1, 10):  # Columns A-I
+                    cell = ws.cell(row=separator_row, column=col_idx)
+                    cell.font = Font(bold=True)
+                    # Slightly darker pink for separator
+                    cell.fill = PatternFill(start_color="FFD0E0", end_color="FFD0E0", fill_type="solid")
+                
+                # Group ONLY the rows AFTER separator (if there are any)
+                if end_idx > start_idx:  # More than 1 row in this group
+                    group_start = legend_rows[start_idx + 1]  # Skip separator
+                    group_end = legend_rows[end_idx]
+                    
+                    if group_end > group_start:  # Only group if more than 1 row
+                        try:
+                            ws.row_dimensions.group(group_start, group_end, hidden=True)
+                        except Exception as e:
+                            # Fallback: set outline level
+                            for row_num in range(group_start, group_end + 1):
+                                ws.row_dimensions[row_num].outline_level = 1
+                                ws.row_dimensions[row_num].hidden = True
     
     # Column grouping for Default, Min, Max, Unit (columns F-I)
     # Set outline_level explicitly for each column
