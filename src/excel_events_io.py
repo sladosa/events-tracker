@@ -1,23 +1,24 @@
 """
-Events Tracker - Unified Excel Events I/O Module V2.1
+Events Tracker - Unified Excel Events I/O Module V2.2
 ======================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-07 21:30 UTC
+Last Modified: 2025-01-08 10:30 UTC
 Python: 3.11
-Version: 2.1.0
+Version: 2.2.0
 
 Description:
-Unified Excel Export/Import for events with enhanced formatting:
-- ATTRIBUTE LEGEND section with title, Area column, row grouping (5-7 rows each)
-- Column grouping for Default/Min/Max/Unit (F-I, collapsible)
-- EVENT DATA section with title, SUBTOTAL formulas, merged comment cells
-- Orange highlighting for non-relevant attributes per row
-- AutoFilter on all columns
-- Proper freeze panes position
-- Outline summary above (group +/- icons above grouped rows)
-- Color coding: PINK (read-only) / BLUE (editable) / ORANGE (non-relevant)
+Unified Excel Export/Import for events with enhanced formatting and LEGEND-BASED import.
 
-Excel Format V2.1:
+NEW in V2.2:
+- ✅ FIXED: Default/Min/Max values now properly formatted as numbers
+- ✅ FIXED: Row grouping in ATTRIBUTE LEGEND (collapsed groups with +/- icons)
+- ✅ FIXED: Column grouping F-I (Default/Min/Max/Unit collapsible)
+- ✅ FIXED: Comment text vertical alignment with auto row height
+- ✅ FIXED: Border on all merged cells (E-I)
+- 🎯 NEW: Legend-based import - users can delete legend rows/columns flexibly
+- 🎯 NEW: Import maps by column letter from legend, NOT by header names
+
+Excel Format V2.2:
 ┌─────────────────────────────────────────────────────────────────┐
 │ A1: ATTRIBUTE LEGEND (bold title)                               │
 ├─────┬──────┬──────────────┬───────────┬──────┬─────┬─────┬─────┤
@@ -38,6 +39,12 @@ Colors:
 🟣 PINK = Read-only (event_id, Area, Category_Path)
 🔵 BLUE = Editable (event_date, comment, relevant attributes)
 🟠 ORANGE = Non-relevant attribute for this event's category
+
+LEGEND-BASED IMPORT:
+- Users can DELETE rows from ATTRIBUTE LEGEND (removes attribute from import)
+- Users can DELETE columns from EVENT DATA table (removes attribute from import)
+- Import maps columns by LETTER from legend (Col F, Col G...), NOT by header names
+- This allows flexible customization of Excel before editing
 
 Dependencies: openpyxl, pandas, json
 """
@@ -313,20 +320,44 @@ def create_events_excel_v2(
         info = attr_info.get(attr_def['id'], {})
         col_letter = get_column_letter(attr_col_start + idx)
         
+        # Convert default, min, max to numbers if data_type is number
+        data_type = info.get('data_type', 'text')
+        default_val = info.get('default_value', '')
+        min_val = info.get('min', '')
+        max_val = info.get('max', '')
+        
+        # Convert to numbers for number type
+        if data_type == 'number':
+            if default_val:
+                try:
+                    default_val = float(default_val) if '.' in str(default_val) else int(default_val)
+                except (ValueError, TypeError):
+                    pass
+            if min_val:
+                try:
+                    min_val = float(min_val) if '.' in str(min_val) else int(min_val)
+                except (ValueError, TypeError):
+                    pass
+            if max_val:
+                try:
+                    max_val = float(max_val) if '.' in str(max_val) else int(max_val)
+                except (ValueError, TypeError):
+                    pass
+        
         legend_data = [
             col_letter,
             info.get('area_name', ''),
             info.get('category_path', ''),
             attr_name,
-            info.get('data_type', 'text'),
-            info.get('default_value', ''),
-            info.get('min', ''),
-            info.get('max', ''),
+            data_type,
+            default_val,
+            min_val,
+            max_val,
             info.get('unit', '')
         ]
         
         for col_idx, value in enumerate(legend_data, start=1):
-            cell = ws.cell(row=row, column=col_idx, value=value if value else '')
+            cell = ws.cell(row=row, column=col_idx, value=value if value != '' else '')
             cell.fill = PINK_FILL
             cell.border = BORDER
             cell.alignment = Alignment(horizontal="left", vertical="center")
@@ -337,6 +368,7 @@ def create_events_excel_v2(
     legend_end_row = row - 1
     
     # Second pass: create groups of ~6 rows each
+    # Set outline_level explicitly for each row in group
     if legend_rows:
         num_groups = max(1, (len(legend_rows) + GROUP_SIZE - 1) // GROUP_SIZE)
         actual_group_size = (len(legend_rows) + num_groups - 1) // num_groups
@@ -348,11 +380,16 @@ def create_events_excel_v2(
             if start_idx <= end_idx and end_idx < len(legend_rows):
                 group_start = legend_rows[start_idx]
                 group_end = legend_rows[end_idx]
-                if group_end > group_start:
-                    ws.row_dimensions.group(group_start, group_end, hidden=True, outline_level=1)
+                
+                # Set outline_level explicitly for each row
+                for row_num in range(group_start, group_end + 1):
+                    ws.row_dimensions[row_num].outline_level = 1
+                    ws.row_dimensions[row_num].hidden = True
     
     # Column grouping for Default, Min, Max, Unit (columns F-I)
-    ws.column_dimensions.group('F', 'I', hidden=False, outline_level=1)
+    # Set outline_level explicitly for each column
+    for col_letter in ['F', 'G', 'H', 'I']:
+        ws.column_dimensions[col_letter].outline_level = 1
     
     # ─────────────────────────────────────────
     # EMPTY ROW
@@ -445,8 +482,16 @@ def create_events_excel_v2(
         comment_cell.border = BORDER
         comment_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
         
-        # Apply border to merged area (right border on I)
-        ws.cell(row=row, column=9).border = Border(right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+        # Apply border to ALL cells in merged range E-I
+        for col_idx in range(5, 10):  # E=5, F=6, G=7, H=8, I=9
+            cell = ws.cell(row=row, column=col_idx)
+            cell.border = BORDER
+            cell.fill = BLUE_FILL
+        
+        # Set row height to accommodate wrapped text (approximate 15 per line, min 30)
+        if comment_value and len(str(comment_value)) > 30:
+            estimated_lines = len(str(comment_value)) // 30 + 1
+            ws.row_dimensions[row].height = max(30, min(15 * estimated_lines, 60))
         
         # Attribute columns
         for attr_idx, attr_name in enumerate(attr_columns):
@@ -544,67 +589,86 @@ def create_events_excel_v2(
 
 
 def _create_help_sheet_v2(ws):
-    """Create Help sheet with V2.1 instructions."""
+    """Create Help sheet with V2.2 instructions."""
     instructions = [
-        ["EVENTS TRACKER - Excel Export/Import Help V2.1"],
+        ["EVENTS TRACKER - Excel Export/Import Help V2.2"],
+        [""],
+        ["🎯 NEW IN V2.2: FLEXIBLE ATTRIBUTE REMOVAL"],
+        [""],
+        ["You can now DELETE attributes you don't need from the Excel file:"],
+        ["  1. DELETE entire rows from ATTRIBUTE LEGEND section"],
+        ["  2. DELETE corresponding columns from EVENT DATA table"],
+        ["  3. Import will use LEGEND (Col F, Col G...) to map columns"],
+        ["  4. This allows you to customize which attributes to edit"],
         [""],
         ["FILE STRUCTURE:"],
-        ["This Excel file has two main sections:"],
         [""],
-        ["1. ATTRIBUTE LEGEND (top)"],
-        ["   - Shows all attributes with their properties"],
-        ["   - Rows are grouped in chunks (click +/- ABOVE group to expand/collapse)"],
-        ["   - Columns Default/Min/Max/Unit (F-I) can be collapsed"],
-        ["   - Col column shows which Excel column contains this attribute"],
+        ["1. ATTRIBUTE LEGEND (top section)"],
+        ["   - Col: Column letter (F, G, H...) for this attribute in EVENT DATA"],
+        ["   - Area: Which area this attribute belongs to"],
+        ["   - Category_Path: Full category path"],
+        ["   - Attribute: Attribute name"],
+        ["   - Type/Default/Min/Max/Unit: Attribute properties"],
+        ["   - Rows grouped (click +/- ABOVE group to expand/collapse)"],
+        ["   - Columns F-I grouped (click +/- to show/hide properties)"],
         [""],
-        ["2. EVENT DATA (below)"],
-        ["   - Your actual events"],
-        ["   - Comment column is merged (E:I) for more space"],
-        ["   - Has AutoFilter enabled - click column headers to filter"],
-        ["   - Title row shows SUMs for numeric columns (respects filters)"],
+        ["2. EVENT DATA (bottom section)"],
+        ["   - Your actual events with attribute values"],
+        ["   - Comment column merged (E:I) for more space"],
+        ["   - AutoFilter enabled - click headers to filter"],
+        ["   - Title row shows SUMs (respects filters)"],
         [""],
         ["COLOR CODING:"],
         [""],
         ["🟣 PINK = READ-ONLY (do not edit)"],
-        ["   - event_id: Identifies existing events"],
-        ["   - Area: Determined by Category"],
-        ["   - Category_Path: Cannot change category of existing event"],
+        ["   - event_id: UUID identifying existing events"],
+        ["   - Area: Auto-determined by Category"],
+        ["   - Category_Path: Cannot change existing event's category"],
         [""],
         ["🔵 BLUE = EDITABLE"],
-        ["   - event_date: Date of event (YYYY-MM-DD)"],
-        ["   - comment: Notes/comments (merged cells E:I)"],
-        ["   - Attribute columns relevant for this event's category"],
+        ["   - event_date: Date (YYYY-MM-DD format)"],
+        ["   - comment: Notes (merged E:I for space)"],
+        ["   - Attributes relevant for this category"],
         [""],
         ["🟠 ORANGE = NOT RELEVANT"],
-        ["   - Attribute belongs to a different category"],
-        ["   - Values here will be ignored on import"],
-        ["   - Helps you see which columns matter for each event"],
+        ["   - Attribute belongs to different category"],
+        ["   - Can leave empty - will be ignored"],
         [""],
-        ["HOW TO EDIT EXISTING EVENTS:"],
-        ["1. Find the row with the event you want to edit"],
-        ["2. Change values in BLUE columns only"],
-        ["3. Save the file"],
-        ["4. Import back in Show Events"],
+        ["HOW TO EDIT:"],
         [""],
-        ["HOW TO CREATE NEW EVENTS:"],
-        ["1. Add a new row at the bottom of EVENT DATA"],
-        ["2. Leave event_id EMPTY (this signals a new event)"],
-        ["3. Fill in Area and Category_Path (must match existing structure)"],
-        ["4. Fill in event_date (required, format: YYYY-MM-DD)"],
-        ["5. Fill in attribute values (only relevant columns)"],
-        ["6. Save and import"],
+        ["UPDATE EXISTING EVENTS:"],
+        ["1. Find row with event_id filled"],
+        ["2. Change BLUE columns only"],
+        ["3. Save and import"],
+        [""],
+        ["CREATE NEW EVENTS:"],
+        ["1. Add row at bottom, leave event_id EMPTY"],
+        ["2. Fill Area, Category_Path (must exist in structure)"],
+        ["3. Fill event_date (required, YYYY-MM-DD)"],
+        ["4. Fill attribute values (only relevant ones)"],
+        ["5. Save and import"],
+        [""],
+        ["REMOVE ATTRIBUTES:"],
+        ["1. Find attribute in ATTRIBUTE LEGEND (e.g., row with 'Weight')"],
+        ["2. Note its Col letter (e.g., 'H')"],
+        ["3. DELETE that row from ATTRIBUTE LEGEND"],
+        ["4. DELETE column H from EVENT DATA table"],
+        ["5. Save - import will skip that attribute"],
         [""],
         ["TIPS:"],
-        ["- Use AutoFilter to show only specific categories or dates"],
-        ["- Collapse ATTRIBUTE LEGEND groups to see more EVENT DATA"],
-        ["- SUM row updates automatically when you filter"],
-        ["- Orange cells can be left empty - they're not for this category"],
-        ["- Group +/- icons are ABOVE the grouped rows"],
+        ["- Use AutoFilter to show only specific categories/dates"],
+        ["- Collapse LEGEND groups to see more EVENT DATA"],
+        ["- SUM row updates when you filter"],
+        ["- Orange cells can be empty"],
+        ["- +/- icons are ABOVE groups"],
+        ["- Delete attributes to focus on what you need"],
         [""],
-        ["IMPORTANT NOTES:"],
-        ["⚠️ DO NOT delete rows - use Delete in app instead"],
-        ["⚠️ DO NOT change event_id values"],
-        ["⚠️ Empty cells = no value (not zero!)"],
+        ["IMPORTANT:"],
+        ["⚠️ If deleting attribute row from LEGEND, DELETE column too"],
+        ["⚠️ DO NOT change event_id values (breaks tracking)"],
+        ["⚠️ Empty cells = no value (not zero)"],
+        ["⚠️ Import maps by LEGEND Col letters, not header names"],
+        ["⚠️ Delete in app is safer than Excel row deletion"],
     ]
     
     for row_idx, row_data in enumerate(instructions, start=1):
@@ -612,67 +676,135 @@ def _create_help_sheet_v2(ws):
             cell = ws.cell(row=row_idx, column=col_idx, value=value)
             if row_idx == 1:
                 cell.font = Font(bold=True, size=14)
-            elif value and value.endswith(':') and not value.startswith(' '):
+            elif value and (value.endswith(':') or value.startswith('🎯')) and not value.startswith(' '):
                 cell.font = Font(bold=True, size=11)
     
-    ws.column_dimensions['A'].width = 70
+    ws.column_dimensions['A'].width = 75
 
 
 # ============================================
-# EXCEL IMPORT (unchanged from V1)
+# EXCEL IMPORT V2 - LEGEND-BASED MAPPING
 # ============================================
 
-def parse_events_excel(file_bytes: bytes) -> Tuple[List[Dict], List[Dict], str]:
-    """Parse Excel file and extract events for import."""
+def parse_events_excel_v2(file_bytes: bytes) -> Tuple[List[Dict], List[Dict], Dict[str, Tuple[str, str, str]], str]:
+    """
+    Parse Excel file V2 with LEGEND-BASED column mapping.
+    
+    This allows users to:
+    - Delete rows from ATTRIBUTE LEGEND (removes that attribute from import)
+    - Delete columns from EVENT DATA (removes that attribute from import)
+    - Import maps columns by letter from legend, NOT by header names
+    
+    Returns:
+        events_to_create: List of new events to create
+        events_to_update: List of existing events to update
+        legend_mapping: Dict[col_letter -> (area, category_path, attribute_name)]
+        error_message: Error string if parsing fails
+    """
     try:
         wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
         ws = wb.active
         
-        # Find EVENT DATA section
-        event_data_row = None
+        # ─────────────────────────────────────────
+        # STEP 1: Parse ATTRIBUTE LEGEND
+        # ─────────────────────────────────────────
+        
+        legend_start_row = None
         for row_idx in range(1, min(ws.max_row + 1, 200)):
+            cell_value = ws.cell(row=row_idx, column=1).value
+            if cell_value and 'ATTRIBUTE LEGEND' in str(cell_value):
+                legend_start_row = row_idx
+                break
+        
+        if not legend_start_row:
+            return [], [], {}, "Could not find ATTRIBUTE LEGEND section. Invalid file format."
+        
+        # Legend header row is next row after title
+        legend_header_row = legend_start_row + 1
+        
+        # Build legend mapping: Col letter -> (Area, Category_Path, Attribute)
+        legend_mapping = {}
+        
+        for row_idx in range(legend_header_row + 1, ws.max_row + 1):
+            col_cell = ws.cell(row=row_idx, column=1).value  # Col column
+            if not col_cell:
+                break  # End of legend section
+            
+            col_letter = str(col_cell).strip().upper()
+            area = ws.cell(row=row_idx, column=2).value or ''
+            category_path = ws.cell(row=row_idx, column=3).value or ''
+            attribute = ws.cell(row=row_idx, column=4).value or ''
+            
+            # Skip if missing essential info
+            if not col_letter or not attribute:
+                continue
+            
+            # Remove "COL" prefix if present (e.g., "COL F" -> "F")
+            if col_letter.startswith('COL '):
+                col_letter = col_letter[4:].strip()
+            
+            legend_mapping[col_letter] = (area, category_path, attribute)
+        
+        if not legend_mapping:
+            return [], [], {}, "No valid attribute mappings found in ATTRIBUTE LEGEND."
+        
+        # ─────────────────────────────────────────
+        # STEP 2: Find EVENT DATA section
+        # ─────────────────────────────────────────
+        
+        event_data_row = None
+        for row_idx in range(legend_header_row, min(ws.max_row + 1, 500)):
             cell_value = ws.cell(row=row_idx, column=1).value
             if cell_value and 'EVENT DATA' in str(cell_value):
                 event_data_row = row_idx
                 break
         
         if not event_data_row:
-            return [], [], "Could not find EVENT DATA section. Invalid file format."
+            return [], [], legend_mapping, "Could not find EVENT DATA section. Invalid file format."
         
-        # Header row is next row after EVENT DATA title
-        header_row = event_data_row + 1
+        # Header row is TWO rows after EVENT DATA title (skip SUBTOTAL row)
+        header_row = event_data_row + 2
         
-        # Read headers
-        headers = []
-        for col_idx in range(1, ws.max_column + 1):
-            val = ws.cell(row=header_row, column=col_idx).value
-            if val and str(val).strip():
-                headers.append(str(val).strip())
-            elif not val:
-                headers.append(f'_empty_{col_idx}')  # Placeholder for empty columns
+        # ─────────────────────────────────────────
+        # STEP 3: Parse data rows using legend mapping
+        # ─────────────────────────────────────────
         
-        if 'event_id' not in headers:
-            return [], [], "Invalid header row. Must contain 'event_id' column."
-        
-        # Parse data rows
         events_to_create = []
         events_to_update = []
         
+        # Build reverse mapping: column_index -> attribute_name (from legend)
+        col_to_attr = {}
+        for col_idx in range(1, ws.max_column + 1):
+            col_letter = get_column_letter(col_idx)
+            if col_letter in legend_mapping:
+                _, _, attr_name = legend_mapping[col_letter]
+                col_to_attr[col_idx] = attr_name
+        
         for row_idx in range(header_row + 1, ws.max_row + 1):
-            first_cell = ws.cell(row=row_idx, column=1).value
-            
-            # Check for Area in column 2 to detect data rows
+            # Check for Area in column 2 to detect valid data rows
             area_cell = ws.cell(row=row_idx, column=2).value
             if not area_cell:
                 continue
             
+            # Build row data
             row_data = {}
-            for col_idx, header in enumerate(headers, start=1):
-                if header.startswith('_empty_'):
-                    continue
-                value = ws.cell(row=row_idx, column=col_idx).value
-                row_data[header] = value
             
+            # Fixed columns (A-E)
+            row_data['event_id'] = ws.cell(row=row_idx, column=1).value
+            row_data['Area'] = ws.cell(row=row_idx, column=2).value
+            row_data['Category_Path'] = ws.cell(row=row_idx, column=3).value
+            row_data['event_date'] = ws.cell(row=row_idx, column=4).value
+            
+            # Comment is merged E-I, read from E
+            row_data['comment'] = ws.cell(row=row_idx, column=5).value
+            
+            # Attribute columns (mapped by legend)
+            for col_idx, attr_name in col_to_attr.items():
+                value = ws.cell(row=row_idx, column=col_idx).value
+                if value is not None:  # Include even empty strings, skip only None
+                    row_data[attr_name] = value
+            
+            # Determine CREATE vs UPDATE based on event_id
             event_id = row_data.get('event_id')
             
             if event_id is None or str(event_id).strip() == '':
@@ -680,10 +812,22 @@ def parse_events_excel(file_bytes: bytes) -> Tuple[List[Dict], List[Dict], str]:
             else:
                 events_to_update.append(row_data)
         
-        return events_to_create, events_to_update, ""
+        return events_to_create, events_to_update, legend_mapping, ""
         
     except Exception as e:
-        return [], [], f"Error parsing Excel file: {str(e)}"
+        return [], [], {}, f"Error parsing Excel file: {str(e)}"
+
+
+def parse_events_excel(file_bytes: bytes) -> Tuple[List[Dict], List[Dict], str]:
+    """
+    DEPRECATED: Old import function. Use parse_events_excel_v2() instead.
+    
+    This is kept for backward compatibility but should not be used.
+    The new V2 function uses legend-based mapping which is more flexible.
+    """
+    # Call V2 and discard legend_mapping for backward compatibility
+    creates, updates, _, error = parse_events_excel_v2(file_bytes)
+    return creates, updates, error
 
 
 def validate_import_data(

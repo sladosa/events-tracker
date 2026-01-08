@@ -2,9 +2,9 @@
 Events Tracker - Show Events Module
 ====================================
 Created: 2025-12-15 09:45 UTC
-Last Modified: 2025-01-07 17:30 UTC
+Last Modified: 2025-01-08 10:35 UTC
 Python: 3.11
-Version: 2.5.0 - Unified Excel Export/Import
+Version: 2.5.1 - Updated for Excel V2.2 legend-based import
 
 Description:
 View, edit, and delete events with:
@@ -16,6 +16,10 @@ View, edit, and delete events with:
 - Category_Path display (ISV-style)
 - Attribute value formatting by type
 - Excel Export/Import with unified format (Master Plan V2)
+
+CHANGELOG v2.5.1:
+- ✅ UPDATED: Uses parse_events_excel_v2 for legend-based import
+- ✅ NEW: Import now supports flexible attribute removal (user can delete legend rows/columns)
 
 CHANGELOG v2.5.0:
 - 📥 NEW: Export to Excel button - exports filtered events with attribute legend
@@ -79,7 +83,7 @@ import pandas as pd
 from src.excel_events_io import (
     export_events_to_excel,
     import_events_from_excel,
-    parse_events_excel,
+    parse_events_excel_v2,  # Use V2 for legend-based mapping
     validate_import_data,
     apply_import_changes,
     load_categories_dict,
@@ -914,7 +918,7 @@ def render_show_events(client, user_id: str):
             
             # Parse and validate
             with st.spinner("Parsing Excel file..."):
-                events_to_create, events_to_update, parse_error = parse_events_excel(file_bytes)
+                events_to_create, events_to_update, legend_mapping, parse_error = parse_events_excel_v2(file_bytes)
             
             if parse_error:
                 st.error(f"❌ {parse_error}")

@@ -2277,41 +2277,6 @@ def render_interactive_structure_viewer(client, user_id: str):
     state_mgr = StateManager(st.session_state)
     
     # ============================================
-    # DEBUG INFO SIDEBAR (v1.12.0 - Enhanced)
-    # ============================================
-    # Shows current state for monitoring and debugging
-    with st.sidebar:
-        st.markdown("---")
-        with st.expander("🐛 DEBUG INFO", expanded=True):
-            st.markdown("**📊 Current State:**")
-            st.text(f"Viewer Mode: {st.session_state.viewer_mode}")
-            st.text(f"Has Changes: {state_mgr.state.has_changes}")
-            filters_status = "Disabled" if not state_mgr.state.filters_enabled else "Enabled"
-            st.text(f"Filters: {filters_status}")
-            st.text(f"Active Tab: {state_mgr.state.active_tab or 'None'}")
-            
-            st.markdown("**🔍 State Machine:**")
-            st.text(f"- mode: {state_mgr.state.mode}")
-            st.text(f"- has_changes: {state_mgr.state.has_changes}")
-            st.text(f"- filters_enabled: {state_mgr.state.filters_enabled}")
-            # v1.11.3: Show discard_pending flag
-            st.text(f"- discard_pending: {state_mgr.state.discard_pending}")
-            # v1.12.0: Show filter_sync_needed flag
-            st.text(f"- filter_sync_needed: {getattr(state_mgr.state, 'filter_sync_needed', False)}")
-            
-            st.markdown("**💾 Data State:**")
-            edited_df_state = "SET" if st.session_state.get('edited_df') is not None else "None"
-            original_df_state = "SET" if st.session_state.get('original_df') is not None else "None"
-            st.text(f"- edited_df: {edited_df_state}")
-            st.text(f"- original_df: {original_df_state}")
-            st.text(f"- editor_reset_counter: {st.session_state.get('editor_reset_counter', 0)}")
-            
-            # v1.12.0: Show form counters
-            st.markdown("**📝 Form Counters:**")
-            st.text(f"- area_form: {st.session_state.get('area_form_counter', 0)}")
-            st.text(f"- category_form: {st.session_state.get('category_form_counter', 0)}")
-            st.text(f"- insert_between: {st.session_state.get('insert_between_counter', 0)}")
-        st.markdown("---")
     
     # Load data
     with st.spinner("Loading structure..."):
