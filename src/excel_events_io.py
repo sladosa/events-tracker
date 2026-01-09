@@ -1,13 +1,20 @@
 """
-Events Tracker - Unified Excel Events I/O Module V2.4.2
+Events Tracker - Unified Excel Events I/O Module V2.4.3
 ========================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-08 20:30 UTC
+Last Modified: 2025-01-09 09:50 UTC
 Python: 3.11
-Version: 2.4.2
+Version: 2.4.3
 
 Description:
 Unified Excel Export/Import for events with enhanced formatting and LEGEND-BASED import.
+
+CRITICAL FIX in V2.4.3:
+- 🐛 FIXED: Off-by-one error in EVENT DATA parsing
+- ✅ ISSUE: Parser was looking for headers at row+2 instead of row+1
+- ✅ RESULT: Import now correctly reads events from exported Excel files
+- 🎯 ROOT CAUSE: Comment said "skip SUBTOTAL row" but export doesn't create one
+- 📝 IMPACT: "No events found" error when importing valid Excel files
 
 CRITICAL FIX in V2.4.2:
 - 🎯 SOLUTION: First row of each group = SEPARATOR (outside group)
@@ -866,8 +873,9 @@ def parse_events_excel_v2(file_bytes: bytes) -> Tuple[List[Dict], List[Dict], Di
         if not event_data_row:
             return [], [], legend_mapping, "Could not find EVENT DATA section. Invalid file format."
         
-        # Header row is TWO rows after EVENT DATA title (skip SUBTOTAL row)
-        header_row = event_data_row + 2
+        # Header row is ONE row after EVENT DATA title
+        # (Export writes headers immediately after title, no subtotal row between)
+        header_row = event_data_row + 1
         
         # ─────────────────────────────────────────
         # STEP 3: Parse data rows using legend mapping
