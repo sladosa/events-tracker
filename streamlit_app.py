@@ -257,6 +257,88 @@ def render_help_page():
     
     ---
     
+    
+    ### 📥📤 Excel Import/Export Best Practices
+    
+    **Understanding the Excel Format:**
+    
+    When you export events, you get an Excel file with TWO main sections:
+    
+    1. **ATTRIBUTE LEGEND** (top) - Defines column mapping
+       - Shows which Excel column (J, K, L...) contains which attribute
+       - Example: "Col K | Fitness | Cardio > Running | duration"
+       - 🎯 **This is the SOURCE OF TRUTH for import!**
+    
+    2. **EVENT DATA** (bottom) - Your actual event data
+       - Contains events with their dates, comments, and attributes
+       - Column headers match attributes from your structure
+    
+    ---
+    
+    **✅ Editing Excel - CORRECT Way:**
+    
+    **Option 1: Delete Attributes by Removing Legend Rows**
+    ```
+    1. Open ATTRIBUTE LEGEND section
+    2. DELETE entire ROW for unwanted attribute
+    3. Save Excel
+    4. Import → Attribute is ignored ✅
+    ```
+    
+    **Option 2: Delete Columns and Update Legend**
+    ```
+    1. DELETE unwanted columns from EVENT DATA
+    2. Excel automatically shifts remaining columns left
+    3. UPDATE the 'Col' letters in ATTRIBUTE LEGEND to match new positions
+    4. Save Excel
+    5. Import → Works perfectly! ✅
+    ```
+    
+    **Example:**
+    - Original: Col K = duration, Col L = pace, Col M = type
+    - You delete Col K (duration)
+    - Excel shifts: L→K, M→L
+    - Update Legend: Change "Col L | pace" to "Col K | pace"
+    - Import succeeds with correct mapping!
+    
+    ---
+    
+    **❌ Common Mistake:**
+    
+    ❌ **DON'T:** Delete columns WITHOUT updating Legend
+    - Excel shifts columns but Legend still shows old positions
+    - Import will be REJECTED with error message
+    - You'll see: "Column headers don't match ATTRIBUTE LEGEND!"
+    
+    ---
+    
+    **🔧 Fixing Mismatch Errors:**
+    
+    If you see "Cannot import: Column headers don't match ATTRIBUTE LEGEND":
+    
+    1. Open the Excel file
+    2. Look at ATTRIBUTE LEGEND section
+    3. For each mismatched column, either:
+       - **UPDATE** the 'Col' letter to match current position, OR
+       - **DELETE** the entire legend row if you don't want that attribute
+    4. Save and import again
+    
+    ---
+    
+    **💡 Key Principles:**
+    
+    ✅ **ATTRIBUTE LEGEND = SOURCE OF TRUTH**
+    - Import uses Legend to know which column contains which attribute
+    - Always keep Legend synchronized with your EVENT DATA columns
+    
+    ✅ **You CAN delete columns** - just update Legend accordingly
+    
+    ✅ **You CAN delete legend rows** - import will ignore those attributes
+    
+    ✅ **Maximum flexibility** - organize your Excel however you want, as long as Legend is correct!
+    
+    ---
+    
     ### ⚠️ Important Notes
     
     **Data Safety:**

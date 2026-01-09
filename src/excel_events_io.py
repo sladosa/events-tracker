@@ -1,13 +1,25 @@
 """
-Events Tracker - Unified Excel Events I/O Module V2.4.3
+Events Tracker - Unified Excel Events I/O Module V2.4.5
 ========================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-09 09:50 UTC
+Last Modified: 2025-01-09 11:15 UTC
 Python: 3.11
-Version: 2.4.3
+Version: 2.4.5
 
 Description:
 Unified Excel Export/Import for events with enhanced formatting and LEGEND-BASED import.
+
+CRITICAL FIX in V2.4.5:
+- 🎯 PROPER FIX: Legend = Source of Truth approach
+- ✅ PRINCIPLE: User CAN delete columns, MUST update Legend accordingly
+- ❌ REJECT: Import rejected if headers don't match Legend (not auto-ignored!)
+- 📝 INSTRUCTIONS: Clear error message explains how to fix Legend
+- 💡 FLEXIBLE: User can delete many columns, just needs to update Legend
+- 🛡️ SAFE: No silent data corruption, user maintains control
+
+REVERTED from V2.4.4:
+- ❌ V2.4.4 auto-ignored mismatches (wrong approach - loses data silently)
+- ✅ V2.4.5 rejects with instructions (correct approach - user has control)
 
 CRITICAL FIX in V2.4.3:
 - 🐛 FIXED: Off-by-one error in EVENT DATA parsing
@@ -69,11 +81,14 @@ Colors:
 🔵 BLUE = Editable (event_date, comment, relevant attributes)
 🟠 ORANGE = Non-relevant attribute for this event's category
 
-LEGEND-BASED IMPORT:
-- Users can DELETE rows from ATTRIBUTE LEGEND (removes attribute from import)
-- Users can DELETE columns from EVENT DATA table (removes attribute from import)
+LEGEND-BASED IMPORT (V2.4.5):
+- ATTRIBUTE LEGEND = SOURCE OF TRUTH for column mapping
+- Users CAN delete rows from ATTRIBUTE LEGEND (removes attribute from import)
+- Users CAN delete columns from EVENT DATA (Excel shifts remaining columns)
+- Users MUST update Legend after deleting columns to match new positions
 - Import maps columns by LETTER from legend (Col F, Col G...), NOT by header names
-- This allows flexible customization of Excel before editing
+- If Legend doesn't match headers, import is REJECTED with instructions
+- This allows maximum flexibility while maintaining data integrity
 
 Dependencies: openpyxl, pandas, json
 """
@@ -658,28 +673,26 @@ def create_events_excel_v2(
 
 
 def _create_help_sheet_v2(ws):
-    """Create Help sheet with V2.2 instructions."""
+    """Create Help sheet with V2.4.5 instructions - Legend = Source of Truth."""
     instructions = [
-        ["EVENTS TRACKER - Excel Export/Import Help V2.2"],
+        ["EVENTS TRACKER - Excel Export/Import Help V2.4.5"],
         [""],
-        ["🎯 NEW IN V2.2: FLEXIBLE ATTRIBUTE REMOVAL"],
+        ["🎯 IMPORTANT: ATTRIBUTE LEGEND = SOURCE OF TRUTH"],
         [""],
-        ["You can now DELETE attributes you don't need from the Excel file:"],
-        ["  1. DELETE entire rows from ATTRIBUTE LEGEND section"],
-        ["  2. DELETE corresponding columns from EVENT DATA table"],
-        ["  3. Import will use LEGEND (Col F, Col G...) to map columns"],
-        ["  4. This allows you to customize which attributes to edit"],
+        ["The ATTRIBUTE LEGEND tells import which Excel column contains which attribute."],
+        ["You MUST keep Legend synchronized with your column structure!"],
         [""],
-        ["FILE STRUCTURE:"],
+        ["═══════════════════════════════════════════════════════════════"],
+        [""],
+        ["📋 FILE STRUCTURE:"],
         [""],
         ["1. ATTRIBUTE LEGEND (top section)"],
-        ["   - Col: Column letter (F, G, H...) for this attribute in EVENT DATA"],
+        ["   - Col: Column letter (J, K, L...) for this attribute in EVENT DATA"],
         ["   - Area: Which area this attribute belongs to"],
         ["   - Category_Path: Full category path"],
         ["   - Attribute: Attribute name"],
         ["   - Type/Default/Min/Max/Unit: Attribute properties"],
         ["   - Rows grouped (click +/- ABOVE group to expand/collapse)"],
-        ["   - Columns F-I grouped (click +/- to show/hide properties)"],
         [""],
         ["2. EVENT DATA (bottom section)"],
         ["   - Your actual events with attribute values"],
@@ -687,7 +700,9 @@ def _create_help_sheet_v2(ws):
         ["   - AutoFilter enabled - click headers to filter"],
         ["   - Title row shows SUMs (respects filters)"],
         [""],
-        ["COLOR CODING:"],
+        ["═══════════════════════════════════════════════════════════════"],
+        [""],
+        ["🎨 COLOR CODING:"],
         [""],
         ["🟣 PINK = READ-ONLY (do not edit)"],
         ["   - event_id: UUID identifying existing events"],
@@ -703,41 +718,94 @@ def _create_help_sheet_v2(ws):
         ["   - Attribute belongs to different category"],
         ["   - Can leave empty - will be ignored"],
         [""],
-        ["HOW TO EDIT:"],
+        ["═══════════════════════════════════════════════════════════════"],
+        [""],
+        ["✏️ HOW TO EDIT EVENTS:"],
         [""],
         ["UPDATE EXISTING EVENTS:"],
-        ["1. Find row with event_id filled"],
-        ["2. Change BLUE columns only"],
+        ["1. Find row with event_id filled (UUID in column A)"],
+        ["2. Change BLUE columns only (date, comment, attributes)"],
         ["3. Save and import"],
         [""],
         ["CREATE NEW EVENTS:"],
         ["1. Add row at bottom, leave event_id EMPTY"],
-        ["2. Fill Area, Category_Path (must exist in structure)"],
-        ["3. Fill event_date (required, YYYY-MM-DD)"],
+        ["2. Fill Area, Category_Path (must exist in your structure)"],
+        ["3. Fill event_date (required, YYYY-MM-DD format)"],
         ["4. Fill attribute values (only relevant ones)"],
         ["5. Save and import"],
         [""],
-        ["REMOVE ATTRIBUTES:"],
-        ["1. Find attribute in ATTRIBUTE LEGEND (e.g., row with 'Weight')"],
-        ["2. Note its Col letter (e.g., 'H')"],
-        ["3. DELETE that row from ATTRIBUTE LEGEND"],
-        ["4. DELETE column H from EVENT DATA table"],
-        ["5. Save - import will skip that attribute"],
+        ["═══════════════════════════════════════════════════════════════"],
         [""],
-        ["TIPS:"],
+        ["✂️ HOW TO REMOVE ATTRIBUTES - TWO OPTIONS:"],
+        [""],
+        ["OPTION 1: Delete Legend Rows (SIMPLEST)"],
+        ["  1. Open ATTRIBUTE LEGEND section"],
+        ["  2. Find attribute you don't want (e.g., 'Weight' in row 5)"],
+        ["  3. DELETE entire row from ATTRIBUTE LEGEND"],
+        ["  4. DON'T touch EVENT DATA columns"],
+        ["  5. Save and import → Attribute ignored ✅"],
+        [""],
+        ["OPTION 2: Delete Columns and Update Legend"],
+        ["  1. DELETE unwanted columns from EVENT DATA (e.g., Col K)"],
+        ["  2. Excel automatically shifts remaining columns LEFT"],
+        ["  3. UPDATE 'Col' letters in ATTRIBUTE LEGEND to match NEW positions"],
+        ["     Example: If L shifted to K, change 'Col L' to 'Col K'"],
+        ["  4. OR DELETE legend rows for removed columns"],
+        ["  5. Save and import → Works perfectly! ✅"],
+        [""],
+        ["⚠️ CRITICAL: If you delete columns WITHOUT updating Legend:"],
+        ["   → Import will FAIL with error message"],
+        ["   → Error will list mismatched columns"],
+        ["   → You must fix Legend before importing"],
+        [""],
+        ["═══════════════════════════════════════════════════════════════"],
+        [""],
+        ["🔧 FIXING MISMATCH ERRORS:"],
+        [""],
+        ["If you see: 'Cannot import: Column headers don't match LEGEND!'"],
+        [""],
+        ["This means Legend Col letters don't match actual column positions."],
+        ["This happens when you delete columns but forget to update Legend."],
+        [""],
+        ["TO FIX:"],
+        ["1. Open ATTRIBUTE LEGEND section"],
+        ["2. For each mismatched column mentioned in error:"],
+        ["   - EITHER: UPDATE 'Col' letter to match new position"],
+        ["   - OR: DELETE entire legend row if you don't want it"],
+        ["3. Save Excel and import again"],
+        [""],
+        ["Example:"],
+        ["  Original: Col K=duration, Col L=pace, Col M=type"],
+        ["  You delete Col K → Excel shifts L to K, M to L"],
+        ["  Update Legend: Change 'Col L' to 'Col K' (pace)"],
+        ["  Update Legend: Change 'Col M' to 'Col L' (type)"],
+        ["  Import succeeds! ✅"],
+        [""],
+        ["═══════════════════════════════════════════════════════════════"],
+        [""],
+        ["💡 TIPS:"],
         ["- Use AutoFilter to show only specific categories/dates"],
         ["- Collapse LEGEND groups to see more EVENT DATA"],
-        ["- SUM row updates when you filter"],
-        ["- Orange cells can be empty"],
-        ["- +/- icons are ABOVE groups"],
-        ["- Delete attributes to focus on what you need"],
+        ["- SUM row updates automatically when you filter"],
+        ["- Orange cells can be left empty (not relevant)"],
+        ["- +/- icons for groups are ABOVE the group"],
+        ["- Option 1 (delete legend rows) is SAFEST"],
+        ["- Option 2 (delete columns) requires Legend update"],
         [""],
-        ["IMPORTANT:"],
-        ["⚠️ If deleting attribute row from LEGEND, DELETE column too"],
-        ["⚠️ DO NOT change event_id values (breaks tracking)"],
-        ["⚠️ Empty cells = no value (not zero)"],
-        ["⚠️ Import maps by LEGEND Col letters, not header names"],
-        ["⚠️ Delete in app is safer than Excel row deletion"],
+        ["⚠️ IMPORTANT WARNINGS:"],
+        ["- DO NOT change event_id values (breaks event tracking)"],
+        ["- Empty cells = no value (not zero)"],
+        ["- Import maps by LEGEND Col letters, not header names"],
+        ["- Delete in app is safer than Excel row deletion"],
+        ["- ALWAYS keep Legend synchronized with columns!"],
+        [""],
+        ["═══════════════════════════════════════════════════════════════"],
+        [""],
+        ["🎯 KEY PRINCIPLE: ATTRIBUTE LEGEND = SOURCE OF TRUTH"],
+        [""],
+        ["Import uses Legend to know which column contains which attribute."],
+        ["You have full flexibility to organize columns as you want,"],
+        ["as long as Legend correctly describes the structure!"],
     ]
     
     for row_idx, row_data in enumerate(instructions, start=1):
@@ -876,6 +944,55 @@ def parse_events_excel_v2(file_bytes: bytes) -> Tuple[List[Dict], List[Dict], Di
         # Header row is ONE row after EVENT DATA title
         # (Export writes headers immediately after title, no subtotal row between)
         header_row = event_data_row + 1
+        
+        # ─────────────────────────────────────────
+        # STEP 2.5: Validate LEGEND vs HEADERS (V2.4.5)
+        # ─────────────────────────────────────────
+        # Check if actual headers in EVENT DATA match legend entries
+        # Legend = SOURCE OF TRUTH: User MUST update legend if columns change
+        # If mismatch found, REJECT import with clear instructions
+        
+        mismatch_errors = []
+        
+        for col_letter, (area, cat_path, attr_name) in legend_mapping.items():
+            try:
+                col_idx = column_index_from_string(col_letter)
+                if col_idx <= ws.max_column:
+                    # Get actual header from EVENT DATA table
+                    actual_header = ws.cell(row=header_row, column=col_idx).value
+                    actual_header_str = str(actual_header).strip() if actual_header else ''
+                    
+                    # Compare with expected attribute name from legend
+                    # Only flag if there's an actual header that doesn't match
+                    if actual_header_str and actual_header_str != attr_name:
+                        mismatch_errors.append(
+                            f"Col {col_letter}: Legend says '{attr_name}' but header shows '{actual_header_str}'"
+                        )
+            except Exception:
+                # Column letter invalid - already handled in previous validation
+                pass
+        
+        # If ANY mismatches found, REJECT import with instructions
+        if mismatch_errors:
+            error_msg = (
+                "❌ Cannot import: Column headers don't match ATTRIBUTE LEGEND!\n\n"
+                "This usually happens when you delete columns from EVENT DATA.\n"
+                "Excel shifts remaining columns, but Legend still shows old positions.\n\n"
+                "🔍 Mismatches found:\n" + 
+                "\n".join(f"  • {err}" for err in mismatch_errors) +
+                "\n\n"
+                "📝 How to fix:\n"
+                "1. Open the ATTRIBUTE LEGEND section in Excel\n"
+                "2. For each mismatched column, you have TWO options:\n"
+                "   a) UPDATE the 'Col' letter to match the new column position, OR\n"
+                "   b) DELETE the entire legend row if you don't want to import that attribute\n"
+                "3. Save Excel and try import again\n\n"
+                "💡 Example: If you deleted Col K and L shifted left to K:\n"
+                "   Change 'Col L' to 'Col K' in the legend row\n\n"
+                "✅ Remember: ATTRIBUTE LEGEND is the source of truth for import mapping!"
+            )
+            return [], [], legend_mapping, error_msg
+        
         
         # ─────────────────────────────────────────
         # STEP 3: Parse data rows using legend mapping
