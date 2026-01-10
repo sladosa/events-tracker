@@ -2,12 +2,25 @@
 Events Tracker - Unified Excel Events I/O Module V2.4.6
 ========================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-09 17:45 UTC
+Last Modified: 2025-01-10 12:00 UTC
 Python: 3.11
-Version: 2.4.6
+Version: 2.4.8
 
 Description:
 Unified Excel Export/Import for events with enhanced formatting and LEGEND-BASED import.
+
+
+NEW in V2.4.8:
+- 🎯 PROPER FIX: Excel date column uses DATE format (not TEXT!)
+  - PROBLEM: V2.4.7 used TEXT format (@) - lost Excel date functionality
+  - INSIGHT: Excel stores dates as numbers, format is just display
+  - SOLUTION: Store as Python date object + format 'YYYY-MM-DD'
+  - BONUS: Flexible parsing for string dates (Croatian/ISO/US formats)
+  - RESULT: Sorting works, formulas work, consistent ISO display!
+- 🎨 FIXED: Number attributes right-aligned based on data_type
+  - Check attribute definition data_type (not isinstance)
+  - All number columns consistently right-aligned
+  - Professional appearance
 
 NEW in V2.4.6:
 - 🎯 SMART VALIDATION: Auto-reclassify invalid event_ids to CREATE (no manual cleanup!)
@@ -535,11 +548,22 @@ def create_events_excel_v2(
                 attr_values[attr_name] = value
         
         # Fixed columns
+        # V2.4.8: Convert event_date to Python date object for Excel
+        event_date = event.get('event_date', '')
+        if isinstance(event_date, str) and event_date:
+            try:
+                event_date = datetime.strptime(event_date, '%Y-%m-%d').date()
+            except:
+                pass  # Keep as string if parsing fails
+        elif isinstance(event_date, datetime):
+            event_date = event_date.date()
+        # If already date object, keep it
+        
         fixed_data = [
             event_id,
             cat_info.get('area_name', ''),
             cat_info.get('full_path', ''),
-            event.get('event_date', ''),
+            event_date,
             event.get('comment', '') or ''
         ]
         
@@ -554,6 +578,10 @@ def create_events_excel_v2(
                 cell.fill = PINK_FILL
             else:
                 cell.fill = BLUE_FILL
+            
+            # V2.4.8: Set Excel date format (ISO display)
+            if col_idx == 4:  # event_date column
+                cell.number_format = 'YYYY-MM-DD'  # Excel DATE format with ISO display
         
         # Comment column (E) with merge to I - merged cell for comment
         comment_value = fixed_data[4]
@@ -598,8 +626,13 @@ def create_events_excel_v2(
             else:
                 cell.fill = ORANGE_FILL
             
-            if isinstance(value, (int, float)):
+            
+            # V2.4.8: Check data_type for alignment
+            attr_def = next((ad for ad in attribute_definitions if ad['name'] == attr_name), None)
+            if attr_def and attr_def.get('data_type') == 'number':
                 cell.alignment = Alignment(horizontal="right", vertical="center")
+                if isinstance(value, (int, float)):
+                    cell.number_format = '0.##'
             else:
                 cell.alignment = Alignment(horizontal="left", vertical="center")
         
@@ -1276,7 +1309,26 @@ def apply_import_changes(
             elif isinstance(event_date, date):
                 event_date = event_date.isoformat()
             else:
-                event_date = str(event_date)
+                # V2.4.8: Flexible date parsing for string dates
+                try:
+                    from dateutil import parser
+                    # dayfirst=True handles Croatian format (DD.MM.YYYY)
+                    parsed_date = parser.parse(str(event_date), dayfirst=True)
+                    event_date = parsed_date.date().isoformat()
+                except ImportError:
+                    # Fallback if dateutil not available
+                    date_str = str(event_date).strip()
+                    for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%d.%M.%Y', '%d/%m/%Y']:
+                        try:
+                            parsed_date = datetime.strptime(date_str, fmt)
+                            event_date = parsed_date.date().isoformat()
+                            break
+                        except:
+                            continue
+                    else:
+                        event_date = str(event_date)
+                except Exception:
+                    event_date = str(event_date)
             
             new_event = {
                 'user_id': user_id,
@@ -1333,7 +1385,24 @@ def apply_import_changes(
             elif isinstance(event_date, date):
                 event_date = event_date.isoformat()
             else:
-                event_date = str(event_date)
+                # V2.4.8: Flexible date parsing for string dates
+                try:
+                    from dateutil import parser
+                    parsed_date = parser.parse(str(event_date), dayfirst=True)
+                    event_date = parsed_date.date().isoformat()
+                except ImportError:
+                    date_str = str(event_date).strip()
+                    for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%d.%M.%Y', '%d/%m/%Y']:
+                        try:
+                            parsed_date = datetime.strptime(date_str, fmt)
+                            event_date = parsed_date.date().isoformat()
+                            break
+                        except:
+                            continue
+                    else:
+                        event_date = str(event_date)
+                except Exception:
+                    event_date = str(event_date)
             
             updates = {
                 'event_date': event_date,
