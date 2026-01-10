@@ -605,6 +605,37 @@ def render_show_events(client, user_id: str):
         st.session_state.se_export_filename = None
     if 'se_export_count' not in st.session_state:
         st.session_state.se_export_count = None
+    if 'se_import_result' not in st.session_state:
+        st.session_state.se_import_result = None  # {'type': 'success'|'error'|'warning', 'message': str, 'details': list}
+    
+    # Display import result messages (persists through rerun)
+    if st.session_state.se_import_result:
+        result = st.session_state.se_import_result
+        if result['type'] == 'success':
+            st.success(result['message'])
+            if result.get('details'):
+                with st.expander("📋 Details", expanded=False):
+                    for detail in result['details']:
+                        if detail.startswith('⚠️'):
+                            st.warning(detail)
+                        else:
+                            st.info(detail)
+        elif result['type'] == 'error':
+            st.error(result['message'])
+            if result.get('details'):
+                for detail in result['details'][:5]:
+                    st.error(f"• {detail}")
+                if len(result['details']) > 5:
+                    st.error(f"... and {len(result['details']) - 5} more errors")
+        elif result['type'] == 'warning':
+            st.warning(result['message'])
+            if result.get('details'):
+                for detail in result['details']:
+                    st.info(f"• {detail}")
+        
+        # Clear result after displaying (one-time message)
+        st.session_state.se_import_result = None
+    
     
     # Load areas and categories
     areas = load_areas(client, user_id)
@@ -980,18 +1011,33 @@ def render_show_events(client, user_id: str):
                 with btn_col1:
                     if st.button("✓ Apply Import", type="primary", use_container_width=True):
                         with st.spinner("Importing events..."):
-                            created, updated, errors = import_events_from_excel(
+                            created, updated, messages = import_events_from_excel(
                                 client, user_id, file_bytes
                             )
                         
+                        # Separate warnings from errors
+                        errors = [m for m in messages if not m.startswith('⚠️') and not m.startswith('💡')]
+                        warnings = [m for m in messages if m.startswith('⚠️') or m.startswith('💡')]
+                        
+                        # Store result in session state (survives st.rerun!)
                         if errors:
-                            st.error("Import completed with errors:")
-                            for err in errors[:5]:
-                                st.error(f"• {err}")
-                            if len(errors) > 5:
-                                st.error(f"... and {len(errors) - 5} more errors")
+                            st.session_state.se_import_result = {
+                                'type': 'error',
+                                'message': "❌ Import failed with errors:",
+                                'details': errors
+                            }
+                        elif warnings:
+                            st.session_state.se_import_result = {
+                                'type': 'success',
+                                'message': f"✅ Import complete: {created} created, {updated} updated",
+                                'details': warnings
+                            }
                         else:
-                            st.success(f"✅ Import complete: {created} created, {updated} updated")
+                            st.session_state.se_import_result = {
+                                'type': 'success',
+                                'message': f"✅ Import complete: {created} created, {updated} updated",
+                                'details': []
+                            }
                         
                         # Reset import state
                         st.session_state.se_import_file = None

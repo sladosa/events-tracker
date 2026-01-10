@@ -2,9 +2,9 @@
 Events Tracker - Add Activity Module
 =====================================
 Created: 2025-12-13 15:00 UTC
-Last Modified: 2025-01-09 17:50 UTC
+Last Modified: 2025-01-10 09:30 UTC
 Python: 3.11
-Version: 2.3.3 - Fixed Category Selectbox Overwrite Bug
+Version: 2.3.4 - Fixed Category Selectbox Overwrite Bug
 
 Description:
 Mobile-first activity entry form with:
@@ -13,6 +13,14 @@ Mobile-first activity entry form with:
 - Full Downstream Workflow: walks through ALL leaf categories in subtree
 - Optimized layout for minimal scrolling
 - Photo attachments via Supabase Storage
+
+
+CHANGELOG v2.3.4:
+- 🐛 CRITICAL FIX: Area selectbox now updates correctly when selecting shortcuts
+  - ROOT CAUSE: Widget keys cache state and block updates from session state
+  - SYMPTOM: Area stays on previous value, only Category changes
+  - SOLUTION: Removed widget keys from Area and Category selectboxes
+  - RESULT: Shortcuts now work perfectly for both Area AND Category! ✅
 
 CHANGELOG v2.3.3:
 - 🐛 CRITICAL FIX: Category selectbox no longer overwrites shortcut values
@@ -1118,7 +1126,6 @@ def render_add_activity(client, user_id: str):
             options=area_ids,
             format_func=lambda x: area_options[x],
             index=current_area_idx,
-            key="aa_area_filter"
         )
         
         if selected_area_id != st.session_state.aa_area_id:
@@ -1144,7 +1151,6 @@ def render_add_activity(client, user_id: str):
                 options=cat_ids,
                 format_func=lambda x: cat_options[x],
                 index=current_cat_idx,
-                key="aa_category_filter"
             )
             # V2.3.3 FIX: Only update if changed (prevents overwriting shortcut values)
             if selected_cat_id != st.session_state.aa_category_id:
