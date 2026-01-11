@@ -2,14 +2,21 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-11 15:15 UTC
+Last Modified: 2025-01-11 16:00 UTC
 Python: 3.11
-Version: 2.1.1 - HOTFIX: Bootstrap System Time Import
+Version: 2.1.2 - Last Area Deletion Prompt
 
 Description:
 Main Streamlit application with authentication and multiple pages.
 Core modules: Interactive Structure Viewer (main hub), Add Activity,
 Show Events (with integrated Excel Export/Import).
+
+NEW in v2.1.2:
+- ✨ Last Area Deletion Prompt
+  - Warns when deleting last Area: "This will delete ENTIRE structure!"
+  - User chooses: Cancel, Keep empty, or Recreate Default
+  - No more surprise Default structure after deleting everything
+  - Full user control over post-deletion behavior
 
 NEW in v2.1.1 (HOTFIX):
 - 🐛 Fixed: UnboundLocalError on time.sleep() in ISV
@@ -30,6 +37,7 @@ NEW in v2.0.0:
 - 🎨 Show Events toolbar now has: Edit | Delete | Export | Import
 
 CHANGELOG:
+- v2.1.2: Last Area deletion prompt (user control)
 - v2.1.1: HOTFIX - Fixed time import namespace conflict
 - v2.1.0: Bootstrap system for empty database UX
 - v2.0.0: Unified Excel Export/Import, removed obsolete pages
@@ -375,7 +383,7 @@ def render_help_page():
     
     # Version info
     st.markdown("---")
-    st.caption("Version: 2.1.1 | 2025-01-11 | Python: 3.11 | Streamlit: 1.28.0")
+    st.caption("Version: 2.1.2 | 2025-01-11 | Python: 3.11 | Streamlit: 1.28.0")
 
 
 if __name__ == "__main__":

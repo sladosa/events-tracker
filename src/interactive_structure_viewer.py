@@ -2,9 +2,21 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-01-11 15:15 UTC
+Last Modified: 2025-01-11 16:00 UTC
 Python: 3.11
-Version: 1.13.1 - HOTFIX: Fixed time import namespace conflict
+Version: 1.13.2 - Last Area Deletion Prompt
+
+CHANGELOG v1.13.2 (Last Area Deletion Prompt):
+- ✨ NEW: Prompt when deleting last Area(s)
+  - Warns user: "This will delete your ENTIRE structure!"
+  - Three choices:
+    1. Cancel - don't delete
+    2. Keep empty database (skip bootstrap)
+    3. Delete and recreate Default structure
+  - Prevents accidental complete data loss
+  - User has full control over post-deletion behavior
+- 🛡️ SAFETY: Bootstrap respects user's "Keep empty" choice
+- 🎯 UX: No more surprise Default structure after deleting everything
 
 CHANGELOG v1.13.1 (HOTFIX):
 - 🐛 CRITICAL FIX: UnboundLocalError on time.sleep()
@@ -2119,6 +2131,32 @@ def add_new_attribute(
 # DELETE FUNCTIONS
 # ============================================
 
+def count_remaining_areas(client, user_id: str, areas_to_delete_ids: list) -> int:
+    """
+    Count how many areas will remain AFTER deletion.
+    
+    Args:
+        client: Supabase client
+        user_id: User ID
+        areas_to_delete_ids: List of area IDs that will be deleted
+        
+    Returns:
+        Number of areas that will remain after deletion
+    """
+    try:
+        # Get total count of areas for this user
+        all_areas = client.table('areas').select('id').eq('user_id', user_id).execute()
+        total_areas = len(all_areas.data) if all_areas.data else 0
+        
+        # Calculate remaining
+        remaining = total_areas - len(areas_to_delete_ids)
+        return remaining
+    
+    except Exception as e:
+        # If error, return -1 to indicate problem
+        return -1
+
+
 def delete_area(client, user_id: str, area_id: str) -> Tuple[bool, str]:
     """
     Delete area from database (CASCADE deletes categories and attributes).
@@ -2391,6 +2429,14 @@ def render_interactive_structure_viewer(client, user_id: str):
     if 'upload_reset_counter' not in st.session_state:
         st.session_state.upload_reset_counter = 0
     
+    # v2.1.2: Flags for Last Area deletion handling
+    # user_wants_empty_db: True = user explicitly wants empty database (skip bootstrap)
+    # last_area_delete_choice: stores user's choice when deleting last area
+    if 'user_wants_empty_db' not in st.session_state:
+        st.session_state.user_wants_empty_db = False
+    if 'last_area_delete_choice' not in st.session_state:
+        st.session_state.last_area_delete_choice = None
+    
     # Initialize State Machine (minimal integration for critical paths)
     state_mgr = StateManager(st.session_state)
     
@@ -2401,7 +2447,8 @@ def render_interactive_structure_viewer(client, user_id: str):
         df = load_structure_as_dataframe(client, user_id)
     
     # v1.13.0: Bootstrap system - auto-create default structure if empty
-    if df.empty:
+    # v2.1.2: Skip bootstrap if user explicitly wants empty database
+    if df.empty and not st.session_state.user_wants_empty_db:
         # Check if bootstrap is needed (no areas exist)
         areas_check = client.table('areas').select('id').eq('user_id', user_id).limit(1).execute()
         
@@ -2426,6 +2473,13 @@ def render_interactive_structure_viewer(client, user_id: str):
             # Areas exist but DataFrame is empty (shouldn't happen, but handle gracefully)
             st.warning("⚠️ No structure defined yet. Please upload a template first.")
             return
+    
+    # If user wants empty database, show info message instead of warning
+    if df.empty and st.session_state.user_wants_empty_db:
+        st.info("ℹ️ Database is empty as per your choice. You can create structure in Edit Mode or switch to Read-Only to recreate defaults.")
+        # Clear the flag after showing message once
+        st.session_state.user_wants_empty_db = False
+        return
     
     # Store original dataframe
     if st.session_state.original_df is None:
@@ -2857,49 +2911,138 @@ def render_interactive_structure_viewer(client, user_id: str):
                 
                 # ============================================
                 # DELETE SECTION - v1.11.0: Added Cancel button
+                # v2.1.2: Added Last Area deletion prompt
                 # ============================================
                 areas_to_delete = edited_area_df[edited_area_df['🗑️'] == True]
                 
                 if not areas_to_delete.empty:
                     st.error(f"⚠️ **{len(areas_to_delete)} area(s) marked for deletion!**")
                     
-                    # Show warnings for each area
-                    for idx in areas_to_delete.index:
-                        area_id = area_full_df.loc[idx, '_area_id']
-                        has_deps, warning = check_area_has_dependencies(client, area_id, user_id)
-                        if has_deps:
-                            st.warning(warning)
+                    # v2.1.2: Check if this will delete ALL areas
+                    areas_to_delete_ids = [area_full_df.loc[idx, '_area_id'] for idx in areas_to_delete.index]
+                    remaining_areas = count_remaining_areas(client, user_id, areas_to_delete_ids)
                     
-                    col1, col2, col3 = st.columns([3, 1, 1])
-                    with col1:
-                        del_confirm = st.text_input("Type 'DELETE' to confirm deletion", key="delete_area_confirm")
-                    with col2:
-                        if st.button("❌ Delete Marked", key="delete_areas_btn", disabled=(del_confirm != "DELETE"), use_container_width=True):
-                            with st.spinner("Deleting areas..."):
-                                deleted_count = 0
-                                for idx in areas_to_delete.index:
-                                    area_id = area_full_df.loc[idx, '_area_id']
-                                    success, msg = delete_area(client, user_id, area_id)
-                                    if success:
-                                        deleted_count += 1
-                                    else:
-                                        st.error(msg)
-                                
-                                if deleted_count > 0:
-                                    st.success(f"✅ Deleted {deleted_count} area(s)")
-                                    st.cache_data.clear()
-                                    st.session_state.original_df = None
-                                    st.session_state.edited_df = None
-                                    st.rerun()
-                    with col3:
-                        # v1.11.0: Cancel button - uncheck all and refresh
-                        # v1.11.4: Must use state_mgr.discard_changes() to set discard_pending flag!
-                        if st.button("↩️ Cancel", key="cancel_delete_areas_btn", type="secondary", use_container_width=True, help="Uncheck all and cancel deletion"):
+                    # If deleting last area(s), show special prompt
+                    if remaining_areas == 0:
+                        st.warning("🚨 **WARNING: This will delete your ENTIRE structure!**")
+                        st.markdown("**What would you like to do after deletion?**")
+                        
+                        # Radio button for user choice
+                        deletion_choice = st.radio(
+                            "Choose one:",
+                            options=[
+                                "Cancel - don't delete",
+                                "Keep empty database (no data, no structure)",
+                                "Delete and recreate Default structure"
+                            ],
+                            key="last_area_deletion_choice",
+                            help="Decide what happens after deleting all areas"
+                        )
+                        
+                        # Action buttons based on choice
+                        if deletion_choice == "Cancel - don't delete":
+                            st.info("💡 Click the Cancel button below to uncheck all and return.")
+                        else:
+                            # Confirm deletion
+                            col1, col2 = st.columns([3, 1])
+                            with col1:
+                                del_confirm = st.text_input(
+                                    "Type 'DELETE' to confirm this action",
+                                    key="delete_last_area_confirm",
+                                    help="This cannot be undone!"
+                                )
+                            with col2:
+                                if st.button(
+                                    "❌ Confirm Delete",
+                                    key="delete_last_areas_btn",
+                                    disabled=(del_confirm != "DELETE"),
+                                    use_container_width=True
+                                ):
+                                    with st.spinner("Deleting areas..."):
+                                        # Delete all marked areas
+                                        deleted_count = 0
+                                        for idx in areas_to_delete.index:
+                                            area_id = area_full_df.loc[idx, '_area_id']
+                                            success, msg = delete_area(client, user_id, area_id)
+                                            if success:
+                                                deleted_count += 1
+                                            else:
+                                                st.error(msg)
+                                        
+                                        if deleted_count > 0:
+                                            st.success(f"✅ Deleted {deleted_count} area(s)")
+                                            
+                                            # Handle user's choice
+                                            if deletion_choice == "Keep empty database (no data, no structure)":
+                                                # Set flag to skip bootstrap
+                                                st.session_state.user_wants_empty_db = True
+                                                st.info("ℹ️ Database is now empty. You can create new structure anytime.")
+                                            
+                                            elif deletion_choice == "Delete and recreate Default structure":
+                                                # Clear the skip bootstrap flag if it was set
+                                                st.session_state.user_wants_empty_db = False
+                                                st.info("♻️ Default structure will be recreated automatically...")
+                                            
+                                            # Clear cache and reload
+                                            st.cache_data.clear()
+                                            st.session_state.original_df = None
+                                            st.session_state.edited_df = None
+                                            time_module.sleep(1.5)  # Brief pause to show messages
+                                            st.rerun()
+                        
+                        # Cancel button (always available)
+                        if st.button(
+                            "↩️ Cancel",
+                            key="cancel_delete_last_areas_btn",
+                            type="secondary",
+                            use_container_width=True,
+                            help="Uncheck all and cancel deletion"
+                        ):
                             st.cache_data.clear()
                             st.session_state.edited_df = None
                             st.session_state.original_df = None
-                            state_mgr.discard_changes()  # CRITICAL: Sets discard_pending flag!
+                            state_mgr.discard_changes()
                             st.rerun()
+                    
+                    else:
+                        # Normal deletion (not last area) - existing code
+                        # Show warnings for each area
+                        for idx in areas_to_delete.index:
+                            area_id = area_full_df.loc[idx, '_area_id']
+                            has_deps, warning = check_area_has_dependencies(client, area_id, user_id)
+                            if has_deps:
+                                st.warning(warning)
+                        
+                        col1, col2, col3 = st.columns([3, 1, 1])
+                        with col1:
+                            del_confirm = st.text_input("Type 'DELETE' to confirm deletion", key="delete_area_confirm")
+                        with col2:
+                            if st.button("❌ Delete Marked", key="delete_areas_btn", disabled=(del_confirm != "DELETE"), use_container_width=True):
+                                with st.spinner("Deleting areas..."):
+                                    deleted_count = 0
+                                    for idx in areas_to_delete.index:
+                                        area_id = area_full_df.loc[idx, '_area_id']
+                                        success, msg = delete_area(client, user_id, area_id)
+                                        if success:
+                                            deleted_count += 1
+                                        else:
+                                            st.error(msg)
+                                    
+                                    if deleted_count > 0:
+                                        st.success(f"✅ Deleted {deleted_count} area(s)")
+                                        st.cache_data.clear()
+                                        st.session_state.original_df = None
+                                        st.session_state.edited_df = None
+                                        st.rerun()
+                        with col3:
+                            # v1.11.0: Cancel button - uncheck all and refresh
+                            # v1.11.4: Must use state_mgr.discard_changes() to set discard_pending flag!
+                            if st.button("↩️ Cancel", key="cancel_delete_areas_btn", type="secondary", use_container_width=True, help="Uncheck all and cancel deletion"):
+                                st.cache_data.clear()
+                                st.session_state.edited_df = None
+                                st.session_state.original_df = None
+                                state_mgr.discard_changes()  # CRITICAL: Sets discard_pending flag!
+                                st.rerun()
                 
                 st.markdown("---")
                 
