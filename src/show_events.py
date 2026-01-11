@@ -2,9 +2,9 @@
 Events Tracker - Show Events Module
 ====================================
 Created: 2025-12-15 09:45 UTC
-Last Modified: 2025-01-08 11:25 UTC
+Last Modified: 2025-01-11 11:30 UTC
 Python: 3.11
-Version: 2.5.2 - Validation warnings display
+Version: 2.6.0 - Bootstrap System Integration
 
 Description:
 View, edit, and delete events with:
@@ -16,6 +16,12 @@ View, edit, and delete events with:
 - Category_Path display (ISV-style)
 - Attribute value formatting by type
 - Excel Export/Import with unified format (Master Plan V2)
+
+CHANGELOG v2.6.0:
+- ✨ NEW: Bootstrap system integration
+  - Auto-creates default structure if empty database
+  - Eliminates empty database UX catch-22
+  - Seamless first-time user experience
 
 CHANGELOG v2.5.2:
 - ✅ NEW: Display validation warnings from Excel import
@@ -80,6 +86,10 @@ import streamlit as st
 from datetime import datetime, date, time, timedelta
 from typing import Dict, List, Optional, Tuple
 import pandas as pd
+import time as time_module  # For sleep in bootstrap
+
+# Import bootstrap function
+from src.interactive_structure_viewer import create_bootstrap_structure
 
 # Import Excel I/O module
 from src.excel_events_io import (
@@ -641,9 +651,22 @@ def render_show_events(client, user_id: str):
     areas = load_areas(client, user_id)
     all_categories = load_all_categories_with_paths(client, user_id)
     
+    # v1.13.0: Bootstrap system - auto-create default structure if empty
     if not areas:
-        st.warning("No areas defined. Please create structure first.")
-        return
+        st.info("🔧 First time here? Creating default structure for you...")
+        
+        success, message = create_bootstrap_structure(client, user_id)
+        
+        if success:
+            st.success(message)
+            st.info("🎉 You can now start using the app! Feel free to customize or delete the default structure.")
+            # Brief pause to show messages, then reload
+            time_module.sleep(1.5)
+            st.rerun()
+        else:
+            st.error(message)
+            st.warning("⚠️ Please try refreshing the page or contact support.")
+            return
     
     # ─────────────────────────────────────────
     # FILTERS ROW

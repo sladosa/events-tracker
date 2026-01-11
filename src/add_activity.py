@@ -2,9 +2,9 @@
 Events Tracker - Add Activity Module
 =====================================
 Created: 2025-12-13 15:00 UTC
-Last Modified: 2025-01-10 09:30 UTC
+Last Modified: 2025-01-11 11:30 UTC
 Python: 3.11
-Version: 2.3.4 - Fixed Category Selectbox Overwrite Bug
+Version: 2.4.0 - Bootstrap System Integration
 
 Description:
 Mobile-first activity entry form with:
@@ -14,6 +14,12 @@ Mobile-first activity entry form with:
 - Optimized layout for minimal scrolling
 - Photo attachments via Supabase Storage
 
+
+CHANGELOG v2.4.0:
+- ✨ NEW: Bootstrap system integration
+  - Auto-creates default structure if empty database
+  - Eliminates empty database UX catch-22
+  - Seamless first-time user experience
 
 CHANGELOG v2.3.4:
 - 🐛 CRITICAL FIX: Area selectbox now updates correctly when selecting shortcuts
@@ -86,6 +92,10 @@ import streamlit as st
 from datetime import datetime, date, time, timedelta
 from typing import Dict, List, Optional, Tuple
 import uuid
+import time as time_module  # For sleep in bootstrap
+
+# Import bootstrap function
+from src.interactive_structure_viewer import create_bootstrap_structure
 
 
 # ============================================
@@ -992,9 +1002,22 @@ def render_add_activity(client, user_id: str):
     areas = load_areas(client, user_id)
     shortcuts = load_shortcuts(client, user_id)
     
+    # v1.13.0: Bootstrap system - auto-create default structure if empty
     if not areas:
-        st.warning("No areas defined. Please create structure first in Interactive Structure Viewer.")
-        return
+        st.info("🔧 First time here? Creating default structure for you...")
+        
+        success, message = create_bootstrap_structure(client, user_id)
+        
+        if success:
+            st.success(message)
+            st.info("🎉 You can now start using the app! Feel free to customize or delete the default structure.")
+            # Brief pause to show messages, then reload
+            time_module.sleep(1.5)
+            st.rerun()
+        else:
+            st.error(message)
+            st.warning("⚠️ Please try refreshing the page or contact support.")
+            return
     
     # ─────────────────────────────────────────
     # CHECK IF WORKFLOW IS ACTIVE

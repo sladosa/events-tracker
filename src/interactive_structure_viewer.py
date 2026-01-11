@@ -2,9 +2,18 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-12-18 19:30 UTC
+Last Modified: 2025-01-11 11:30 UTC
 Python: 3.11
-Version: 1.12.11 - T1 Cleanup: Removed icon/color from Areas
+Version: 1.13.0 - Bootstrap System: Auto-create default structure
+
+CHANGELOG v1.13.0 (Bootstrap System):
+- ✨ NEW: Auto-bootstrap for empty database
+  - Automatically creates "Default" Area + Category + Attribute
+  - Creates initial event: "System initialized at {timestamp}"
+  - Eliminates empty database UX catch-22
+  - User can immediately start using the app
+- 🛡️ SAFETY: Bootstrap only runs if ZERO areas exist
+- 🎯 IMPACT: New users no longer stuck at "upload template first" screen
 
 CHANGELOG v1.12.11 (T1 Areas Cleanup):
 - 🗑️ REMOVED: icon and color fields from Areas
@@ -670,11 +679,12 @@ import streamlit as st
 import pandas as pd
 from typing import Dict, List, Optional, Tuple, Any
 import json
-from datetime import datetime
+from datetime import datetime, date
 import uuid
 import re
 import os
 import tempfile
+import time  # For sleep in bootstrap
 
 # Import State Machine (minimal integration)
 from .state_machine import StateManager
@@ -917,6 +927,104 @@ def load_all_structure_data(_client, user_id: str) -> Tuple[List[Dict], List[Dic
 # ============================================
 # DATA TRANSFORMATION
 # ============================================
+
+def create_bootstrap_structure(client, user_id: str) -> Tuple[bool, str]:
+    """
+    Create default bootstrap structure for new users with empty database.
+    
+    This eliminates the empty database UX catch-22 where users can't upload
+    templates because they need the Edit Mode, but can't access Edit Mode
+    without existing structure.
+    
+    Creates:
+    - Area: "Default"
+    - Category: "Default" (under Default area)
+    - Attribute: "note" (text type, under Default category)
+    - Event: "System initialized at {timestamp}"
+    
+    Args:
+        client: Supabase client instance
+        user_id: Current user's UUID
+    
+    Returns:
+        Tuple of (success: bool, message: str)
+    """
+    try:
+        # Double-check that no areas exist (safety check)
+        existing_areas = client.table('areas').select('id').eq('user_id', user_id).limit(1).execute()
+        if existing_areas.data and len(existing_areas.data) > 0:
+            return False, "⚠️ Areas already exist - bootstrap not needed"
+        
+        # 1. Create Default Area
+        area_id = str(uuid.uuid4())
+        area_data = {
+            'id': area_id,
+            'user_id': user_id,
+            'name': 'Default',
+            'slug': 'default',
+            'sort_order': 1,
+            'description': 'Default area created by system'
+        }
+        client.table('areas').insert(area_data).execute()
+        
+        # 2. Create Default Category
+        category_id = str(uuid.uuid4())
+        category_data = {
+            'id': category_id,
+            'user_id': user_id,
+            'area_id': area_id,
+            'parent_category_id': None,
+            'name': 'Default',
+            'slug': 'default',
+            'level': 1,
+            'sort_order': 1,
+            'description': 'Default category created by system'
+        }
+        client.table('categories').insert(category_data).execute()
+        
+        # 3. Create Default Attribute
+        attribute_id = str(uuid.uuid4())
+        attribute_data = {
+            'id': attribute_id,
+            'user_id': user_id,
+            'category_id': category_id,
+            'name': 'note',
+            'slug': 'note',
+            'data_type': 'text',
+            'is_required': False,
+            'sort_order': 1,
+            'description': 'Default text attribute for notes'
+        }
+        client.table('attribute_definitions').insert(attribute_data).execute()
+        
+        # 4. Create initial event
+        from datetime import date
+        event_id = str(uuid.uuid4())
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        event_data = {
+            'id': event_id,
+            'user_id': user_id,
+            'category_id': category_id,
+            'event_date': date.today().isoformat(),
+            'comment': f'System initialized at {current_time}'
+        }
+        event_result = client.table('events').insert(event_data).execute()
+        
+        # 5. Add attribute value for the event
+        if event_result.data and len(event_result.data) > 0:
+            event_attr_data = {
+                'event_id': event_id,
+                'attribute_definition_id': attribute_id,
+                'user_id': user_id,
+                'value_text': 'Welcome to Events Tracker! You can now start building your structure.'
+            }
+            client.table('event_attributes').insert(event_attr_data).execute()
+        
+        return True, "✅ Bootstrap structure created successfully!"
+    
+    except Exception as e:
+        return False, f"❌ Error creating bootstrap structure: {str(e)}"
+
 
 def load_structure_as_dataframe(client, user_id: str) -> pd.DataFrame:
     """
@@ -2282,9 +2390,32 @@ def render_interactive_structure_viewer(client, user_id: str):
     with st.spinner("Loading structure..."):
         df = load_structure_as_dataframe(client, user_id)
     
+    # v1.13.0: Bootstrap system - auto-create default structure if empty
     if df.empty:
-        st.warning("⚠️ No structure defined yet. Please upload a template first.")
-        return
+        # Check if bootstrap is needed (no areas exist)
+        areas_check = client.table('areas').select('id').eq('user_id', user_id).limit(1).execute()
+        
+        if not areas_check.data or len(areas_check.data) == 0:
+            # No structure exists - create bootstrap
+            st.info("🔧 First time here? Creating default structure for you...")
+            
+            success, message = create_bootstrap_structure(client, user_id)
+            
+            if success:
+                st.success(message)
+                st.info("🎉 You can now start using the app! Feel free to customize or delete the default structure.")
+                # Clear cache and reload
+                st.cache_data.clear()
+                time.sleep(1.5)  # Brief pause to show messages
+                st.rerun()
+            else:
+                st.error(message)
+                st.warning("⚠️ Please try refreshing the page or contact support.")
+                return
+        else:
+            # Areas exist but DataFrame is empty (shouldn't happen, but handle gracefully)
+            st.warning("⚠️ No structure defined yet. Please upload a template first.")
+            return
     
     # Store original dataframe
     if st.session_state.original_df is None:

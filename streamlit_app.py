@@ -2,14 +2,20 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-07 17:45 UTC
+Last Modified: 2025-01-11 11:30 UTC
 Python: 3.11
-Version: 2.0.0 - Unified Excel Export/Import in Show Events
+Version: 2.1.0 - Bootstrap System for Empty Database
 
 Description:
 Main Streamlit application with authentication and multiple pages.
 Core modules: Interactive Structure Viewer (main hub), Add Activity,
 Show Events (with integrated Excel Export/Import).
+
+NEW in v2.1.0:
+- 🚀 Bootstrap System: Auto-creates default structure for new users
+  - Eliminates empty database UX catch-22
+  - Creates Default Area → Category → Attribute + initial event
+  - Seamless first-time user experience across all modules
 
 NEW in v2.0.0:
 - 📥📤 Unified Excel Export/Import integrated into Show Events
@@ -19,6 +25,7 @@ NEW in v2.0.0:
 - 🎨 Show Events toolbar now has: Edit | Delete | Export | Import
 
 CHANGELOG:
+- v2.1.0: Bootstrap system for empty database UX
 - v2.0.0: Unified Excel Export/Import, removed obsolete pages
 - v1.9.0: Add Activity Workflow + Show Events Table View
 - v1.8.0: Show Events + Remove Add Event
@@ -362,7 +369,7 @@ def render_help_page():
     
     # Version info
     st.markdown("---")
-    st.caption("Version: 2.0.0 | 2025-01-07 | Python: 3.11 | Streamlit: 1.28.0")
+    st.caption("Version: 2.1.0 | 2025-01-11 | Python: 3.11 | Streamlit: 1.28.0")
 
 
 if __name__ == "__main__":
