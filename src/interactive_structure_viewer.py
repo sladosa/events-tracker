@@ -2,9 +2,18 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-01-11 16:00 UTC
+Last Modified: 2025-01-11 16:30 UTC
 Python: 3.11
-Version: 1.13.2 - Last Area Deletion Prompt
+Version: 1.13.3 - HOTFIX: Text Input State Issue
+
+CHANGELOG v1.13.3 (HOTFIX - Critical):
+- 🐛 CRITICAL FIX: Apply Changes button stayed disabled
+  - ROOT CAUSE: st.text_input doesn't trigger rerun on value change
+  - User types "CONFIRM" but button remains disabled due to stale state
+  - SOLUTION: Added `on_change=lambda: None` to force rerun
+  - Fixed in 5 places: CONFIRM input + 4x DELETE inputs
+- ✅ Now works: Type CONFIRM → Button enables immediately!
+- 🎯 IMPACT: Excel Upload Apply Changes now works correctly
 
 CHANGELOG v1.13.2 (Last Area Deletion Prompt):
 - ✨ NEW: Prompt when deleting last Area(s)
@@ -2949,7 +2958,8 @@ def render_interactive_structure_viewer(client, user_id: str):
                                 del_confirm = st.text_input(
                                     "Type 'DELETE' to confirm this action",
                                     key="delete_last_area_confirm",
-                                    help="This cannot be undone!"
+                                    help="This cannot be undone!",
+                                    on_change=lambda: None  # Force rerun on text change
                                 )
                             with col2:
                                 if st.button(
@@ -3015,7 +3025,11 @@ def render_interactive_structure_viewer(client, user_id: str):
                         
                         col1, col2, col3 = st.columns([3, 1, 1])
                         with col1:
-                            del_confirm = st.text_input("Type 'DELETE' to confirm deletion", key="delete_area_confirm")
+                            del_confirm = st.text_input(
+                                "Type 'DELETE' to confirm deletion",
+                                key="delete_area_confirm",
+                                on_change=lambda: None  # Force rerun on text change
+                            )
                         with col2:
                             if st.button("❌ Delete Marked", key="delete_areas_btn", disabled=(del_confirm != "DELETE"), use_container_width=True):
                                 with st.spinner("Deleting areas..."):
@@ -3229,7 +3243,11 @@ def render_interactive_structure_viewer(client, user_id: str):
                         
                         col1, col2, col3 = st.columns([3, 1, 1])
                         with col1:
-                            del_confirm = st.text_input("Type 'DELETE' to confirm deletion", key="delete_cat_confirm")
+                            del_confirm = st.text_input(
+                                "Type 'DELETE' to confirm deletion",
+                                key="delete_cat_confirm",
+                                on_change=lambda: None  # Force rerun on text change
+                            )
                         with col2:
                             if st.button("❌ Delete Marked", key="delete_cats_btn", disabled=(del_confirm != "DELETE"), use_container_width=True):
                                 with st.spinner("Deleting categories..."):
@@ -3771,7 +3789,11 @@ def render_interactive_structure_viewer(client, user_id: str):
                         
                         col1, col2, col3 = st.columns([3, 1, 1])
                         with col1:
-                            del_confirm = st.text_input("Type 'DELETE' to confirm deletion", key="delete_attr_confirm")
+                            del_confirm = st.text_input(
+                                "Type 'DELETE' to confirm deletion",
+                                key="delete_attr_confirm",
+                                on_change=lambda: None  # Force rerun on text change
+                            )
                         with col2:
                             if st.button("❌ Delete Marked", key="delete_attrs_btn", disabled=(del_confirm != "DELETE"), use_container_width=True):
                                 with st.spinner("Deleting attributes..."):
@@ -4308,7 +4330,8 @@ def render_interactive_structure_viewer(client, user_id: str):
                                 "Type 'CONFIRM' to apply changes:",
                                 placeholder="CONFIRM",
                                 help="Type CONFIRM in all caps to enable the Apply button",
-                                key="isv_confirm_text"
+                                key="isv_confirm_text",
+                                on_change=lambda: None  # Force rerun on text change
                             )
                         
                         with col2:
