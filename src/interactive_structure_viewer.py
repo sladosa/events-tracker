@@ -2,9 +2,19 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-01-11 11:30 UTC
+Last Modified: 2025-01-11 15:15 UTC
 Python: 3.11
-Version: 1.13.0 - Bootstrap System: Auto-create default structure
+Version: 1.13.1 - HOTFIX: Fixed time import namespace conflict
+
+CHANGELOG v1.13.1 (HOTFIX):
+- 🐛 CRITICAL FIX: UnboundLocalError on time.sleep()
+  - ROOT CAUSE: Local `import time` at line 4201 caused namespace conflict
+  - Python treated `time` as local variable throughout entire function
+  - Using `time.sleep()` before local import triggered UnboundLocalError
+  - SOLUTION: Changed to `import time as time_module` (consistent with other modules)
+  - Removed local `import time` at line 4201
+  - All `time.sleep()` changed to `time_module.sleep()`
+- ✅ Bootstrap now works correctly without crashing!
 
 CHANGELOG v1.13.0 (Bootstrap System):
 - ✨ NEW: Auto-bootstrap for empty database
@@ -684,7 +694,7 @@ import uuid
 import re
 import os
 import tempfile
-import time  # For sleep in bootstrap
+import time as time_module  # For sleep in bootstrap
 
 # Import State Machine (minimal integration)
 from .state_machine import StateManager
@@ -2406,7 +2416,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                 st.info("🎉 You can now start using the app! Feel free to customize or delete the default structure.")
                 # Clear cache and reload
                 st.cache_data.clear()
-                time.sleep(1.5)  # Brief pause to show messages
+                time_module.sleep(1.5)  # Brief pause to show messages
                 st.rerun()
             else:
                 st.error(message)
@@ -4198,8 +4208,7 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     
                                     # Show success message and auto-rerun
                                     st.info("🔄 Refreshing to show updated data...")
-                                    import time
-                                    time.sleep(1)  # Brief pause so user sees success message
+                                    time_module.sleep(1)  # Brief pause so user sees success message
                                     st.rerun()
                                 else:
                                     st.error(f"❌ {message}")
