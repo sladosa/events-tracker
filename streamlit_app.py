@@ -2,16 +2,25 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-11 16:30 UTC
+Last Modified: 2025-01-12 11:00 UTC
 Python: 3.11
-Version: 2.1.3 - HOTFIX: Text Input State Issue
+Version: 2.2.0 - Excel Export/Import V2.5.0
 
 Description:
 Main Streamlit application with authentication and multiple pages.
 Core modules: Interactive Structure Viewer (main hub), Add Activity,
 Show Events (with integrated Excel Export/Import).
 
-NEW in v2.1.3 (HOTFIX):
+NEW in v2.2.0:
+- 📊 EXCEL EXPORT/IMPORT V2.5.0: Major improvements
+  - ⏰ TIME column added (session_start, default 09:00)
+  - 🌳 Parent category attributes included (e.g., Cardio attrs for Running events)
+  - 🏷️ Clear attribute names with "(Category)" suffix in headers
+  - 📈 Hierarchical sorting (parents before children)
+  - ✅ All inherited attributes are editable (blue)
+- 🎨 Improved Excel format clarity and consistency
+
+PREVIOUS v2.1.3 (HOTFIX):
 - 🐛 Fixed: CONFIRM/DELETE inputs not enabling buttons
   - Added on_change callbacks to force rerun
   - Excel Upload Apply Changes now works correctly
@@ -390,7 +399,7 @@ def render_help_page():
     
     # Version info
     st.markdown("---")
-    st.caption("Version: 2.1.3 | 2025-01-11 | Python: 3.11 | Streamlit: 1.28.0")
+    st.caption("Version: 2.2.0 | 2025-01-12 | Python: 3.11 | Streamlit: 1.28.0")
 
 
 if __name__ == "__main__":

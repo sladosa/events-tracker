@@ -1,26 +1,40 @@
 """
-Events Tracker - Unified Excel Events I/O Module V2.4.6
+Events Tracker - Unified Excel Events I/O Module V2.5.0
 ========================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-10 12:00 UTC
+Last Modified: 2025-01-12 11:00 UTC
 Python: 3.11
-Version: 2.4.8
+Version: 2.5.0
 
 Description:
 Unified Excel Export/Import for events with enhanced formatting and LEGEND-BASED import.
 
+NEW in V2.5.0 - MAJOR RESTRUCTURE:
+- 🎯 HIERARCHICAL ATTRIBUTE SORTING: Attributes sorted by category level → sort_order
+  - Parent categories first (e.g., Cardio before Cardio > Running)
+  - Sub-categories follow their parents in tree order
+  - Matches Interactive Structure Viewer display order
+- 🌳 PARENT ATTRIBUTES INCLUDED: Export includes all parent category attributes
+  - Running events now show Cardio parent attributes (total_duration, avg_hr, etc.)
+  - All parent attributes are EDITABLE (blue) for child category events
+  - Enables full data entry for inherited attributes
+- 🏷️ UNIQUE ATTRIBUTE IDENTIFICATION: Handles duplicate attribute names correctly
+  - Uses (category_path, attr_name) as unique key internally
+  - LEGEND shows full Category_Path for each attribute
+  - EVENT DATA headers show "attr_name (Category)" format
+  - No more missing attributes due to name collisions!
+- ⏰ TIME COLUMN ADDED: New session_start column for event time
+  - Column after event_date, before comment
+  - Default value: 09:00 if not specified
+  - Format: HH:MM (24-hour)
+  - Stored as timestamp in database
+- 🎨 IMPROVED LEGEND CLARITY: Category_Path explicitly shown
+  - "Cardio" vs "Cardio > Running" clearly distinguished
+  - Easier to understand which attributes belong where
 
-NEW in V2.4.8:
+PREVIOUS V2.4.8:
 - 🎯 PROPER FIX: Excel date column uses DATE format (not TEXT!)
-  - PROBLEM: V2.4.7 used TEXT format (@) - lost Excel date functionality
-  - INSIGHT: Excel stores dates as numbers, format is just display
-  - SOLUTION: Store as Python date object + format 'YYYY-MM-DD'
-  - BONUS: Flexible parsing for string dates (Croatian/ISO/US formats)
-  - RESULT: Sorting works, formulas work, consistent ISO display!
 - 🎨 FIXED: Number attributes right-aligned based on data_type
-  - Check attribute definition data_type (not isinstance)
-  - All number columns consistently right-aligned
-  - Professional appearance
 
 NEW in V2.4.6:
 - 🎯 SMART VALIDATION: Auto-reclassify invalid event_ids to CREATE (no manual cleanup!)
@@ -154,9 +168,9 @@ OUTER_BORDER = Border(
 )
 
 # Fixed columns for EVENT DATA (before attributes)
-FIXED_COLUMNS = ['event_id', 'Area', 'Category_Path', 'event_date', 'comment']
+FIXED_COLUMNS = ['event_id', 'Area', 'Category_Path', 'event_date', 'session_start', 'comment']
 FIXED_COL_COUNT = len(FIXED_COLUMNS)
-PADDING_COLS = 4  # Empty columns after comment for grouping padding
+PADDING_COLS = 3  # Empty columns after comment for grouping padding
 
 # Legend columns
 LEGEND_COLUMNS = ['Col', 'Area', 'Category_Path', 'Attribute', 'Type', 'Default', 'Min', 'Max', 'Unit']
@@ -232,22 +246,78 @@ def get_category_ids_for_area(client, user_id: str, area_id: str) -> List[str]:
         return []
 
 
+def get_category_ids_with_parents(categories_dict: Dict[str, Dict], category_ids: List[str]) -> List[str]:
+    """
+    Get category IDs including all parent categories in their paths.
+    
+    V2.5.0: This ensures we load attributes from parent categories too.
+    Example: For "Cardio > Running", also include "Cardio" attributes.
+    
+    Args:
+        categories_dict: Dict mapping category_id to category info (with parent_category_id)
+        category_ids: List of current category IDs
+    
+    Returns:
+        List of category IDs including all parents
+    """
+    all_ids = set(category_ids)
+    
+    for cat_id in category_ids:
+        cat = categories_dict.get(cat_id)
+        # Walk up the parent chain
+        while cat and cat.get('parent_category_id'):
+            parent_id = cat['parent_category_id']
+            all_ids.add(parent_id)
+            cat = categories_dict.get(parent_id)
+    
+    return list(all_ids)
+
+
 def load_attribute_definitions_for_categories(
     client, user_id: str, category_ids: List[str]
 ) -> List[Dict]:
-    """Load all attribute definitions for given categories."""
+    """
+    Load all attribute definitions for given categories, sorted hierarchically.
+    
+    V2.5.0: Sort by category level → category sort_order → attribute sort_order
+    This ensures parent categories appear before children in LEGEND and columns.
+    """
     if not category_ids:
         return []
     
     try:
-        resp = client.table('attribute_definitions') \
+        # STEP 1: Load categories with level and sort_order for sorting
+        cats_resp = client.table('categories') \
+            .select('id, level, sort_order') \
+            .eq('user_id', user_id) \
+            .in_('id', category_ids) \
+            .execute()
+        
+        cats_dict = {c['id']: c for c in (cats_resp.data or [])}
+        
+        # STEP 2: Load attribute definitions
+        attrs_resp = client.table('attribute_definitions') \
             .select('id, category_id, name, data_type, unit, is_required, default_value, validation_rules, sort_order') \
             .eq('user_id', user_id) \
             .in_('category_id', category_ids) \
-            .order('category_id') \
-            .order('sort_order') \
             .execute()
-        return resp.data or []
+        
+        attrs = attrs_resp.data or []
+        
+        # STEP 3: Sort by category hierarchy, then attribute sort_order
+        def sort_key(attr):
+            cat_id = attr.get('category_id')
+            cat = cats_dict.get(cat_id, {})
+            return (
+                cat.get('level', 999),        # Level first (parent categories first)
+                cat.get('sort_order', 999),   # Category sort_order within same level
+                attr.get('sort_order', 999)   # Attribute sort_order within category
+            )
+        
+        attrs.sort(key=sort_key)
+        
+        return attrs
+        
     except Exception:
         return []
 
@@ -258,9 +328,9 @@ def load_events_for_export(
     date_from: Optional[date] = None,
     date_to: Optional[date] = None
 ) -> List[Dict]:
-    """Load events with their attributes for export."""
+    """Load events with their attributes for export. V2.5.0: includes session_start."""
     try:
-        select_fields = 'id, category_id, event_date, comment, event_attributes(id, attribute_definition_id, value_text, value_number, value_datetime, value_boolean)'
+        select_fields = 'id, category_id, event_date, session_start, comment, event_attributes(id, attribute_definition_id, value_text, value_number, value_datetime, value_boolean)'
         
         query = client.table('events') \
             .select(select_fields) \
@@ -303,15 +373,16 @@ def create_events_excel_v2(
     attribute_definitions: List[Dict],
     categories_dict: Dict[str, Dict]
 ) -> bytes:
-    """Create Excel file with enhanced V2 format."""
+    """Create Excel file with enhanced V2.5 format."""
     
     wb = Workbook()
     ws = wb.active
     ws.title = "Events"
     
     # Build attribute info and determine columns
+    # V2.5.0: attr_columns now contains (category_path, attr_name, attr_def_id) tuples for uniqueness
     attr_info = {}  # attr_def_id -> {name, category_path, area_name, data_type, ...}
-    attr_columns = []  # Ordered list of attribute names
+    attr_columns = []  # Ordered list of (category_path, attr_name, attr_def_id) tuples
     attr_by_category = {}  # category_id -> set of attr_def_ids
     
     for attr_def in attribute_definitions:
@@ -319,11 +390,15 @@ def create_events_excel_v2(
         cat_info = categories_dict.get(cat_id, {})
         validation = parse_validation_rules(attr_def.get('validation_rules'))
         
-        attr_info[attr_def['id']] = {
-            'id': attr_def['id'],
-            'name': attr_def['name'],
+        category_path = cat_info.get('full_path', 'Unknown')
+        attr_name = attr_def['name']
+        attr_def_id = attr_def['id']
+        
+        attr_info[attr_def_id] = {
+            'id': attr_def_id,
+            'name': attr_name,
             'category_id': cat_id,
-            'category_path': cat_info.get('full_path', 'Unknown'),
+            'category_path': category_path,
             'area_name': cat_info.get('area_name', 'Unknown'),
             'data_type': attr_def.get('data_type', 'text'),
             'unit': attr_def.get('unit', ''),
@@ -332,13 +407,15 @@ def create_events_excel_v2(
             'max': validation.get('max', '')
         }
         
-        attr_name = attr_def['name']
-        if attr_name not in attr_columns:
-            attr_columns.append(attr_name)
+        # V2.5.0: Use (category_path, attr_name, attr_def_id) as unique key
+        # This prevents losing attributes with duplicate names from different categories
+        attr_unique_key = (category_path, attr_name, attr_def_id)
+        if attr_unique_key not in attr_columns:
+            attr_columns.append(attr_unique_key)
         
         if cat_id not in attr_by_category:
             attr_by_category[cat_id] = set()
-        attr_by_category[cat_id].add(attr_def['id'])
+        attr_by_category[cat_id].add(attr_def_id)
     
     # Build category -> attr_names mapping for orange highlighting
     cat_to_attr_names = {}
@@ -374,13 +451,10 @@ def create_events_excel_v2(
     attr_col_start = FIXED_COL_COUNT + PADDING_COLS + 1
     
     # First pass: write all legend data
+    # V2.5.0: attr_columns now contains (category_path, attr_name, attr_def_id) tuples
     legend_rows = []
-    for idx, attr_name in enumerate(attr_columns):
-        attr_def = next((ad for ad in attribute_definitions if ad['name'] == attr_name), None)
-        if not attr_def:
-            continue
-        
-        info = attr_info.get(attr_def['id'], {})
+    for idx, (category_path, attr_name, attr_def_id) in enumerate(attr_columns):
+        info = attr_info.get(attr_def_id, {})
         col_letter = get_column_letter(attr_col_start + idx)
         
         # Convert default, min, max to numbers if data_type is number
@@ -503,8 +577,18 @@ def create_events_excel_v2(
     row += 1
     
     # Header row
+    # V2.5.0: Build headers with "attr_name (Category)" format
     event_header_row = row
-    all_columns = FIXED_COLUMNS + [''] * PADDING_COLS + attr_columns
+    
+    # Create attribute header strings with category name for clarity
+    attr_header_strings = []
+    for category_path, attr_name, attr_def_id in attr_columns:
+        # Extract last part of category_path as short name
+        category_short = category_path.split(' > ')[-1] if ' > ' in category_path else category_path
+        header_str = f"{attr_name} ({category_short})"
+        attr_header_strings.append(header_str)
+    
+    all_columns = FIXED_COLUMNS + [''] * PADDING_COLS + attr_header_strings
     
     for col_idx, col_name in enumerate(all_columns, start=1):
         cell = ws.cell(row=row, column=col_idx, value=col_name)
@@ -525,17 +609,27 @@ def create_events_excel_v2(
         cat_id = event.get('category_id')
         cat_info = categories_dict.get(cat_id, {})
         
-        # Get set of relevant attribute names for this event's category
-        relevant_attrs = cat_to_attr_names.get(cat_id, set())
+        # V2.5.0: Get all relevant attribute IDs for this event's category
+        # Include attributes from this category AND all parent categories
+        relevant_attr_ids = set()
+        current_cat_id = cat_id
+        while current_cat_id:
+            if current_cat_id in attr_by_category:
+                relevant_attr_ids.update(attr_by_category[current_cat_id])
+            # Walk up to parent
+            cat = categories_dict.get(current_cat_id, {})
+            current_cat_id = cat.get('parent_category_id')
         
-        # Build attribute values dict
+        # Build attribute values dict: (category_path, attr_name, attr_def_id) -> value
         attr_values = {}
         for ea in event.get('event_attributes', []):
             attr_def_id = ea.get('attribute_definition_id')
             attr_inf = attr_info.get(attr_def_id, {})
-            attr_name = attr_inf.get('name')
             
-            if attr_name:
+            if attr_inf:
+                # Build key matching attr_columns format
+                key = (attr_inf['category_path'], attr_inf['name'], attr_def_id)
+                
                 value = None
                 if ea.get('value_number') is not None:
                     value = ea['value_number']
@@ -545,7 +639,7 @@ def create_events_excel_v2(
                     value = ea['value_datetime']
                 elif ea.get('value_text'):
                     value = ea['value_text']
-                attr_values[attr_name] = value
+                attr_values[key] = value
         
         # Fixed columns
         # V2.4.8: Convert event_date to Python date object for Excel
@@ -559,34 +653,55 @@ def create_events_excel_v2(
             event_date = event_date.date()
         # If already date object, keep it
         
+        # V2.5.0: Handle session_start (TIME column)
+        session_start = event.get('session_start', '')
+        if session_start:
+            # Parse timestamp to time
+            if isinstance(session_start, str):
+                try:
+                    dt = datetime.fromisoformat(session_start.replace('Z', '+00:00'))
+                    session_start = dt.strftime('%H:%M')
+                except:
+                    session_start = '09:00'  # Default
+            elif isinstance(session_start, datetime):
+                session_start = session_start.strftime('%H:%M')
+        else:
+            session_start = '09:00'  # Default if NULL
+        
         fixed_data = [
             event_id,
             cat_info.get('area_name', ''),
             cat_info.get('full_path', ''),
             event_date,
+            session_start,  # V2.5.0: TIME column
             event.get('comment', '') or ''
         ]
         
-        # Write fixed columns (A-D: event_id, Area, Category_Path, event_date)
-        for col_idx, value in enumerate(fixed_data[:4], start=1):
+        # Write fixed columns (A-E: event_id, Area, Category_Path, event_date, session_start)
+        for col_idx, value in enumerate(fixed_data[:5], start=1):
             cell = ws.cell(row=row, column=col_idx, value=value)
             cell.border = BORDER
             cell.alignment = Alignment(horizontal="left", vertical="center")
             
-            # Color: event_id, Area, Category_Path = PINK; event_date = BLUE
+            # Color: event_id(1), Area(2), Category_Path(3) = PINK; event_date(4), session_start(5) = BLUE
             if col_idx <= 3:
                 cell.fill = PINK_FILL
             else:
                 cell.fill = BLUE_FILL
             
-            # V2.4.8: Set Excel date format (ISO display)
+            # Set formats
             if col_idx == 4:  # event_date column
                 cell.number_format = 'YYYY-MM-DD'  # Excel DATE format with ISO display
+            elif col_idx == 5:  # session_start (TIME) column
+                cell.number_format = '@'  # Text format for HH:MM
         
-        # Comment column (E) with merge to I - merged cell for comment
-        comment_value = fixed_data[4]
-        ws.merge_cells(f'E{row}:I{row}')
-        comment_cell = ws.cell(row=row, column=5, value=comment_value)
+        # Comment column (F) with merge to padding columns (F:H after we reduced PADDING_COLS to 3)
+        # V2.5.0: Column indices shifted due to adding session_start
+        comment_value = fixed_data[5]
+        comment_start_col = 6  # Column F
+        comment_end_col = comment_start_col + PADDING_COLS  # Merge to col I (6+3-1=8, so F:I)
+        ws.merge_cells(f'{get_column_letter(comment_start_col)}{row}:{get_column_letter(comment_end_col)}{row}')
+        comment_cell = ws.cell(row=row, column=comment_start_col, value=comment_value)
         comment_cell.fill = BLUE_FILL
         comment_cell.border = BORDER
         
@@ -594,8 +709,8 @@ def create_events_excel_v2(
         # NO wrap_text by default - keeps rows consistent height
         comment_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=False)
         
-        # Apply border to ALL cells in merged range E-I
-        for col_idx in range(5, 10):  # E=5, F=6, G=7, H=8, I=9
+        # Apply border to ALL cells in merged range
+        for col_idx in range(comment_start_col, comment_end_col + 1):
             cell = ws.cell(row=row, column=col_idx)
             cell.border = BORDER
             cell.fill = BLUE_FILL
@@ -613,23 +728,25 @@ def create_events_excel_v2(
             ws.row_dimensions[row].height = 20 + (estimated_lines - 1) * 15
         
         # Attribute columns
-        for attr_idx, attr_name in enumerate(attr_columns):
+        # V2.5.0: Use (category_path, attr_name, attr_def_id) as key
+        for attr_idx, attr_key in enumerate(attr_columns):
             col_idx = attr_col_start + attr_idx
-            value = attr_values.get(attr_name, '')
+            category_path, attr_name, attr_def_id = attr_key
+            value = attr_values.get(attr_key, '')
             
             cell = ws.cell(row=row, column=col_idx, value=value if value is not None else '')
             cell.border = BORDER
             
-            # Color: ORANGE if not relevant, BLUE if relevant
-            if attr_name in relevant_attrs:
+            # Color: BLUE if attr belongs to this event's category or parent categories (relevant)
+            # ORANGE if not relevant
+            if attr_def_id in relevant_attr_ids:
                 cell.fill = BLUE_FILL
             else:
                 cell.fill = ORANGE_FILL
             
-            
             # V2.4.8: Check data_type for alignment
-            attr_def = next((ad for ad in attribute_definitions if ad['name'] == attr_name), None)
-            if attr_def and attr_def.get('data_type') == 'number':
+            attr_inf = attr_info.get(attr_def_id)
+            if attr_inf and attr_inf.get('data_type') == 'number':
                 cell.alignment = Alignment(horizontal="right", vertical="center")
                 if isinstance(value, (int, float)):
                     cell.number_format = '0.##'
@@ -644,10 +761,11 @@ def create_events_excel_v2(
     # SUBTOTAL FORMULAS
     # ─────────────────────────────────────────
     
-    for attr_idx, attr_name in enumerate(attr_columns):
-        # Find attr_def to check if it's a number type
-        attr_def = next((ad for ad in attribute_definitions if ad['name'] == attr_name), None)
-        if attr_def and attr_def.get('data_type') == 'number':
+    # V2.5.0: attr_columns now contains (category_path, attr_name, attr_def_id) tuples
+    for attr_idx, (category_path, attr_name, attr_def_id) in enumerate(attr_columns):
+        # Check if it's a number type
+        attr_inf = attr_info.get(attr_def_id)
+        if attr_inf and attr_inf.get('data_type') == 'number':
             col_idx = attr_col_start + attr_idx
             col_letter = get_column_letter(col_idx)
             
@@ -668,22 +786,24 @@ def create_events_excel_v2(
     # FREEZE PANES
     # ─────────────────────────────────────────
     
-    # Freeze below header row, after event_date column (E = column 5)
-    ws.freeze_panes = f"E{event_data_start_row}"
+    # V2.5.0: Freeze below header row, after session_start column (F = column 6)
+    ws.freeze_panes = f"G{event_data_start_row}"
     
     # ─────────────────────────────────────────
     # COLUMN WIDTHS
     # ─────────────────────────────────────────
     
+    # V2.5.0: Adjusted for new session_start (TIME) column
     ws.column_dimensions['A'].width = 10  # event_id (narrow)
     ws.column_dimensions['B'].width = 12  # Area
     ws.column_dimensions['C'].width = 30  # Category_Path
     ws.column_dimensions['D'].width = 12  # event_date
-    ws.column_dimensions['E'].width = 30  # comment
+    ws.column_dimensions['E'].width = 8   # session_start (TIME)
+    ws.column_dimensions['F'].width = 30  # comment (merged F:I)
     
-    # Padding columns
-    for i in range(PADDING_COLS):
-        ws.column_dimensions[get_column_letter(FIXED_COL_COUNT + 1 + i)].width = 3
+    # Padding columns (G-H are part of comment merge, I is last padding)
+    for i in range(1, PADDING_COLS):  # Columns G, H
+        ws.column_dimensions[get_column_letter(FIXED_COL_COUNT + i)].width = 3
     
     # Attribute columns
     for idx in range(len(attr_columns)):
@@ -713,9 +833,9 @@ def create_events_excel_v2(
 
 
 def _create_help_sheet_v2(ws):
-    """Create Help sheet with V2.4.5 instructions - Legend = Source of Truth."""
+    """Create Help sheet with V2.5.0 instructions."""
     instructions = [
-        ["EVENTS TRACKER - Excel Export/Import Help V2.4.5"],
+        ["EVENTS TRACKER - Excel Export/Import Help V2.5.0"],
         [""],
         ["🎯 IMPORTANT: ATTRIBUTE LEGEND = SOURCE OF TRUTH"],
         [""],
@@ -724,19 +844,46 @@ def _create_help_sheet_v2(ws):
         [""],
         ["═══════════════════════════════════════════════════════════════"],
         [""],
+        ["🆕 NEW IN V2.5.0:"],
+        [""],
+        ["✨ TIME Column (session_start) added after event_date"],
+        ["   - Default: 09:00 if not specified"],
+        ["   - Format: HH:MM (24-hour, e.g., 14:30)"],
+        ["   - Allows tracking multiple events per day"],
+        [""],
+        ["🌳 Parent Category Attributes Included"],
+        ["   - Running events now show Cardio parent attributes"],
+        ["   - All parent attributes are EDITABLE (blue)"],
+        ["   - Example: Running event shows distance, duration (Running) AND"],
+        ["     total_duration, avg_hr, max_hr, calories (Cardio parent)"],
+        [""],
+        ["🏷️ Clearer Attribute Names in Headers"],
+        ["   - Headers show 'attr_name (Category)' format"],
+        ["   - Example: 'distance (Running)', 'distance (Cycling)'"],
+        ["   - Prevents confusion with duplicate attribute names"],
+        [""],
+        ["📊 Hierarchical Sorting"],
+        ["   - Attributes sorted by category hierarchy"],
+        ["   - Parent categories appear before child categories"],
+        ["   - Matches Interactive Structure Viewer order"],
+        [""],
+        ["═══════════════════════════════════════════════════════════════"],
+        [""],
         ["📋 FILE STRUCTURE:"],
         [""],
         ["1. ATTRIBUTE LEGEND (top section)"],
         ["   - Col: Column letter (J, K, L...) for this attribute in EVENT DATA"],
         ["   - Area: Which area this attribute belongs to"],
-        ["   - Category_Path: Full category path"],
+        ["   - Category_Path: Full category path (e.g., 'Cardio > Running')"],
         ["   - Attribute: Attribute name"],
         ["   - Type/Default/Min/Max/Unit: Attribute properties"],
         ["   - Rows grouped (click +/- ABOVE group to expand/collapse)"],
         [""],
         ["2. EVENT DATA (bottom section)"],
         ["   - Your actual events with attribute values"],
-        ["   - Comment column merged (E:I) for more space"],
+        ["   - Fixed columns: event_id, Area, Category_Path, event_date, session_start"],
+        ["   - Comment column merged (F:I) for more space"],
+        ["   - Attribute columns start at J with 'name (Category)' headers"],
         ["   - AutoFilter enabled - click headers to filter"],
         ["   - Title row shows SUMs (respects filters)"],
         [""],
@@ -751,11 +898,12 @@ def _create_help_sheet_v2(ws):
         [""],
         ["🔵 BLUE = EDITABLE"],
         ["   - event_date: Date (YYYY-MM-DD format)"],
-        ["   - comment: Notes (merged E:I for space)"],
-        ["   - Attributes relevant for this category"],
+        ["   - session_start: Time (HH:MM, default 09:00)"],
+        ["   - comment: Notes (merged F:I for space)"],
+        ["   - Attributes relevant for this category AND parent categories"],
         [""],
         ["🟠 ORANGE = NOT RELEVANT"],
-        ["   - Attribute belongs to different category"],
+        ["   - Attribute belongs to different category (not in hierarchy)"],
         ["   - Can leave empty - will be ignored"],
         [""],
         ["═══════════════════════════════════════════════════════════════"],
@@ -764,15 +912,16 @@ def _create_help_sheet_v2(ws):
         [""],
         ["UPDATE EXISTING EVENTS:"],
         ["1. Find row with event_id filled (UUID in column A)"],
-        ["2. Change BLUE columns only (date, comment, attributes)"],
+        ["2. Change BLUE columns only (date, time, comment, attributes)"],
         ["3. Save and import"],
         [""],
         ["CREATE NEW EVENTS:"],
         ["1. Add row at bottom, leave event_id EMPTY"],
         ["2. Fill Area, Category_Path (must exist in your structure)"],
         ["3. Fill event_date (required, YYYY-MM-DD format)"],
-        ["4. Fill attribute values (only relevant ones)"],
-        ["5. Save and import"],
+        ["4. Fill session_start (optional, HH:MM format, defaults to 09:00)"],
+        ["5. Fill attribute values (only relevant ones - blue cells)"],
+        ["6. Save and import"],
         [""],
         ["═══════════════════════════════════════════════════════════════"],
         [""],
@@ -949,7 +1098,8 @@ def parse_events_excel_v2(file_bytes: bytes) -> Tuple[List[Dict], List[Dict], Di
         
         # Check if there are "orphan" columns in EVENT DATA (not in legend)
         # This is less critical but good to know
-        event_data_start_col = 10  # Column J (after comment merged E-I)
+        # V2.5.0: Column J starts attributes (after comment merged F-I)
+        event_data_start_col = 10  # Column J
         if ws.max_column > event_data_start_col:
             orphan_columns = []
             for col_idx in range(event_data_start_col, ws.max_column + 1):
@@ -986,11 +1136,11 @@ def parse_events_excel_v2(file_bytes: bytes) -> Tuple[List[Dict], List[Dict], Di
         header_row = event_data_row + 1
         
         # ─────────────────────────────────────────
-        # STEP 2.5: Validate LEGEND vs HEADERS (V2.4.5)
+        # STEP 2.5: Validate LEGEND vs HEADERS (V2.5.0 updated)
         # ─────────────────────────────────────────
-        # Check if actual headers in EVENT DATA match legend entries
+        # V2.5.0: Headers now have "attr_name (Category)" format
+        # Check if attribute name appears in header (flexible matching)
         # Legend = SOURCE OF TRUTH: User MUST update legend if columns change
-        # If mismatch found, REJECT import with clear instructions
         
         mismatch_errors = []
         
@@ -1002,12 +1152,16 @@ def parse_events_excel_v2(file_bytes: bytes) -> Tuple[List[Dict], List[Dict], Di
                     actual_header = ws.cell(row=header_row, column=col_idx).value
                     actual_header_str = str(actual_header).strip() if actual_header else ''
                     
-                    # Compare with expected attribute name from legend
-                    # Only flag if there's an actual header that doesn't match
-                    if actual_header_str and actual_header_str != attr_name:
-                        mismatch_errors.append(
-                            f"Col {col_letter}: Legend says '{attr_name}' but header shows '{actual_header_str}'"
-                        )
+                    # V2.5.0: Headers have "attr_name (Category)" format
+                    # Check if attr_name appears at start of header
+                    # This allows both old "attr_name" and new "attr_name (Category)" formats
+                    if actual_header_str:
+                        # Extract base name before any parentheses
+                        base_header = actual_header_str.split('(')[0].strip()
+                        if base_header != attr_name:
+                            mismatch_errors.append(
+                                f"Col {col_letter}: Legend says '{attr_name}' but header shows '{actual_header_str}'"
+                            )
             except Exception:
                 # Column letter invalid - already handled in previous validation
                 pass
@@ -1058,14 +1212,15 @@ def parse_events_excel_v2(file_bytes: bytes) -> Tuple[List[Dict], List[Dict], Di
             # Build row data
             row_data = {}
             
-            # Fixed columns (A-E)
+            # Fixed columns (A-F) - V2.5.0: Added session_start
             row_data['event_id'] = ws.cell(row=row_idx, column=1).value
             row_data['Area'] = ws.cell(row=row_idx, column=2).value
             row_data['Category_Path'] = ws.cell(row=row_idx, column=3).value
             row_data['event_date'] = ws.cell(row=row_idx, column=4).value
+            row_data['session_start'] = ws.cell(row=row_idx, column=5).value  # V2.5.0: TIME column
             
-            # Comment is merged E-I, read from E
-            row_data['comment'] = ws.cell(row=row_idx, column=5).value
+            # Comment is merged F-I, read from F (V2.5.0: column shifted due to session_start)
+            row_data['comment'] = ws.cell(row=row_idx, column=6).value
             
             # Attribute columns (mapped by legend)
             for col_idx, attr_name in col_to_attr.items():
@@ -1330,10 +1485,34 @@ def apply_import_changes(
                 except Exception:
                     event_date = str(event_date)
             
+            # V2.5.0: Handle session_start (TIME) field
+            session_start = event_data.get('session_start', '09:00')
+            if session_start and session_start != '09:00':
+                # Parse HH:MM to timestamp
+                try:
+                    # Combine with event_date to create full timestamp
+                    time_parts = str(session_start).split(':')
+                    if len(time_parts) == 2:
+                        hour, minute = int(time_parts[0]), int(time_parts[1])
+                        # Create datetime from date + time
+                        if isinstance(event_date, str):
+                            date_obj = datetime.strptime(event_date, '%Y-%m-%d').date()
+                        else:
+                            date_obj = event_date
+                        dt = datetime.combine(date_obj, datetime.min.time().replace(hour=hour, minute=minute))
+                        session_start = dt.isoformat()
+                    else:
+                        session_start = None
+                except:
+                    session_start = None
+            else:
+                session_start = None
+            
             new_event = {
                 'user_id': user_id,
                 'category_id': category_id,
                 'event_date': event_date,
+                'session_start': session_start,  # V2.5.0: TIME field
                 'comment': event_data.get('comment', '') or None
             }
             
@@ -1404,8 +1583,31 @@ def apply_import_changes(
                 except Exception:
                     event_date = str(event_date)
             
+            # V2.5.0: Handle session_start (TIME) field
+            session_start = event_data.get('session_start', '09:00')
+            if session_start and session_start != '09:00':
+                # Parse HH:MM to timestamp
+                try:
+                    time_parts = str(session_start).split(':')
+                    if len(time_parts) == 2:
+                        hour, minute = int(time_parts[0]), int(time_parts[1])
+                        # Create datetime from date + time
+                        if isinstance(event_date, str):
+                            date_obj = datetime.strptime(event_date, '%Y-%m-%d').date()
+                        else:
+                            date_obj = event_date
+                        dt = datetime.combine(date_obj, datetime.min.time().replace(hour=hour, minute=minute))
+                        session_start = dt.isoformat()
+                    else:
+                        session_start = None
+                except:
+                    session_start = None
+            else:
+                session_start = None
+            
             updates = {
                 'event_date': event_date,
+                'session_start': session_start,  # V2.5.0: TIME field
                 'comment': event_data.get('comment', '') or None,
                 'edited_at': datetime.now().isoformat()
             }
@@ -1493,7 +1695,11 @@ def export_events_to_excel(
     date_from: Optional[date] = None,
     date_to: Optional[date] = None
 ) -> Tuple[bytes, int, str]:
-    """High-level function to export events to Excel V2 format."""
+    """
+    High-level function to export events to Excel V2.5 format.
+    
+    V2.5.0: Includes parent category attributes in export.
+    """
     try:
         categories_dict = load_categories_dict(client, user_id)
         
@@ -1510,13 +1716,18 @@ def export_events_to_excel(
             # No filter - get all categories
             effective_category_ids = list(categories_dict.keys())
         
+        # V2.5.0: Include parent categories to show their attributes too
+        category_ids_with_parents = get_category_ids_with_parents(
+            categories_dict, effective_category_ids
+        )
+        
         attribute_definitions = load_attribute_definitions_for_categories(
-            client, user_id, effective_category_ids
+            client, user_id, category_ids_with_parents
         )
         
         events = load_events_for_export(
             client, user_id,
-            category_ids=effective_category_ids,
+            category_ids=effective_category_ids,  # Still filter events by original selection
             date_from=date_from,
             date_to=date_to
         )
