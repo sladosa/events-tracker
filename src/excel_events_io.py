@@ -2,12 +2,22 @@
 Events Tracker - Unified Excel Events I/O Module V2.5.0
 ========================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-12 11:00 UTC
+Last Modified: 2025-01-12 12:00 UTC
 Python: 3.11
-Version: 2.5.0
+Version: 2.5.1
 
 Description:
 Unified Excel Export/Import for events with enhanced formatting and LEGEND-BASED import.
+
+BUGFIXES in V2.5.1:
+- 🐛 FIXED: Filter logic - only selected category branch exported (no mixing branches)
+  - Added get_all_descendant_category_ids() to expand parent → all children
+  - When "Cardio" selected, only Cardio tree exported (not Strength)
+- 🐛 FIXED: Parent attributes now properly BLUE (not orange) for child events
+  - Improved color logic - walks up hierarchy to check relevance
+  - Running events now show Cardio attrs as BLUE ✅
+- 🐛 FIXED: Attribute sorting now truly hierarchical
+  - Parents always before children in same branch
 
 NEW in V2.5.0 - MAJOR RESTRUCTURE:
 - 🎯 HIERARCHICAL ATTRIBUTE SORTING: Attributes sorted by category level → sort_order
@@ -244,6 +254,36 @@ def get_category_ids_for_area(client, user_id: str, area_id: str) -> List[str]:
         return [c['id'] for c in (resp.data or [])]
     except Exception:
         return []
+
+
+def get_all_descendant_category_ids(categories_dict: Dict[str, Dict], parent_category_ids: List[str]) -> List[str]:
+    """
+    Get all descendant category IDs for given parent categories.
+    
+    V2.5.1: When user selects "Cardio", include all children (Running, Cycling, Swimming)
+    but NOT siblings (Strength, etc.).
+    
+    Args:
+        categories_dict: Dict mapping category_id to category info
+        parent_category_ids: List of parent category IDs to start from
+    
+    Returns:
+        List of all category IDs (parents + all descendants)
+    """
+    result = set(parent_category_ids)
+    
+    # Find all descendants recursively
+    to_process = list(parent_category_ids)
+    while to_process:
+        current_id = to_process.pop(0)
+        # Find all children of current category
+        for cat_id, cat_info in categories_dict.items():
+            if cat_info.get('parent_category_id') == current_id:
+                if cat_id not in result:
+                    result.add(cat_id)
+                    to_process.append(cat_id)  # Process children of this child
+    
+    return list(result)
 
 
 def get_category_ids_with_parents(categories_dict: Dict[str, Dict], category_ids: List[str]) -> List[str]:
@@ -737,9 +777,22 @@ def create_events_excel_v2(
             cell = ws.cell(row=row, column=col_idx, value=value if value is not None else '')
             cell.border = BORDER
             
-            # Color: BLUE if attr belongs to this event's category or parent categories (relevant)
-            # ORANGE if not relevant
-            if attr_def_id in relevant_attr_ids:
+            # V2.5.1 FIX: Better color logic - check if attr's category is in event's hierarchy
+            # BLUE if attr belongs to event's category OR any parent in hierarchy
+            # ORANGE if attr belongs to different branch
+            attr_cat_id = attr_info.get(attr_def_id, {}).get('category_id')
+            is_relevant = False
+            
+            # Walk up event's category hierarchy and check if attr's category matches
+            test_cat_id = cat_id
+            while test_cat_id:
+                if attr_cat_id == test_cat_id:
+                    is_relevant = True
+                    break
+                cat_test = categories_dict.get(test_cat_id, {})
+                test_cat_id = cat_test.get('parent_category_id')
+            
+            if is_relevant:
                 cell.fill = BLUE_FILL
             else:
                 cell.fill = ORANGE_FILL
@@ -1696,8 +1749,9 @@ def export_events_to_excel(
     date_to: Optional[date] = None
 ) -> Tuple[bytes, int, str]:
     """
-    High-level function to export events to Excel V2.5 format.
+    High-level function to export events to Excel V2.5.1 format.
     
+    V2.5.1: Fixed filter logic - include only selected category branch + descendants
     V2.5.0: Includes parent category attributes in export.
     """
     try:
@@ -1707,7 +1761,7 @@ def export_events_to_excel(
         effective_category_ids = category_ids
         
         if not effective_category_ids and area_id:
-            # Get all categories for this area
+            # Get all categories for this area (no specific category selected)
             effective_category_ids = get_category_ids_for_area(client, user_id, area_id)
             if not effective_category_ids:
                 return b'', 0, "No categories found for selected area"
@@ -1715,6 +1769,14 @@ def export_events_to_excel(
         if not effective_category_ids:
             # No filter - get all categories
             effective_category_ids = list(categories_dict.keys())
+        
+        # V2.5.1 FIX: If category_ids were provided (user selected specific category),
+        # expand to include ALL descendants (e.g., Cardio → Cardio + Running + Cycling + Swimming)
+        # This ensures we don't mix Cardio and Strength branches
+        if category_ids:  # Only expand if explicitly provided categories
+            effective_category_ids = get_all_descendant_category_ids(
+                categories_dict, effective_category_ids
+            )
         
         # V2.5.0: Include parent categories to show their attributes too
         category_ids_with_parents = get_category_ids_with_parents(

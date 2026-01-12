@@ -2,16 +2,22 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-12 11:00 UTC
+Last Modified: 2025-01-12 12:00 UTC
 Python: 3.11
-Version: 2.2.0 - Excel Export/Import V2.5.0
+Version: 2.2.1 - Excel Export/Import V2.5.1 BUGFIXES
 
 Description:
 Main Streamlit application with authentication and multiple pages.
 Core modules: Interactive Structure Viewer (main hub), Add Activity,
 Show Events (with integrated Excel Export/Import).
 
-NEW in v2.2.0:
+NEW in v2.2.1:
+- 🐛 BUGFIXES V2.5.1: Critical fixes for Excel Export/Import
+  - ✅ Filter now works correctly (only selected branch exported)
+  - ✅ Parent attributes now BLUE (not orange) for child events  
+  - ✅ Hierarchical sorting fixed (no branch mixing)
+
+PREVIOUS v2.2.0:
 - 📊 EXCEL EXPORT/IMPORT V2.5.0: Major improvements
   - ⏰ TIME column added (session_start, default 09:00)
   - 🌳 Parent category attributes included (e.g., Cardio attrs for Running events)
@@ -399,7 +405,7 @@ def render_help_page():
     
     # Version info
     st.markdown("---")
-    st.caption("Version: 2.2.0 | 2025-01-12 | Python: 3.11 | Streamlit: 1.28.0")
+    st.caption("Version: 2.2.1 | 2025-01-12 | Python: 3.11 | Streamlit: 1.28.0")
 
 
 if __name__ == "__main__":
