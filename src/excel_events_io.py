@@ -2,12 +2,23 @@
 Events Tracker - Unified Excel Events I/O Module V2.5.0
 ========================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-12 12:00 UTC
+Last Modified: 2025-01-12 13:00 UTC
 Python: 3.11
-Version: 2.5.1
+Version: 2.5.2
 
 Description:
 Unified Excel Export/Import for events with enhanced formatting and LEGEND-BASED import.
+
+CRITICAL FIXES in V2.5.2:
+- 🐛 FIXED: Parent attributes now ACTUALLY BLUE (was still yellow!)
+  - load_categories_dict() missing parent_category_id field
+  - Color logic couldn't walk hierarchy without it
+  - NOW WORKS! ✅
+- 🐛 FIXED: Hierarchical sort now PERFECT (matches Structure Viewer)
+  - New algorithm: builds sort_path by walking parent chain
+  - Example: "0001/0001/0002" = Strength > Legs > Squats
+  - String sort maintains perfect tree order
+  - All Categories export: Strength tree → Cardio tree → etc.
 
 BUGFIXES in V2.5.1:
 - 🐛 FIXED: Filter logic - only selected category branch exported (no mixing branches)
@@ -229,13 +240,16 @@ def load_categories_dict(client, user_id: str) -> Dict[str, Dict]:
             area_id = cat.get('area_id')
             area_info = areas.get(area_id, {})
             
+            # V2.5.2: Include parent_category_id and sort_order for hierarchy operations
             result[cat['id']] = {
                 'id': cat['id'],
                 'name': cat['name'],
                 'full_path': ' > '.join(path_parts),
                 'area_id': area_id,
                 'area_name': area_info.get('name', 'Unknown'),
-                'level': cat.get('level', 1)
+                'level': cat.get('level', 1),
+                'parent_category_id': cat.get('parent_category_id'),  # V2.5.2: CRITICAL FIX
+                'sort_order': cat.get('sort_order', 0)  # V2.5.2: For hierarchical sorting
             }
         
         return result
@@ -319,21 +333,44 @@ def load_attribute_definitions_for_categories(
     """
     Load all attribute definitions for given categories, sorted hierarchically.
     
-    V2.5.0: Sort by category level → category sort_order → attribute sort_order
-    This ensures parent categories appear before children in LEGEND and columns.
+    V2.5.2: TRUE hierarchical sort - maintains parent-child tree structure
+    Matches Interactive Structure Viewer order exactly!
     """
     if not category_ids:
         return []
     
     try:
-        # STEP 1: Load categories with level and sort_order for sorting
+        # STEP 1: Load categories with level, sort_order, and parent info
         cats_resp = client.table('categories') \
-            .select('id, level, sort_order') \
+            .select('id, name, parent_category_id, level, sort_order') \
             .eq('user_id', user_id) \
             .in_('id', category_ids) \
             .execute()
         
         cats_dict = {c['id']: c for c in (cats_resp.data or [])}
+        
+        # STEP 1.5: Build hierarchical sort paths for each category
+        # V2.5.2: This ensures tree structure is maintained
+        # Example: "Strength" (sort=1) → "0001"
+        #          "Strength > Legs" (sort=1) → "0001/0001"
+        #          "Strength > Arms" (sort=2) → "0001/0002"
+        #          "Cardio" (sort=2) → "0002"
+        
+        def get_sort_path(cat_id):
+            """Build hierarchical sort path by walking up parent chain."""
+            path_parts = []
+            current_id = cat_id
+            
+            while current_id:
+                cat = cats_dict.get(current_id)
+                if not cat:
+                    break
+                # Pad sort_order to 4 digits for proper string sorting
+                path_parts.insert(0, f"{cat.get('sort_order', 0):04d}")
+                current_id = cat.get('parent_category_id')
+            
+            # Join with '/' to create hierarchical path
+            return '/'.join(path_parts)
         
         # STEP 2: Load attribute definitions
         attrs_resp = client.table('attribute_definitions') \
@@ -344,15 +381,15 @@ def load_attribute_definitions_for_categories(
         
         attrs = attrs_resp.data or []
         
-        # STEP 3: Sort by category hierarchy, then attribute sort_order
+        # STEP 3: Sort by hierarchical path, then attribute sort_order
+        # V2.5.2: This maintains tree structure exactly like Structure Viewer
         def sort_key(attr):
             cat_id = attr.get('category_id')
-            cat = cats_dict.get(cat_id, {})
-            return (
-                cat.get('level', 999),        # Level first (parent categories first)
-                cat.get('sort_order', 999),   # Category sort_order within same level
-                attr.get('sort_order', 999)   # Attribute sort_order within category
-            )
+            sort_path = get_sort_path(cat_id)
+            attr_sort = attr.get('sort_order', 999)
+            
+            # Sort by: hierarchical path (string comparison), then attribute sort
+            return (sort_path, attr_sort)
         
         attrs.sort(key=sort_key)
         
