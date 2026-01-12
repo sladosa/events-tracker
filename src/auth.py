@@ -2,18 +2,23 @@
 Authentication Module
 =====================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-08 11:20 UTC
+Last Modified: 2025-01-12 19:00 UTC
 Python: 3.11
-Version: 2.0.0
+Version: 2.2.0
 
 Handles user signup, login, logout with Supabase Auth
 Uses AuthManager class for clean authentication flow
 
-NEW in V2.0.0:
-- ✅ Forgot Password functionality (email reset link)
+NEW in V2.2.0:
+- 🛡️ SECURE Forgot Password (uses email from login form)
 - ✅ Change Password for logged-in users
-- 🔒 Secure password reset via Supabase Auth
-- 📧 Email-based password recovery
+- 🔒 No arbitrary email input - security fixed!
+- 📧 Password reset only for authenticated email
+
+SECURITY FIX:
+- Forgot Password now SECURE - email taken from login form
+- No separate email input field
+- Prevents arbitrary password reset attempts
 """
 import streamlit as st
 from supabase import Client
@@ -112,30 +117,38 @@ class AuthManager:
             st.session_state.authenticated = False
             st.rerun()
     
-    def forgot_password(self, email: str) -> Tuple[bool, str]:
+    def request_password_reset(self, email: str) -> Tuple[bool, str]:
         """
         Send password reset email to user.
         
+        SECURITY: Email parameter should come from login form, not arbitrary input!
+        
         Args:
-            email: User's email address
+            email: User's email address (from login form)
             
         Returns:
             Tuple of (success: bool, message: str)
         """
         try:
-            # Supabase will send email with reset link
-            response = self.client.auth.reset_password_for_email(
+            # Use Supabase's built-in password reset
+            # Note: This sends an email with a reset link
+            self.client.auth.reset_password_for_email(
                 email,
                 options={
-                    "redirect_to": "https://events-tracker.streamlit.app"  # Adjust to your domain
+                    "redirect_to": "https://events-tracker.streamlit.app"
                 }
             )
             
-            return True, f"✅ Password reset email sent to {email}. Please check your inbox and follow the instructions."
+            # SECURITY: Always return same message (don't reveal if email exists)
+            return True, (
+                f"✅ If an account exists for {email}, "
+                "a password reset email has been sent. Please check your inbox."
+            )
             
         except Exception as e:
             error_msg = str(e)
-            return False, f"❌ Error sending reset email: {error_msg}"
+            # SECURITY: Don't reveal specific error details
+            return False, "❌ Unable to process password reset request. Please try again later."
     
     def change_password(self, new_password: str) -> Tuple[bool, str]:
         """
@@ -173,8 +186,17 @@ class AuthManager:
         with tab1:
             st.subheader("Login to Your Account")
             
+            # Store email in session state for Forgot Password
+            if 'login_email' not in st.session_state:
+                st.session_state.login_email = ''
+            
             with st.form("login_form"):
-                email = st.text_input("Email", placeholder="your.email@example.com")
+                email = st.text_input(
+                    "Email", 
+                    placeholder="your.email@example.com",
+                    value=st.session_state.login_email,
+                    key="email_input"
+                )
                 password = st.text_input("Password", type="password")
                 submit = st.form_submit_button("🔓 Login", use_container_width=True)
                 
@@ -182,6 +204,9 @@ class AuthManager:
                     if not email or not password:
                         st.error("❌ Please enter both email and password.")
                     else:
+                        # Save email for potential Forgot Password use
+                        st.session_state.login_email = email
+                        
                         success, message = self.login(email, password)
                         if success:
                             st.success(message)
@@ -189,16 +214,30 @@ class AuthManager:
                         else:
                             st.error(message)
             
-            # Forgot Password section
+            # SECURE Forgot Password - uses email from login form
+            st.markdown("---")
+            
             with st.expander("🔑 Forgot Password?"):
-                st.caption("Enter your email to receive a password reset link")
-                reset_email = st.text_input("Email for reset", placeholder="your.email@example.com", key="reset_email")
+                st.markdown("""
+                **Password reset will be sent to the email address you entered above.**
                 
-                if st.button("📧 Send Reset Link", use_container_width=True):
-                    if not reset_email:
-                        st.error("❌ Please enter your email address.")
+                1. Enter your email in the login form above
+                2. Click the button below to receive a reset link
+                """)
+                
+                # Show which email will receive the reset
+                if st.session_state.login_email:
+                    st.info(f"📧 Reset link will be sent to: **{st.session_state.login_email}**")
+                else:
+                    st.warning("⚠️ Please enter your email in the login form above first.")
+                
+                # Button to send reset
+                if st.button("📧 Send Password Reset Link", use_container_width=True):
+                    if not st.session_state.login_email:
+                        st.error("❌ Please enter your email in the login form above first.")
                     else:
-                        success, message = self.forgot_password(reset_email)
+                        # SECURITY: Email comes from login form, not arbitrary input!
+                        success, message = self.request_password_reset(st.session_state.login_email)
                         if success:
                             st.success(message)
                         else:

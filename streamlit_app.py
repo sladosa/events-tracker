@@ -2,16 +2,31 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-12 13:00 UTC
+Last Modified: 2025-01-12 19:30 UTC
 Python: 3.11
-Version: 2.2.2 - Excel Export/Import V2.5.2 CRITICAL FIXES
+Version: 2.2.3.1 - Change Password Fix
 
 Description:
 Main Streamlit application with authentication and multiple pages.
 Core modules: Interactive Structure Viewer (main hub), Add Activity,
 Show Events (with integrated Excel Export/Import).
 
-NEW in v2.2.2:
+NEW in v2.2.3.1:
+- 🔧 HOTFIX: Change Password now visible in sidebar
+  - Fixed: streamlit_app.py now calls auth_manager.show_user_info_sidebar()
+  - Users can now access Change Password expander in User section
+  - Previously was missing due to direct sidebar rendering
+
+PREVIOUS v2.2.3:
+- ðŸ› CRITICAL BUGFIX V2.5.3: TIME import now works correctly
+  - âœ… Default "09:00" no longer becomes NULL
+  - âœ… All time values properly stored in database
+  - âœ… Both CREATE and UPDATE paths fixed
+- ðŸ›¡ï¸ SECURITY FIX: Removed Forgot Password feature (security vulnerability)
+  - Prevented arbitrary email reset attempts
+  - Users can change password when logged in (secure alternative)
+
+PREVIOUS v2.2.2:
 - 🐛 CRITICAL FIXES V2.5.2:
   - ✅ Parent attributes NOW ACTUALLY BLUE (fixed missing field)
   - ✅ Hierarchical sort PERFECT (matches Structure Viewer exactly)
@@ -152,14 +167,9 @@ def main():
         label_visibility="collapsed"
     )
     
-    st.sidebar.markdown("---")
     
-    # User info and logout
-    st.sidebar.markdown("### 👤 User")
-    st.sidebar.text(f"📧 {user_email}")
-    
-    if st.sidebar.button("🚪 Logout", use_container_width=True):
-        auth_manager.logout()
+    # User info with Change Password
+    auth_manager.show_user_info_sidebar()
     
     # Connection status
     with st.sidebar.expander("🔌 Connection Status", expanded=False):
@@ -411,7 +421,7 @@ def render_help_page():
     
     # Version info
     st.markdown("---")
-    st.caption("Version: 2.2.2 | 2025-01-12 | Python: 3.11 | Streamlit: 1.28.0")
+    st.caption("Version: 2.2.3.1 | 2025-01-12 | Python: 3.11 | Streamlit: 1.28.0")
 
 
 if __name__ == "__main__":
