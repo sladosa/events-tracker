@@ -2,16 +2,34 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-13 13:50 UTC
+Last Modified: 2025-01-13 15:10 UTC
 Python: 3.11
-Version: 2.2.4 - Multi-level Import & UI Improvements
+Version: 2.2.6 - UX Improvements
 
 Description:
 Main Streamlit application with authentication and multiple pages.
 Core modules: Interactive Structure Viewer (main hub), Add Activity,
 Show Events (with integrated Excel Export/Import).
 
-NEW in v2.2.4:
+NEW in v2.2.6:
+- 🎯 MAJOR UX IMPROVEMENTS:
+  - ✅ UI Sort: Parent-child events properly grouped (Cardio always above Running)
+  - ✅ Export Sort: Respects UI sort order (newest/oldest first)
+  - ✅ Export Structure: Session-based merging (cleaner Excel output)
+    • Events with same timestamp merge into ONE row (leaf event + all attributes)
+    • Example: 11 rows (Cardio + Running separate) → 6 rows (Running with merged attrs)
+    • Only leaf events exported, but with parent attributes populated
+    • Dramatically cleaner export format! 🎉
+
+PREVIOUS v2.2.5:
+- 🐛 CRITICAL BUGFIX V2.5.4: UPDATE path multi-level support
+  - ✅ UPDATE existing event + populate parent attrs → creates parent events
+  - ✅ Example: Update "Running" + add Cardio data → creates Cardio event
+  - ✅ Parent event shares SAME session_start timestamp
+  - ✅ Full multi-level workflow now works for BOTH CREATE and UPDATE
+  - ✅ Previously: UPDATE ignored parent attributes (only modified child)
+
+PREVIOUS v2.2.4:
 - 🐛 CRITICAL BUGFIX V2.5.3: session_start default and multi-level import
   - ✅ session_start now properly defaults to 09:00 (not NULL)
   - ✅ Empty time field correctly creates 09:00 timestamp
@@ -63,6 +81,8 @@ PREVIOUS v2.2.0:
 - 🎨 Improved Excel format clarity and consistency
 
 CHANGELOG:
+- v2.2.6: UX improvements (UI sort, export sort, session merging)
+- v2.2.5: UPDATE multi-level fix (parent events created from UPDATE rows)
 - v2.2.4: Multi-level import, session_start fix, UI cleanup, sort order
 - v2.2.3.1: HOTFIX - Change Password visible in sidebar
 - v2.2.3: TIME import fix + Forgot Password removed
@@ -410,7 +430,7 @@ def render_help_page():
     
     # Version info
     st.markdown("---")
-    st.caption("Version: 2.2.4 | 2025-01-13 | Python: 3.11 | Streamlit: 1.28.0")
+    st.caption("Version: 2.2.6 | 2025-01-13 | Python: 3.11 | Streamlit: 1.28.0")
 
 
 if __name__ == "__main__":

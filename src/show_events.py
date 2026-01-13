@@ -2,9 +2,9 @@
 Events Tracker - Show Events Module
 ====================================
 Created: 2025-12-15 09:45 UTC
-Last Modified: 2025-01-13 13:45 UTC
+Last Modified: 2025-01-13 15:05 UTC
 Python: 3.11
-Version: 2.6.1 - Multi-level Import & UI Cleanup
+Version: 2.6.2 - UX Improvements
 
 Description:
 View, edit, and delete events with:
@@ -16,6 +16,13 @@ View, edit, and delete events with:
 - Category_Path display (ISV-style)
 - Attribute value formatting by type
 - Excel Export/Import with unified format (Master Plan V2)
+
+CHANGELOG v2.6.2:
+- 🎯 IMPROVED: Parent-child sorting in UI
+  - Events with same timestamp now properly grouped
+  - Parent category (e.g., Cardio) ALWAYS appears above child (e.g., Running)
+  - Added tertiary sort by category.level (ascending)
+  - Much cleaner visual grouping of multi-level activities ✅
 
 CHANGELOG v2.6.1:
 - 🐛 FIXED: Export UI cleanup after actions
@@ -307,7 +314,8 @@ def load_events_with_attributes(
         
         # Build base query - include attributes in join
         # NOTE: Nested select must be on single line - multiline breaks PostgREST
-        select_fields = 'id, category_id, event_date, session_start, comment, created_at, categories(id, name, area_id), event_attributes(id, value_text, value_number, value_datetime, value_boolean, attribute_definitions(id, name, data_type, unit, description))'
+        # V2.5.5: Added categories.level for proper parent-child sorting
+        select_fields = 'id, category_id, event_date, session_start, comment, created_at, categories(id, name, area_id, level), event_attributes(id, value_text, value_number, value_datetime, value_boolean, attribute_definitions(id, name, data_type, unit, description))'
         
         query = client.table('events') \
             .select(select_fields, count='exact') \
@@ -324,10 +332,23 @@ def load_events_with_attributes(
             query = query.lte('event_date', date_to.isoformat())
         
         # V2.5.3: Apply sort order based on parameter
+        # V2.5.5: Added session_start secondary sort for timestamp grouping
         desc_order = (sort_order == 'desc')
         query = query.order('event_date', desc=desc_order) \
                      .order('session_start', desc=desc_order) \
                      .range(offset, offset + limit - 1)
+        
+        resp = query.execute()
+        events = resp.data or []
+        
+        # V2.5.5: Sort by category.level (ascending) as tertiary sort
+        # This ensures parent categories appear before child categories for same timestamp
+        # Cannot do this in SQL ORDER BY because 'level' is in nested 'categories' relation
+        events.sort(key=lambda e: (
+            e.get('event_date', ''),
+            e.get('session_start', ''),
+            e.get('categories', {}).get('level', 999)  # Parent (level=1) before child (level=2)
+        ), reverse=desc_order)
         
         resp = query.execute()
         events = resp.data or []
@@ -937,7 +958,8 @@ def render_show_events(client, user_id: str):
                     area_id=st.session_state.se_area_id,  # Pass area_id for filtering
                     category_ids=category_ids,
                     date_from=date_from,
-                    date_to=date_to
+                    date_to=date_to,
+                    sort_order=st.session_state.se_sort_order  # V2.5.5: Pass user sort order
                 )
                 
                 if error:

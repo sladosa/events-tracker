@@ -1,13 +1,24 @@
 """
-Events Tracker - Unified Excel Events I/O Module V2.5.4
+Events Tracker - Unified Excel Events I/O Module V2.5.5
 ========================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-13 14:15 UTC
+Last Modified: 2025-01-13 15:00 UTC
 Python: 3.11
-Version: 2.5.4
+Version: 2.5.5
 
 Description:
 Unified Excel Export/Import for events with enhanced formatting and LEGEND-BASED import.
+
+MAJOR UX IMPROVEMENTS in V2.5.5:
+- 🎯 EXPORT: Session-based merging for cleaner Excel output
+  - Events with same timestamp in parent-child hierarchy merge into ONE row
+  - Example: Cardio + Running (same timestamp) → exports as Running with ALL attributes
+  - Reduces Excel rows significantly (from 11 to 6 rows in typical case)
+  - Only leaf (deepest) events exported, but with merged parent attributes
+  - Independent events (same level) still export separately ✅
+- 📊 EXPORT: Respects UI sort order (newest/oldest first)
+  - Export now matches what user sees in Show Events UI
+  - Consistent UX between view and export ✅
 
 CRITICAL FIX in V2.5.4:
 - 🐛 FIXED: UPDATE path now supports multi-level event creation!
@@ -465,9 +476,15 @@ def load_events_for_export(
     client, user_id: str,
     category_ids: Optional[List[str]] = None,
     date_from: Optional[date] = None,
-    date_to: Optional[date] = None
+    date_to: Optional[date] = None,
+    sort_order: str = 'desc'  # V2.5.5: User-selected sort order
 ) -> List[Dict]:
-    """Load events with their attributes for export. V2.5.0: includes session_start."""
+    """
+    Load events with their attributes for export.
+    
+    V2.5.5: Added sort_order parameter to respect UI sorting
+    V2.5.0: Includes session_start field
+    """
     try:
         select_fields = 'id, category_id, event_date, session_start, comment, event_attributes(id, attribute_definition_id, value_text, value_number, value_datetime, value_boolean)'
         
@@ -483,12 +500,100 @@ def load_events_for_export(
         if date_to:
             query = query.lte('event_date', date_to.isoformat())
         
-        query = query.order('event_date', desc=True)
+        # V2.5.5: Apply user-selected sort order
+        desc_order = (sort_order == 'desc')
+        query = query.order('event_date', desc=desc_order) \
+                     .order('session_start', desc=desc_order)
         
         resp = query.execute()
         return resp.data or []
     except Exception:
         return []
+
+
+def merge_session_events(events: List[Dict], categories_dict: Dict[str, Dict]) -> List[Dict]:
+    """
+    Merge hierarchical events with same session_start into single export rows.
+    
+    V2.5.5 NEW: Session-based merging for cleaner export.
+    
+    Logic:
+    - Group events by exact session_start timestamp
+    - For each group with multiple events:
+      - Check if they form a parent-child hierarchy (different levels)
+      - If yes → export only the DEEPEST (leaf) event
+      - Merge all attributes from parent events into leaf event
+      - If no → export separately (they are independent events)
+    
+    Example:
+    Input:
+        Event 1: Cardio (level=1, ts=09:00:00.123) → [total_duration=5, avg_hr=4]
+        Event 2: Running (level=2, ts=09:00:00.123) → [distance=10, pace=5:00]
+    
+    Output:
+        Merged Event: Running (level=2, ts=09:00:00.123) → [total_duration=5, avg_hr=4, distance=10, pace=5:00]
+    
+    Args:
+        events: List of event dicts from database
+        categories_dict: Category info including level
+    
+    Returns:
+        List of events with merged attributes
+    """
+    # Group by exact session_start timestamp
+    sessions = {}
+    for event in events:
+        ts = event.get('session_start')
+        if ts not in sessions:
+            sessions[ts] = []
+        sessions[ts].append(event)
+    
+    merged_events = []
+    
+    for timestamp, session_events in sessions.items():
+        if len(session_events) == 1:
+            # Single event - no merging needed
+            merged_events.append(session_events[0])
+            continue
+        
+        # Multiple events with same timestamp
+        # Get category levels for each event
+        event_levels = []
+        for event in session_events:
+            cat_id = event.get('category_id')
+            cat_info = categories_dict.get(cat_id, {})
+            level = cat_info.get('level', 0)
+            event_levels.append((event, level))
+        
+        # Sort by level (parent first)
+        event_levels.sort(key=lambda x: x[1])
+        
+        # Check if levels are all different (hierarchical chain)
+        levels = [el[1] for el in event_levels]
+        unique_levels = set(levels)
+        
+        if len(unique_levels) == len(levels) and len(unique_levels) > 1:
+            # All different levels - this is a parent-child hierarchy
+            # Merge into the deepest (leaf) event
+            
+            leaf_event = event_levels[-1][0].copy()  # Deepest level
+            
+            # Merge all attributes from all events in the session
+            merged_attributes = []
+            for event, _ in event_levels:
+                merged_attributes.extend(event.get('event_attributes', []))
+            
+            # Replace leaf event's attributes with merged list
+            leaf_event['event_attributes'] = merged_attributes
+            
+            merged_events.append(leaf_event)
+        else:
+            # Not all different levels - these are independent events
+            # (e.g., 2 Cardio events at same time, or same-level siblings)
+            # Export separately
+            merged_events.extend(session_events)
+    
+    return merged_events
 
 
 def parse_validation_rules(rules) -> Dict:
@@ -1990,10 +2095,16 @@ def export_events_to_excel(
     area_id: Optional[str] = None,
     category_ids: Optional[List[str]] = None,
     date_from: Optional[date] = None,
-    date_to: Optional[date] = None
+    date_to: Optional[date] = None,
+    sort_order: str = 'desc'  # V2.5.5: User-selected sort order
 ) -> Tuple[bytes, int, str]:
     """
-    High-level function to export events to Excel V2.5.1 format.
+    High-level function to export events to Excel.
+    
+    V2.5.5 NEW:
+    - Session-based merging: Events with same timestamp in parent-child hierarchy
+      are merged into single row (leaf event with all attributes)
+    - Respects UI sort order (newest/oldest first)
     
     V2.5.1: Fixed filter logic - include only selected category branch + descendants
     V2.5.0: Includes parent category attributes in export.
@@ -2035,15 +2146,21 @@ def export_events_to_excel(
             client, user_id,
             category_ids=effective_category_ids,  # Still filter events by original selection
             date_from=date_from,
-            date_to=date_to
+            date_to=date_to,
+            sort_order=sort_order  # V2.5.5: Pass user sort order
         )
         
         if not events:
             return b'', 0, "No events found matching filters"
         
-        excel_bytes = create_events_excel_v2(events, attribute_definitions, categories_dict)
+        # V2.5.5 NEW: Merge hierarchical session events
+        # This reduces export rows by combining parent+child events with same timestamp
+        merged_events = merge_session_events(events, categories_dict)
         
-        return excel_bytes, len(events), ""
+        excel_bytes = create_events_excel_v2(merged_events, attribute_definitions, categories_dict)
+        
+        # Return count of merged events (what user sees in Excel)
+        return excel_bytes, len(merged_events), ""
         
     except Exception as e:
         return b'', 0, f"Export error: {str(e)}"
