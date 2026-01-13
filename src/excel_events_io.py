@@ -1575,33 +1575,28 @@ def apply_import_changes(
                 except Exception:
                     event_date = str(event_date)
             
-            # V2.5.3: Handle session_start (TIME) field - FIXED default "09:00" handling
-            session_start_raw = event_data.get('session_start', '09:00')
-            
-            if session_start_raw:
+            # V2.5.0: Handle session_start (TIME) field
+            session_start = event_data.get('session_start', '09:00')
+            if session_start and session_start != '09:00':
+                # Parse HH:MM to timestamp
                 try:
-                    # Parse HH:MM to timestamp (works for both "09:00" and other times)
-                    time_str = str(session_start_raw).strip()
-                    time_parts = time_str.split(':')
-                    
+                    # Combine with event_date to create full timestamp
+                    time_parts = str(session_start).split(':')
                     if len(time_parts) == 2:
                         hour, minute = int(time_parts[0]), int(time_parts[1])
-                        
-                        # Get date object
+                        # Create datetime from date + time
                         if isinstance(event_date, str):
                             date_obj = datetime.strptime(event_date, '%Y-%m-%d').date()
                         else:
                             date_obj = event_date
-                        
-                        # Create full timestamp
                         dt = datetime.combine(date_obj, datetime.min.time().replace(hour=hour, minute=minute))
                         session_start = dt.isoformat()
                     else:
-                        session_start = None  # Invalid format
+                        session_start = None
                 except:
-                    session_start = None  # Parsing failed
+                    session_start = None
             else:
-                session_start = None  # Empty/NULL
+                session_start = None
             
             new_event = {
                 'user_id': user_id,
@@ -1678,33 +1673,27 @@ def apply_import_changes(
                 except Exception:
                     event_date = str(event_date)
             
-            # V2.5.3: Handle session_start (TIME) field - FIXED default "09:00" handling
-            session_start_raw = event_data.get('session_start', '09:00')
-            
-            if session_start_raw:
+            # V2.5.0: Handle session_start (TIME) field
+            session_start = event_data.get('session_start', '09:00')
+            if session_start and session_start != '09:00':
+                # Parse HH:MM to timestamp
                 try:
-                    # Parse HH:MM to timestamp (works for both "09:00" and other times)
-                    time_str = str(session_start_raw).strip()
-                    time_parts = time_str.split(':')
-                    
+                    time_parts = str(session_start).split(':')
                     if len(time_parts) == 2:
                         hour, minute = int(time_parts[0]), int(time_parts[1])
-                        
-                        # Get date object
+                        # Create datetime from date + time
                         if isinstance(event_date, str):
                             date_obj = datetime.strptime(event_date, '%Y-%m-%d').date()
                         else:
                             date_obj = event_date
-                        
-                        # Create full timestamp
                         dt = datetime.combine(date_obj, datetime.min.time().replace(hour=hour, minute=minute))
                         session_start = dt.isoformat()
                     else:
-                        session_start = None  # Invalid format
+                        session_start = None
                 except:
-                    session_start = None  # Parsing failed
+                    session_start = None
             else:
-                session_start = None  # Empty/NULL
+                session_start = None
             
             updates = {
                 'event_date': event_date,
