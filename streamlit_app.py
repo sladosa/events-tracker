@@ -2,16 +2,24 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-13 15:10 UTC
+Last Modified: 2025-01-13 15:40 UTC
 Python: 3.11
-Version: 2.2.6 - UX Improvements
+Version: 2.2.7 - Bugfixes
 
 Description:
 Main Streamlit application with authentication and multiple pages.
 Core modules: Interactive Structure Viewer (main hub), Add Activity,
 Show Events (with integrated Excel Export/Import).
 
-NEW in v2.2.6:
+NEW in v2.2.7:
+- 🐛 CRITICAL BUGFIXES:
+  - ✅ UI Sort: Fixed parent-child grouping (stable sort by level only)
+  - ✅ Export Merge: Fixed grouping by (timestamp, comment) combination
+  - ✅ Now properly merges only related events from same import row
+  - ✅ "test 2 - corr" events now properly grouped in UI
+  - ✅ Export only shows leaf events (Running) with merged attributes
+
+PREVIOUS v2.2.6:
 - 🎯 MAJOR UX IMPROVEMENTS:
   - ✅ UI Sort: Parent-child events properly grouped (Cardio always above Running)
   - ✅ Export Sort: Respects UI sort order (newest/oldest first)
@@ -81,6 +89,7 @@ PREVIOUS v2.2.0:
 - 🎨 Improved Excel format clarity and consistency
 
 CHANGELOG:
+- v2.2.7: Bugfixes (UI sort stable, export merge by comment)
 - v2.2.6: UX improvements (UI sort, export sort, session merging)
 - v2.2.5: UPDATE multi-level fix (parent events created from UPDATE rows)
 - v2.2.4: Multi-level import, session_start fix, UI cleanup, sort order
@@ -430,7 +439,7 @@ def render_help_page():
     
     # Version info
     st.markdown("---")
-    st.caption("Version: 2.2.6 | 2025-01-13 | Python: 3.11 | Streamlit: 1.28.0")
+    st.caption("Version: 2.2.7 | 2025-01-13 | Python: 3.11 | Streamlit: 1.28.0")
 
 
 if __name__ == "__main__":

@@ -1,13 +1,20 @@
 """
-Events Tracker - Unified Excel Events I/O Module V2.5.5
+Events Tracker - Unified Excel Events I/O Module V2.5.6
 ========================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-13 15:00 UTC
+Last Modified: 2025-01-13 15:30 UTC
 Python: 3.11
-Version: 2.5.5
+Version: 2.5.6
 
 Description:
 Unified Excel Export/Import for events with enhanced formatting and LEGEND-BASED import.
+
+BUGFIXES in V2.5.6:
+- 🐛 FIXED: Export merging now works correctly!
+  - Group by (timestamp, comment) instead of just timestamp
+  - Prevents merging unrelated events with same timestamp
+  - Example: "novi 2" + "test 2 - corr" no longer merge (different comments)
+  - Now properly merges only parent-child events from SAME import row ✅
 
 MAJOR UX IMPROVEMENTS in V2.5.5:
 - 🎯 EXPORT: Session-based merging for cleaner Excel output
@@ -513,12 +520,12 @@ def load_events_for_export(
 
 def merge_session_events(events: List[Dict], categories_dict: Dict[str, Dict]) -> List[Dict]:
     """
-    Merge hierarchical events with same session_start into single export rows.
+    Merge hierarchical events with same session_start AND comment into single export rows.
     
-    V2.5.5 NEW: Session-based merging for cleaner export.
+    V2.5.6 FIXED: Group by (timestamp, comment) combination, not just timestamp.
     
     Logic:
-    - Group events by exact session_start timestamp
+    - Group events by (exact session_start timestamp, comment)
     - For each group with multiple events:
       - Check if they form a parent-child hierarchy (different levels)
       - If yes → export only the DEEPEST (leaf) event
@@ -527,11 +534,11 @@ def merge_session_events(events: List[Dict], categories_dict: Dict[str, Dict]) -
     
     Example:
     Input:
-        Event 1: Cardio (level=1, ts=09:00:00.123) → [total_duration=5, avg_hr=4]
-        Event 2: Running (level=2, ts=09:00:00.123) → [distance=10, pace=5:00]
+        Event 1: Cardio (level=1, ts=09:00, comment="novi 2") → [total_duration=5]
+        Event 2: Running (level=2, ts=09:00, comment="novi 2") → [distance=10]
     
     Output:
-        Merged Event: Running (level=2, ts=09:00:00.123) → [total_duration=5, avg_hr=4, distance=10, pace=5:00]
+        Merged Event: Running (level=2, ts=09:00, comment="novi 2") → [total_duration=5, distance=10]
     
     Args:
         events: List of event dicts from database
@@ -540,23 +547,25 @@ def merge_session_events(events: List[Dict], categories_dict: Dict[str, Dict]) -
     Returns:
         List of events with merged attributes
     """
-    # Group by exact session_start timestamp
+    # V2.5.6 FIX: Group by (timestamp, comment) combination
+    # This prevents merging unrelated events with same timestamp but different comments
     sessions = {}
     for event in events:
-        ts = event.get('session_start')
-        if ts not in sessions:
-            sessions[ts] = []
-        sessions[ts].append(event)
+        # Group key: (session_start, comment)
+        key = (event.get('session_start'), event.get('comment'))
+        if key not in sessions:
+            sessions[key] = []
+        sessions[key].append(event)
     
     merged_events = []
     
-    for timestamp, session_events in sessions.items():
+    for (timestamp, comment), session_events in sessions.items():
         if len(session_events) == 1:
             # Single event - no merging needed
             merged_events.append(session_events[0])
             continue
         
-        # Multiple events with same timestamp
+        # Multiple events with same timestamp AND comment
         # Get category levels for each event
         event_levels = []
         for event in session_events:

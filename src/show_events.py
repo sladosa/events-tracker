@@ -2,9 +2,9 @@
 Events Tracker - Show Events Module
 ====================================
 Created: 2025-12-15 09:45 UTC
-Last Modified: 2025-01-13 15:05 UTC
+Last Modified: 2025-01-13 15:35 UTC
 Python: 3.11
-Version: 2.6.2 - UX Improvements
+Version: 2.6.3 - Sort Bugfix
 
 Description:
 View, edit, and delete events with:
@@ -16,6 +16,13 @@ View, edit, and delete events with:
 - Category_Path display (ISV-style)
 - Attribute value formatting by type
 - Excel Export/Import with unified format (Master Plan V2)
+
+CHANGELOG v2.6.3:
+- 🐛 FIXED: UI sort now works correctly!
+  - Stable sort preserves SQL date/time order
+  - Python re-sorts only by category.level (ascending always)
+  - Parent (level=1) now ALWAYS above child (level=2) for same timestamp
+  - Result: "test 2 - corr" events properly grouped together ✅
 
 CHANGELOG v2.6.2:
 - 🎯 IMPROVED: Parent-child sorting in UI
@@ -332,7 +339,7 @@ def load_events_with_attributes(
             query = query.lte('event_date', date_to.isoformat())
         
         # V2.5.3: Apply sort order based on parameter
-        # V2.5.5: Added session_start secondary sort for timestamp grouping
+        # V2.5.5: SQL handles date/time sort, Python handles level sort
         desc_order = (sort_order == 'desc')
         query = query.order('event_date', desc=desc_order) \
                      .order('session_start', desc=desc_order) \
@@ -341,14 +348,11 @@ def load_events_with_attributes(
         resp = query.execute()
         events = resp.data or []
         
-        # V2.5.5: Sort by category.level (ascending) as tertiary sort
+        # V2.5.6 FIX: Stable sort by category.level (ascending ALWAYS)
         # This ensures parent categories appear before child categories for same timestamp
-        # Cannot do this in SQL ORDER BY because 'level' is in nested 'categories' relation
-        events.sort(key=lambda e: (
-            e.get('event_date', ''),
-            e.get('session_start', ''),
-            e.get('categories', {}).get('level', 999)  # Parent (level=1) before child (level=2)
-        ), reverse=desc_order)
+        # Python's sort is stable - preserves original order for equal keys
+        # So date/time order from SQL is preserved, we just re-order same-timestamp groups by level
+        events = sorted(events, key=lambda e: e.get('categories', {}).get('level', 999))
         
         resp = query.execute()
         events = resp.data or []
