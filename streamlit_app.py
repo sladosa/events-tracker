@@ -2,27 +2,42 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-12 19:30 UTC
+Last Modified: 2025-01-13 13:50 UTC
 Python: 3.11
-Version: 2.2.3.1 - Change Password Fix
+Version: 2.2.4 - Multi-level Import & UI Improvements
 
 Description:
 Main Streamlit application with authentication and multiple pages.
 Core modules: Interactive Structure Viewer (main hub), Add Activity,
 Show Events (with integrated Excel Export/Import).
 
-NEW in v2.2.3.1:
+NEW in v2.2.4:
+- 🐛 CRITICAL BUGFIX V2.5.3: session_start default and multi-level import
+  - ✅ session_start now properly defaults to 09:00 (not NULL)
+  - ✅ Empty time field correctly creates 09:00 timestamp
+  - ✅ One Excel row can create MULTIPLE events (hierarchy levels)
+  - ✅ Events with BAREM 1 populated attribute get created
+  - ✅ All events from same row share SAME session_start timestamp
+  - ✅ Enables true activity/session grouping by timestamp
+- 🧹 UI CLEANUP: Export state properly cleared after actions
+  - ✅ Export UI removed after Edit/Delete/Import/Filter changes
+  - ✅ No more stale "Export ready" messages
+- ✨ NEW: Sort order selection in Show Events
+  - ✅ User can choose: Newest first ⬇️ or Oldest first ⬆️
+  - ✅ Useful for viewing activity sessions chronologically
+
+PREVIOUS v2.2.3.1:
 - 🔧 HOTFIX: Change Password now visible in sidebar
   - Fixed: streamlit_app.py now calls auth_manager.show_user_info_sidebar()
   - Users can now access Change Password expander in User section
   - Previously was missing due to direct sidebar rendering
 
 PREVIOUS v2.2.3:
-- ðŸ› CRITICAL BUGFIX V2.5.3: TIME import now works correctly
-  - âœ… Default "09:00" no longer becomes NULL
-  - âœ… All time values properly stored in database
-  - âœ… Both CREATE and UPDATE paths fixed
-- ðŸ›¡ï¸ SECURITY FIX: Removed Forgot Password feature (security vulnerability)
+- 🐛 CRITICAL BUGFIX V2.5.3: TIME import now works correctly
+  - ✅ Default "09:00" no longer becomes NULL
+  - ✅ All time values properly stored in database
+  - ✅ Both CREATE and UPDATE paths fixed
+- 🛡️ SECURITY FIX: Removed Forgot Password feature (security vulnerability)
   - Prevented arbitrary email reset attempts
   - Users can change password when logged in (secure alternative)
 
@@ -47,38 +62,13 @@ PREVIOUS v2.2.0:
   - ✅ All inherited attributes are editable (blue)
 - 🎨 Improved Excel format clarity and consistency
 
-PREVIOUS v2.1.3 (HOTFIX):
-- 🐛 Fixed: CONFIRM/DELETE inputs not enabling buttons
-  - Added on_change callbacks to force rerun
-  - Excel Upload Apply Changes now works correctly
-  - All deletion confirmations now work correctly
-
-NEW in v2.1.2:
-- ✨ Last Area Deletion Prompt
-  - Warns when deleting last Area: "This will delete ENTIRE structure!"
-  - User chooses: Cancel, Keep empty, or Recreate Default
-  - No more surprise Default structure after deleting everything
-  - Full user control over post-deletion behavior
-
-NEW in v2.1.1 (HOTFIX):
-- 🐛 Fixed: UnboundLocalError on time.sleep() in ISV
-  - Changed import to `import time as time_module`
-  - Removed local `import time` that caused namespace conflict
-
-NEW in v2.1.0:
-- 🚀 Bootstrap System: Auto-creates default structure for new users
-  - Eliminates empty database UX catch-22
-  - Creates Default Area → Category → Attribute + initial event
-  - Seamless first-time user experience across all modules
-
-NEW in v2.0.0:
-- 📥📤 Unified Excel Export/Import integrated into Show Events
-- 🗑️ REMOVED: Bulk Import page (obsolete)
-- 🗑️ REMOVED: View Data - Export page (merged into Show Events)
-- 🗑️ REMOVED: View Data - Import page (merged into Show Events)
-- 🎨 Show Events toolbar now has: Edit | Delete | Export | Import
-
 CHANGELOG:
+- v2.2.4: Multi-level import, session_start fix, UI cleanup, sort order
+- v2.2.3.1: HOTFIX - Change Password visible in sidebar
+- v2.2.3: TIME import fix + Forgot Password removed
+- v2.2.2: Parent attributes BLUE + hierarchical sort fix
+- v2.2.1: Filter fix + parent attributes colors
+- v2.2.0: TIME column + parent category attributes
 - v2.1.3: HOTFIX - Text input state issue (CONFIRM/DELETE)
 - v2.1.2: Last Area deletion prompt (user control)
 - v2.1.1: HOTFIX - Fixed time import namespace conflict
@@ -87,7 +77,6 @@ CHANGELOG:
 - v1.9.0: Add Activity Workflow + Show Events Table View
 - v1.8.0: Show Events + Remove Add Event
 - v1.7.0: Add Activity module (mobile-optimized)
-- v1.6.1: Removed deprecated pages (View Structure, Download, Upload Template)
 
 Modules:
 - auth: User authentication
@@ -421,7 +410,7 @@ def render_help_page():
     
     # Version info
     st.markdown("---")
-    st.caption("Version: 2.2.3.1 | 2025-01-12 | Python: 3.11 | Streamlit: 1.28.0")
+    st.caption("Version: 2.2.4 | 2025-01-13 | Python: 3.11 | Streamlit: 1.28.0")
 
 
 if __name__ == "__main__":

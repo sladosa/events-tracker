@@ -2,20 +2,30 @@
 Events Tracker - Show Events Module
 ====================================
 Created: 2025-12-15 09:45 UTC
-Last Modified: 2025-01-11 11:30 UTC
+Last Modified: 2025-01-13 13:45 UTC
 Python: 3.11
-Version: 2.6.0 - Bootstrap System Integration
+Version: 2.6.1 - Multi-level Import & UI Cleanup
 
 Description:
 View, edit, and delete events with:
 - Table view using st.dataframe with native row selection
-- Filter by Area + Category drill-down + Date range
+- Filter by Area + Category drill-down + Date range + Sort order
 - Toolbar actions (Edit/Delete/Export/Import) above table
 - Downstream category filter (includes all sub-categories)
 - Bulk delete with row selection
 - Category_Path display (ISV-style)
 - Attribute value formatting by type
 - Excel Export/Import with unified format (Master Plan V2)
+
+CHANGELOG v2.6.1:
+- 🐛 FIXED: Export UI cleanup after actions
+  - Clear export state after Edit/Delete/Import/Filter changes
+  - Prevents stale "Export ready" messages from persisting
+  - Added clear_export_state() helper function
+- ✨ NEW: Sort order selection (Newest first ⬇️ / Oldest first ⬆️)
+  - User can choose sort direction in filters
+  - Sorts by event_date → session_start
+  - Useful for viewing activity sessions chronologically
 
 CHANGELOG v2.6.0:
 - ✨ NEW: Bootstrap system integration
@@ -108,6 +118,22 @@ from src.excel_events_io import (
 # ============================================
 
 EVENTS_PER_PAGE = 20
+
+
+# ============================================
+# HELPER FUNCTIONS
+# ============================================
+
+def clear_export_state():
+    """
+    Clear export state after actions.
+    
+    V2.5.3: Prevents stale export UI from remaining visible after
+    Edit, Delete, Import, or Filter changes.
+    """
+    st.session_state.se_export_data = None
+    st.session_state.se_export_filename = None
+    st.session_state.se_export_count = None
 
 
 # ============================================
@@ -252,7 +278,8 @@ def load_events_with_attributes(
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
     offset: int = 0,
-    limit: int = EVENTS_PER_PAGE
+    limit: int = EVENTS_PER_PAGE,
+    sort_order: str = 'desc'  # V2.5.3: 'desc' = newest first, 'asc' = oldest first
 ) -> Tuple[List[Dict], int]:
     """
     Load events with their attributes for table display.
@@ -260,10 +287,12 @@ def load_events_with_attributes(
     Args:
         area_id: Filter by area (converted to category_ids internally)
         category_ids: List of category IDs to filter (supports downstream filtering)
+        sort_order: 'desc' for newest first (default), 'asc' for oldest first
     
     Returns:
         Tuple of (events list with attributes, total count)
     
+    v2.5.3: Added sort_order parameter for flexible sorting
     v2.2.0: Fixed filtering - now done in SQL query, not Python (P1 fix)
     """
     try:
@@ -294,9 +323,10 @@ def load_events_with_attributes(
         if date_to:
             query = query.lte('event_date', date_to.isoformat())
         
-        # Execute query with pagination
-        query = query.order('event_date', desc=True) \
-                     .order('session_start', desc=True) \
+        # V2.5.3: Apply sort order based on parameter
+        desc_order = (sort_order == 'desc')
+        query = query.order('event_date', desc=desc_order) \
+                     .order('session_start', desc=desc_order) \
                      .range(offset, offset + limit - 1)
         
         resp = query.execute()
@@ -617,6 +647,8 @@ def render_show_events(client, user_id: str):
         st.session_state.se_export_count = None
     if 'se_import_result' not in st.session_state:
         st.session_state.se_import_result = None  # {'type': 'success'|'error'|'warning', 'message': str, 'details': list}
+    if 'se_sort_order' not in st.session_state:
+        st.session_state.se_sort_order = 'desc'  # V2.5.3: 'desc' = newest first, 'asc' = oldest first
     
     # Display import result messages (persists through rerun)
     if st.session_state.se_import_result:
@@ -671,7 +703,7 @@ def render_show_events(client, user_id: str):
     # ─────────────────────────────────────────
     # FILTERS ROW
     # ─────────────────────────────────────────
-    col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+    col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 1.5])
     
     with col1:
         area_options = {"all": "All Areas"} | {a['id']: f"📦 {a['name']}" for a in areas}
@@ -695,11 +727,13 @@ def render_show_events(client, user_id: str):
                 st.session_state.se_category_id = None
                 st.session_state.se_page = 0
                 st.session_state.se_selected_events = set()  # Clear selection on filter change
+                clear_export_state()  # V2.5.3: Clear export UI
         elif selected_area != st.session_state.se_area_id:
             st.session_state.se_area_id = selected_area
             st.session_state.se_category_id = None
             st.session_state.se_page = 0
             st.session_state.se_selected_events = set()  # Clear selection on filter change
+            clear_export_state()  # V2.5.3: Clear export UI
     
     # Load categories for selected area
     categories = []
@@ -727,9 +761,11 @@ def render_show_events(client, user_id: str):
                 if st.session_state.se_category_id is not None:
                     st.session_state.se_category_id = None
                     st.session_state.se_selected_events = set()  # Clear selection on filter change
+                    clear_export_state()  # V2.5.3: Clear export UI
             elif selected_cat != st.session_state.se_category_id:
                 st.session_state.se_category_id = selected_cat
                 st.session_state.se_selected_events = set()  # Clear selection on filter change
+                clear_export_state()  # V2.5.3: Clear export UI
         else:
             st.selectbox("📂 Category", ["Select area first"], disabled=True, key="se_cat_disabled")
     
@@ -746,6 +782,22 @@ def render_show_events(client, user_id: str):
             value=date.today(),
             key="se_date_to"
         )
+    
+    with col5:
+        # V2.5.3: Sort order selection
+        sort_options = {
+            'desc': '⬇️ Newest first',
+            'asc': '⬆️ Oldest first'
+        }
+        selected_sort = st.selectbox(
+            "🔄 Sort",
+            options=['desc', 'asc'],
+            format_func=lambda x: sort_options[x],
+            index=0 if st.session_state.se_sort_order == 'desc' else 1,
+            key="se_sort_filter"
+        )
+        if selected_sort != st.session_state.se_sort_order:
+            st.session_state.se_sort_order = selected_sort
     
     st.markdown("---")
     
@@ -769,7 +821,8 @@ def render_show_events(client, user_id: str):
         date_from=date_from,
         date_to=date_to,
         offset=offset,
-        limit=EVENTS_PER_PAGE
+        limit=EVENTS_PER_PAGE,
+        sort_order=st.session_state.se_sort_order  # V2.5.3: User-selected sort order
     )
     
     if not events:
@@ -923,6 +976,7 @@ def render_show_events(client, user_id: str):
                     st.success(f"✅ Deleted {success} events")
                 else:
                     st.warning(f"Deleted {success}, failed {errors}")
+                clear_export_state()  # V2.5.3: Clear export UI after delete
                 st.rerun()
         with confirm_col2:
             if st.button("Cancel"):
@@ -1065,12 +1119,14 @@ def render_show_events(client, user_id: str):
                         # Reset import state
                         st.session_state.se_import_file = None
                         st.session_state.se_upload_counter += 1
+                        clear_export_state()  # V2.5.3: Clear export UI after import
                         st.rerun()
                 
                 with btn_col2:
                     if st.button("✕ Cancel", use_container_width=True):
                         st.session_state.se_import_file = None
                         st.session_state.se_upload_counter += 1
+                        clear_export_state()  # V2.5.3: Clear export UI
                         st.rerun()
             else:
                 # No events found in Excel
@@ -1078,6 +1134,7 @@ def render_show_events(client, user_id: str):
                 if st.button("✕ Cancel", use_container_width=True):
                     st.session_state.se_import_file = None
                     st.session_state.se_upload_counter += 1
+                    clear_export_state()  # V2.5.3: Clear export UI
                     st.rerun()
         else:
             # Cancel button when no file uploaded
@@ -1123,6 +1180,7 @@ def render_show_events(client, user_id: str):
             if st.button("◀ Previous", key="prev_page", use_container_width=True):
                 st.session_state.se_page -= 1
                 st.session_state.se_edit_event = None
+                clear_export_state()  # V2.5.3: Clear export UI
                 st.rerun()
     
     with page_col2:
@@ -1133,6 +1191,7 @@ def render_show_events(client, user_id: str):
             if st.button("Next ▶", key="next_page", use_container_width=True):
                 st.session_state.se_page += 1
                 st.session_state.se_edit_event = None
+                clear_export_state()  # V2.5.3: Clear export UI
                 st.rerun()
 
 
@@ -1169,10 +1228,12 @@ def render_event_edit_modal(client, user_id: str, event: Dict, all_categories: D
                     st.session_state.se_edit_event = None
                     st.session_state.se_edit_list = []
                     st.session_state.se_edit_index = 0
+                    clear_export_state()  # V2.5.3: Clear export UI
                     st.rerun()
         else:
             if st.button("✕ Close", key="close_edit"):
                 st.session_state.se_edit_event = None
+                clear_export_state()  # V2.5.3: Clear export UI
                 st.rerun()
         
         st.markdown("---")
@@ -1230,6 +1291,7 @@ def render_event_edit_modal(client, user_id: str, event: Dict, all_categories: D
             success, msg = update_event(client, user_id, event_id, updates)
             if success:
                 st.success("✅ Event updated!")
+                clear_export_state()  # V2.5.3: Clear export UI after edit
                 st.rerun()
             else:
                 st.error(f"❌ {msg}")

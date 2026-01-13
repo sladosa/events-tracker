@@ -1,13 +1,26 @@
 """
-Events Tracker - Unified Excel Events I/O Module V2.5.0
+Events Tracker - Unified Excel Events I/O Module V2.5.3
 ========================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-12 13:00 UTC
+Last Modified: 2025-01-13 13:30 UTC
 Python: 3.11
-Version: 2.5.2
+Version: 2.5.3
 
 Description:
 Unified Excel Export/Import for events with enhanced formatting and LEGEND-BASED import.
+
+CRITICAL FIXES in V2.5.3:
+- 🐛 FIXED: session_start default (09:00) now properly applied!
+  - Empty or '09:00' → creates timestamp with 09:00 (not NULL)
+  - CREATE and UPDATE paths both fixed
+  - All events now have valid session_start timestamps ✅
+- 🌳 FIXED: Multi-level event creation from single Excel row!
+  - One row can create MULTIPLE events (one per hierarchy level)
+  - Example: Row with Cardio + Running attrs → creates 2 events
+  - All events from same row share SAME session_start timestamp
+  - Only creates event if BAREM 1 attribute for that level is populated
+  - Only populated attributes saved (empty attributes skipped)
+  - Enables true session/activity grouping by timestamp ✅
 
 CRITICAL FIXES in V2.5.2:
 - 🐛 FIXED: Parent attributes now ACTUALLY BLUE (was still yellow!)
@@ -268,6 +281,46 @@ def get_category_ids_for_area(client, user_id: str, area_id: str) -> List[str]:
         return [c['id'] for c in (resp.data or [])]
     except Exception:
         return []
+
+
+def get_hierarchy_levels_for_path(category_path: str, categories_dict: Dict[str, Dict]) -> List[Tuple[str, str]]:
+    """
+    Extract all hierarchy levels from a Category_Path.
+    
+    V2.5.3 NEW: Support multi-level event creation from single Excel row.
+    
+    Example:
+        category_path = "Cardio > Running"
+        Returns: [
+            ("Cardio", category_id_for_cardio),
+            ("Cardio > Running", category_id_for_running)
+        ]
+    
+    Args:
+        category_path: Full category path (e.g., "Cardio > Running")
+        categories_dict: Dict mapping category_id → category info
+    
+    Returns:
+        List of (partial_path, category_id) tuples for each hierarchy level
+    """
+    if not category_path:
+        return []
+    
+    # Build reverse mapping: full_path → category_id
+    path_to_id = {info['full_path']: cat_id for cat_id, info in categories_dict.items()}
+    
+    # Split path into parts
+    parts = [p.strip() for p in category_path.split('>')]
+    
+    # Build all partial paths
+    result = []
+    for i in range(1, len(parts) + 1):
+        partial_path = ' > '.join(parts[:i])
+        category_id = path_to_id.get(partial_path)
+        if category_id:
+            result.append((partial_path, category_id))
+    
+    return result
 
 
 def get_all_descendant_category_ids(categories_dict: Dict[str, Dict], parent_category_ids: List[str]) -> List[str]:
@@ -1534,20 +1587,39 @@ def apply_import_changes(
     categories_dict: Dict[str, Dict],
     attribute_definitions: List[Dict]
 ) -> Tuple[int, int, List[str]]:
-    """Apply import changes to database."""
+    """
+    Apply import changes to database.
+    
+    V2.5.3 NEW: Multi-level event creation from single Excel row.
+    - One Excel row can create MULTIPLE events (one per hierarchy level)
+    - All events from same row share SAME session_start timestamp
+    - Only creates event if at least ONE attribute for that level is populated
+    - Only populated attributes are saved (empty attributes skipped)
+    """
     created = 0
     updated = 0
     errors = []
     
+    # Build mapping: (category_id, attr_name) → attr_definition
     attr_by_cat_name = {}
     for attr_def in attribute_definitions:
         key = (attr_def['category_id'], attr_def['name'])
         attr_by_cat_name[key] = attr_def
     
+    # ─────────────────────────────────────────
+    # CREATE EVENTS (V2.5.3: Multi-level support)
+    # ─────────────────────────────────────────
     for event_data in events_to_create:
         try:
-            category_id = event_data.get('_category_id')
+            # Extract Category_Path and get all hierarchy levels
+            category_path = event_data.get('Category_Path', '')
+            hierarchy_levels = get_hierarchy_levels_for_path(category_path, categories_dict)
             
+            if not hierarchy_levels:
+                errors.append(f"Invalid category path: {category_path}")
+                continue
+            
+            # Parse date once (shared by all events from this row)
             event_date = event_data.get('event_date')
             if isinstance(event_date, datetime):
                 event_date = event_date.date().isoformat()
@@ -1575,75 +1647,108 @@ def apply_import_changes(
                 except Exception:
                     event_date = str(event_date)
             
-            # V2.5.0: Handle session_start (TIME) field
+            # V2.5.3: Parse session_start once (SHARED by all events from this row!)
             session_start = event_data.get('session_start', '09:00')
-            if session_start and session_start != '09:00':
+            
+            # Parse time to timestamp (default to 09:00 if empty or '09:00')
+            try:
+                # If empty/None, use default '09:00'
+                if not session_start or str(session_start).strip() == '':
+                    session_start = '09:00'
+                
                 # Parse HH:MM to timestamp
-                try:
-                    # Combine with event_date to create full timestamp
-                    time_parts = str(session_start).split(':')
-                    if len(time_parts) == 2:
-                        hour, minute = int(time_parts[0]), int(time_parts[1])
-                        # Create datetime from date + time
-                        if isinstance(event_date, str):
-                            date_obj = datetime.strptime(event_date, '%Y-%m-%d').date()
-                        else:
-                            date_obj = event_date
-                        dt = datetime.combine(date_obj, datetime.min.time().replace(hour=hour, minute=minute))
-                        session_start = dt.isoformat()
+                time_parts = str(session_start).split(':')
+                if len(time_parts) == 2:
+                    hour, minute = int(time_parts[0]), int(time_parts[1])
+                    # Create datetime from date + time
+                    if isinstance(event_date, str):
+                        date_obj = datetime.strptime(event_date, '%Y-%m-%d').date()
                     else:
-                        session_start = None
+                        date_obj = event_date
+                    dt = datetime.combine(date_obj, datetime.min.time().replace(hour=hour, minute=minute))
+                    session_start = dt.isoformat()
+                else:
+                    # Invalid format - use default 09:00
+                    if isinstance(event_date, str):
+                        date_obj = datetime.strptime(event_date, '%Y-%m-%d').date()
+                    else:
+                        date_obj = event_date
+                    dt = datetime.combine(date_obj, datetime.min.time().replace(hour=9, minute=0))
+                    session_start = dt.isoformat()
+            except:
+                # Fallback to 09:00 on any error
+                try:
+                    if isinstance(event_date, str):
+                        date_obj = datetime.strptime(event_date, '%Y-%m-%d').date()
+                    else:
+                        date_obj = event_date
+                    dt = datetime.combine(date_obj, datetime.min.time().replace(hour=9, minute=0))
+                    session_start = dt.isoformat()
                 except:
                     session_start = None
-            else:
-                session_start = None
             
-            new_event = {
-                'user_id': user_id,
-                'category_id': category_id,
-                'event_date': event_date,
-                'session_start': session_start,  # V2.5.0: TIME field
-                'comment': event_data.get('comment', '') or None
-            }
-            
-            result = client.table('events').insert(new_event).execute()
-            event_id = result.data[0]['id']
-            
-            for key, value in event_data.items():
-                if key in FIXED_COLUMNS or key.startswith('_') or not value:
+            # V2.5.3: Create event for EACH hierarchy level that has populated attributes
+            for partial_path, category_id in hierarchy_levels:
+                # Find which attributes belong to this category level
+                level_attributes = {}
+                
+                for key, value in event_data.items():
+                    if key in FIXED_COLUMNS or key.startswith('_') or not value:
+                        continue
+                    
+                    # Check if this attribute belongs to current category level
+                    attr_def = attr_by_cat_name.get((category_id, key))
+                    if attr_def:
+                        level_attributes[key] = (value, attr_def)
+                
+                # Only create event if at least ONE attribute is populated for this level
+                if not level_attributes:
                     continue
                 
-                attr_def = attr_by_cat_name.get((category_id, key))
-                if not attr_def:
-                    continue
-                
-                attr_data = {
-                    'event_id': event_id,
-                    'attribute_definition_id': attr_def['id'],
+                # Create event for this hierarchy level
+                new_event = {
                     'user_id': user_id,
-                    'value_text': None,
-                    'value_number': None,
-                    'value_datetime': None,
-                    'value_boolean': None
+                    'category_id': category_id,
+                    'event_date': event_date,
+                    'session_start': session_start,  # SAME timestamp for all levels!
+                    'comment': event_data.get('comment', '') or None
                 }
                 
-                data_type = attr_def.get('data_type', 'text')
-                if data_type == 'number':
-                    attr_data['value_number'] = float(value) if value else None
-                elif data_type == 'boolean':
-                    attr_data['value_boolean'] = bool(value)
-                elif data_type == 'datetime':
-                    attr_data['value_datetime'] = str(value)
-                else:
-                    attr_data['value_text'] = str(value)
+                result = client.table('events').insert(new_event).execute()
+                event_id = result.data[0]['id']
                 
-                client.table('event_attributes').insert(attr_data).execute()
-            
-            created += 1
+                # Insert only populated attributes for this level
+                for attr_name, (value, attr_def) in level_attributes.items():
+                    attr_data = {
+                        'event_id': event_id,
+                        'attribute_definition_id': attr_def['id'],
+                        'user_id': user_id,
+                        'value_text': None,
+                        'value_number': None,
+                        'value_datetime': None,
+                        'value_boolean': None
+                    }
+                    
+                    data_type = attr_def.get('data_type', 'text')
+                    if data_type == 'number':
+                        attr_data['value_number'] = float(value) if value else None
+                    elif data_type == 'boolean':
+                        attr_data['value_boolean'] = bool(value)
+                    elif data_type == 'datetime':
+                        attr_data['value_datetime'] = str(value)
+                    else:
+                        attr_data['value_text'] = str(value)
+                    
+                    client.table('event_attributes').insert(attr_data).execute()
+                
+                created += 1
             
         except Exception as e:
             errors.append(f"Error creating event: {str(e)}")
     
+    # ─────────────────────────────────────────
+    # UPDATE EVENTS (unchanged logic)
+    # ─────────────────────────────────────────
     for event_data in events_to_update:
         try:
             event_id = event_data.get('event_id')
@@ -1673,27 +1778,45 @@ def apply_import_changes(
                 except Exception:
                     event_date = str(event_date)
             
-            # V2.5.0: Handle session_start (TIME) field
+            # V2.5.3: Handle session_start (TIME) field - FIXED default handling
             session_start = event_data.get('session_start', '09:00')
-            if session_start and session_start != '09:00':
+            
+            # Parse time to timestamp (default to 09:00 if empty or '09:00')
+            try:
+                # If empty/None, use default '09:00'
+                if not session_start or str(session_start).strip() == '':
+                    session_start = '09:00'
+                
                 # Parse HH:MM to timestamp
-                try:
-                    time_parts = str(session_start).split(':')
-                    if len(time_parts) == 2:
-                        hour, minute = int(time_parts[0]), int(time_parts[1])
-                        # Create datetime from date + time
-                        if isinstance(event_date, str):
-                            date_obj = datetime.strptime(event_date, '%Y-%m-%d').date()
-                        else:
-                            date_obj = event_date
-                        dt = datetime.combine(date_obj, datetime.min.time().replace(hour=hour, minute=minute))
-                        session_start = dt.isoformat()
+                time_parts = str(session_start).split(':')
+                if len(time_parts) == 2:
+                    hour, minute = int(time_parts[0]), int(time_parts[1])
+                    # Create datetime from date + time
+                    if isinstance(event_date, str):
+                        date_obj = datetime.strptime(event_date, '%Y-%m-%d').date()
                     else:
-                        session_start = None
+                        date_obj = event_date
+                    dt = datetime.combine(date_obj, datetime.min.time().replace(hour=hour, minute=minute))
+                    session_start = dt.isoformat()
+                else:
+                    # Invalid format - use default 09:00
+                    if isinstance(event_date, str):
+                        date_obj = datetime.strptime(event_date, '%Y-%m-%d').date()
+                    else:
+                        date_obj = event_date
+                    dt = datetime.combine(date_obj, datetime.min.time().replace(hour=9, minute=0))
+                    session_start = dt.isoformat()
+            except:
+                # Fallback to 09:00 on any error
+                try:
+                    if isinstance(event_date, str):
+                        date_obj = datetime.strptime(event_date, '%Y-%m-%d').date()
+                    else:
+                        date_obj = event_date
+                    dt = datetime.combine(date_obj, datetime.min.time().replace(hour=9, minute=0))
+                    session_start = dt.isoformat()
                 except:
                     session_start = None
-            else:
-                session_start = None
             
             updates = {
                 'event_date': event_date,
