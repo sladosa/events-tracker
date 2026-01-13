@@ -1,13 +1,22 @@
 """
-Events Tracker - Unified Excel Events I/O Module V2.5.3
+Events Tracker - Unified Excel Events I/O Module V2.5.4
 ========================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-13 13:30 UTC
+Last Modified: 2025-01-13 14:15 UTC
 Python: 3.11
-Version: 2.5.3
+Version: 2.5.4
 
 Description:
 Unified Excel Export/Import for events with enhanced formatting and LEGEND-BASED import.
+
+CRITICAL FIX in V2.5.4:
+- 🐛 FIXED: UPDATE path now supports multi-level event creation!
+  - When updating event and populating parent category attributes → creates parent events
+  - Example: Update "Cardio > Running" + populate Cardio attrs → creates NEW Cardio event
+  - Parent event shares SAME session_start timestamp as child event
+  - Enables full multi-level workflow for both CREATE and UPDATE
+  - Previously: UPDATE only modified existing event, ignored parent attributes
+  - Now: UPDATE checks hierarchy, creates parent events if attributes populated ✅
 
 CRITICAL FIXES in V2.5.3:
 - 🐛 FIXED: session_start default (09:00) now properly applied!
@@ -1747,12 +1756,36 @@ def apply_import_changes(
             errors.append(f"Error creating event: {str(e)}")
     
     # ─────────────────────────────────────────
-    # UPDATE EVENTS (unchanged logic)
+    # UPDATE EVENTS (V2.5.4: Multi-level support added)
     # ─────────────────────────────────────────
     for event_data in events_to_update:
         try:
             event_id = event_data.get('event_id')
             
+            # First, fetch existing event to get its category_id
+            select_fields = 'id, category_id, event_attributes(id, attribute_definition_id)'
+            existing = client.table('events') \
+                .select(select_fields) \
+                .eq('id', event_id) \
+                .eq('user_id', user_id) \
+                .single() \
+                .execute()
+            
+            if not existing.data:
+                errors.append(f"Event {event_id} not found")
+                continue
+            
+            existing_category_id = existing.data.get('category_id')
+            
+            # Extract hierarchy levels from Category_Path
+            category_path = event_data.get('Category_Path', '')
+            hierarchy_levels = get_hierarchy_levels_for_path(category_path, categories_dict)
+            
+            if not hierarchy_levels:
+                errors.append(f"Invalid category path for event {event_id}: {category_path}")
+                continue
+            
+            # Parse date once (shared by all events from this row)
             event_date = event_data.get('event_date')
             if isinstance(event_date, datetime):
                 event_date = event_date.date().isoformat()
@@ -1778,7 +1811,7 @@ def apply_import_changes(
                 except Exception:
                     event_date = str(event_date)
             
-            # V2.5.3: Handle session_start (TIME) field - FIXED default handling
+            # V2.5.3: Parse session_start once (SHARED by all events from this row!)
             session_start = event_data.get('session_start', '09:00')
             
             # Parse time to timestamp (default to 09:00 if empty or '09:00')
@@ -1818,9 +1851,71 @@ def apply_import_changes(
                 except:
                     session_start = None
             
+            # V2.5.4 NEW: Create parent events for levels with populated attributes
+            # (only for parent levels, NOT for the existing event's category)
+            for partial_path, category_id in hierarchy_levels:
+                # Skip the existing event's category (we'll UPDATE it later)
+                if category_id == existing_category_id:
+                    continue
+                
+                # Find which attributes belong to this parent category level
+                level_attributes = {}
+                
+                for key, value in event_data.items():
+                    if key in FIXED_COLUMNS or key.startswith('_') or not value:
+                        continue
+                    
+                    # Check if this attribute belongs to current parent category level
+                    attr_def = attr_by_cat_name.get((category_id, key))
+                    if attr_def:
+                        level_attributes[key] = (value, attr_def)
+                
+                # Only create parent event if at least ONE attribute is populated for this level
+                if not level_attributes:
+                    continue
+                
+                # Create parent event with SAME timestamp!
+                new_parent_event = {
+                    'user_id': user_id,
+                    'category_id': category_id,
+                    'event_date': event_date,
+                    'session_start': session_start,  # SAME timestamp as child!
+                    'comment': event_data.get('comment', '') or None
+                }
+                
+                result = client.table('events').insert(new_parent_event).execute()
+                parent_event_id = result.data[0]['id']
+                
+                # Insert only populated attributes for this parent level
+                for attr_name, (value, attr_def) in level_attributes.items():
+                    attr_data = {
+                        'event_id': parent_event_id,
+                        'attribute_definition_id': attr_def['id'],
+                        'user_id': user_id,
+                        'value_text': None,
+                        'value_number': None,
+                        'value_datetime': None,
+                        'value_boolean': None
+                    }
+                    
+                    data_type = attr_def.get('data_type', 'text')
+                    if data_type == 'number':
+                        attr_data['value_number'] = float(value) if value else None
+                    elif data_type == 'boolean':
+                        attr_data['value_boolean'] = bool(value)
+                    elif data_type == 'datetime':
+                        attr_data['value_datetime'] = str(value)
+                    else:
+                        attr_data['value_text'] = str(value)
+                    
+                    client.table('event_attributes').insert(attr_data).execute()
+                
+                created += 1  # Count parent event as created
+            
+            # Now UPDATE the existing child event (normal UPDATE logic)
             updates = {
                 'event_date': event_date,
-                'session_start': session_start,  # V2.5.0: TIME field
+                'session_start': session_start,
                 'comment': event_data.get('comment', '') or None,
                 'edited_at': datetime.now().isoformat()
             }
@@ -1831,29 +1926,18 @@ def apply_import_changes(
                 .eq('user_id', user_id) \
                 .execute()
             
-            select_fields = 'id, category_id, event_attributes(id, attribute_definition_id)'
-            existing = client.table('events') \
-                .select(select_fields) \
-                .eq('id', event_id) \
-                .eq('user_id', user_id) \
-                .single() \
-                .execute()
-            
-            if not existing.data:
-                errors.append(f"Event {event_id} not found")
-                continue
-            
-            category_id = existing.data.get('category_id')
             existing_attrs = {
                 ea['attribute_definition_id']: ea['id']
                 for ea in existing.data.get('event_attributes', [])
             }
             
+            # Update/insert attributes for the child event (only its own category's attributes)
             for key, value in event_data.items():
                 if key in FIXED_COLUMNS or key.startswith('_'):
                     continue
                 
-                attr_def = attr_by_cat_name.get((category_id, key))
+                # Only update attributes that belong to the existing event's category
+                attr_def = attr_by_cat_name.get((existing_category_id, key))
                 if not attr_def:
                     continue
                 
