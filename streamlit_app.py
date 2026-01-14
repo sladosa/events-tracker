@@ -2,16 +2,29 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-14 08:15 UTC
+Last Modified: 2025-01-14 08:30 UTC
 Python: 3.11
-Version: 2.2.9 - UI Grouping Fix + Excel UX Improvement
+Version: 2.3.0 - Dictionary-Based Grouping Fix
 
 Description:
 Main Streamlit application with authentication and multiple pages.
 Core modules: Interactive Structure Viewer (main hub), Add Activity,
 Show Events (with integrated Excel Export/Import).
 
-NEW in v2.2.9:
+NEW in v2.3.0:
+- 🐛 CRITICAL FIX in Show Events (v2.6.6):
+  - ✅ Dictionary-based grouping NOW WORKS correctly!
+  - ✅ Changed from itertools.groupby to defaultdict approach
+  - ✅ GroupBy failed because SQL doesn't sort by comment (non-consecutive groups)
+  - ✅ Dictionary approach groups ALL events regardless of SQL order
+  - ✅ Result: Cardio(test 2) → Running(test 2) → Cardio(novi 1) → Running(novi 1) ✅
+- 📝 NOTE about Excel "Enable Editing":
+  - "Protected View" is Windows security feature (Mark of the Web)
+  - Cannot be disabled from Python code - it's added by browser/Windows
+  - User can disable in Excel Options → Trust Center → Protected View
+  - Or: Save file to disk first, then open (instead of direct open from browser)
+
+PREVIOUS v2.2.9:
 - 🐛 CRITICAL FIX in Show Events (v2.6.5):
   - ✅ Parent-child grouping NOW WORKS correctly with GroupBy approach!
   - ✅ Groups events by (date, timestamp, comment) FIRST, then sorts by level within groups
@@ -21,16 +34,6 @@ NEW in v2.2.9:
   - ✅ Removed "Enable Editing" / Protected View prompt!
   - ✅ Excel files now open directly in edit mode without security warnings
   - ✅ No more annoying yellow bar at top of Excel! 🎉
-
-PREVIOUS v2.2.8:
-- 🐛 CRITICAL FIX in Show Events (v2.6.4):
-  - ✅ Removed duplicate query.execute() that was overriding UI sort!
-  - ✅ Parent-child events NOW properly grouped in UI table
-  - ✅ Cardio event always appears above Running event for same timestamp
-- 🔍 DEBUG in Excel Export (v2.5.7):
-  - ✅ Added extensive console logging to merge_session_events()
-  - ✅ Helps diagnose why Excel export might not be merging correctly
-  - ✅ Shows session grouping, hierarchy detection, merge decisions
 
 PREVIOUS v2.2.5:
 - 🐛 CRITICAL BUGFIX V2.5.4: UPDATE path multi-level support

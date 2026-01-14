@@ -2,9 +2,9 @@
 Events Tracker - Show Events Module
 ====================================
 Created: 2025-12-15 09:45 UTC
-Last Modified: 2025-01-14 08:15 UTC
+Last Modified: 2025-01-14 08:30 UTC
 Python: 3.11
-Version: 2.6.5 - Fixed Parent-Child Grouping (GroupBy Approach)
+Version: 2.6.6 - Fixed Grouping with Dictionary Approach
 
 Description:
 View, edit, and delete events with:
@@ -16,6 +16,16 @@ View, edit, and delete events with:
 - Category_Path display (ISV-style)
 - Attribute value formatting by type
 - Excel Export/Import with unified format (Master Plan V2)
+
+CHANGELOG v2.6.6:
+- 🐛 CRITICAL FIX: Dictionary-based grouping NOW WORKS correctly!
+  - Changed from itertools.groupby to defaultdict grouping
+  - GroupBy failed because SQL doesn't sort by comment → non-consecutive groups
+  - Dictionary approach groups ALL events by (date, time, comment) regardless of SQL order
+  - Then sorts groups by (date, time) in user direction
+  - Within each group, sorts by level (parent → child)
+  - Result: Cardio (test 2) → Running (test 2) → Cardio (novi 1) → Running (novi 1) ✅
+  - Previous bug: GroupBy only worked on consecutive items from SQL ❌
 
 CHANGELOG v2.6.5:
 - 🐛 CRITICAL FIX: Parent-child grouping NOW WORKS correctly!
@@ -32,13 +42,6 @@ CHANGELOG v2.6.4:
   - This was causing parent-child events to NOT be grouped properly in UI
   - Fix: Deleted duplicate query execution, kept only first one with proper sort
   - Result: Parent (Cardio) now ALWAYS appears above child (Running) for same timestamp ✅
-
-CHANGELOG v2.6.3:
-- 🐛 FIXED: UI sort now works correctly!
-  - Stable sort preserves SQL date/time order
-  - Python re-sorts only by category.level (ascending always)
-  - Parent (level=1) now ALWAYS above child (level=2) for same timestamp
-  - Result: "test 2 - corr" events properly grouped together ✅
   - Added tertiary sort by category.level (ascending)
   - Much cleaner visual grouping of multi-level activities ✅
 
@@ -359,36 +362,47 @@ def load_events_with_attributes(
         resp = query.execute()
         events = resp.data or []
         
-        # V2.6.5 FIX: Group by (date, timestamp, comment) and sort within groups by level
-        # This ensures parent-child events stay together instead of all parents first, then all children
-        # Example: Cardio(test 21) → Running(test 21) → Cardio(test 2) → Running(test 2)
-        # Instead of: Cardio(test 21) → Cardio(test 2) → Running(test 21) → Running(test 2)
+        # V2.6.6 FIX: Dictionary-based grouping (doesn't require consecutive items!)
+        # GroupBy approach failed because SQL doesn't sort by comment, so consecutive groups weren't formed
+        # This approach groups ALL events by (date, timestamp, comment) regardless of order
         
-        from itertools import groupby
+        from collections import defaultdict
         
-        def group_and_sort_events(events):
+        def group_and_sort_events(events, sort_order):
             """
             Group events by (date, timestamp, comment) and sort within groups by level.
-            Preserves original SQL order of groups.
+            Doesn't require consecutive items - works on any SQL order.
             """
-            # Group consecutive events with same (date, timestamp, comment)
-            # NOTE: groupby only groups CONSECUTIVE items, so SQL order is preserved
-            grouped = []
-            for key, group in groupby(events, key=lambda e: (
-                e.get('event_date'),
-                e.get('session_start'),
-                e.get('comment')
-            )):
-                # Sort group by level ascending (parent before child)
-                sorted_group = sorted(
-                    list(group), 
-                    key=lambda e: e.get('categories', {}).get('level', 999)
+            # Group events by (date, timestamp, comment) in a dictionary
+            groups = defaultdict(list)
+            for event in events:
+                key = (
+                    event.get('event_date'),
+                    event.get('session_start'),
+                    event.get('comment')
                 )
-                grouped.extend(sorted_group)
+                groups[key].append(event)
             
-            return grouped
+            # Sort each group by level (parent before child)
+            for key in groups:
+                groups[key].sort(key=lambda e: e.get('categories', {}).get('level', 999))
+            
+            # Flatten groups back to list, maintaining date/time sort order
+            # Sort groups by (date, time) in user-selected direction
+            desc_order = (sort_order == 'desc')
+            sorted_keys = sorted(
+                groups.keys(), 
+                key=lambda k: (k[0], k[1]),  # (date, time)
+                reverse=desc_order
+            )
+            
+            result = []
+            for key in sorted_keys:
+                result.extend(groups[key])
+            
+            return result
         
-        events = group_and_sort_events(events)
+        events = group_and_sort_events(events, sort_order)
         
         # Get total count from response (count='exact' in select)
         total_count = resp.count if hasattr(resp, 'count') and resp.count is not None else len(events)
