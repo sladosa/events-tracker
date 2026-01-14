@@ -2,9 +2,9 @@
 Events Tracker - Show Events Module
 ====================================
 Created: 2025-12-15 09:45 UTC
-Last Modified: 2025-01-13 15:35 UTC
+Last Modified: 2025-01-14 08:00 UTC
 Python: 3.11
-Version: 2.6.3 - Sort Bugfix
+Version: 2.6.4 - Critical Bugfix (Dupli Query Execute)
 
 Description:
 View, edit, and delete events with:
@@ -16,6 +16,13 @@ View, edit, and delete events with:
 - Category_Path display (ISV-style)
 - Attribute value formatting by type
 - Excel Export/Import with unified format (Master Plan V2)
+
+CHANGELOG v2.6.4:
+- 🐛 CRITICAL FIX: Removed duplicate query.execute() that was overriding sorted events!
+  - Lines 357-358 were re-executing query and overriding the sort by level
+  - This was causing parent-child events to NOT be grouped properly in UI
+  - Fix: Deleted duplicate query execution, kept only first one with proper sort
+  - Result: Parent (Cardio) now ALWAYS appears above child (Running) for same timestamp ✅
 
 CHANGELOG v2.6.3:
 - 🐛 FIXED: UI sort now works correctly!
@@ -348,14 +355,11 @@ def load_events_with_attributes(
         resp = query.execute()
         events = resp.data or []
         
-        # V2.5.6 FIX: Stable sort by category.level (ascending ALWAYS)
+        # V2.5.7 FIX: Stable sort by category.level (ascending ALWAYS)
         # This ensures parent categories appear before child categories for same timestamp
         # Python's sort is stable - preserves original order for equal keys
         # So date/time order from SQL is preserved, we just re-order same-timestamp groups by level
         events = sorted(events, key=lambda e: e.get('categories', {}).get('level', 999))
-        
-        resp = query.execute()
-        events = resp.data or []
         
         # Get total count from response (count='exact' in select)
         total_count = resp.count if hasattr(resp, 'count') and resp.count is not None else len(events)

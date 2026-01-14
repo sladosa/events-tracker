@@ -2,16 +2,26 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-13 15:40 UTC
+Last Modified: 2025-01-14 08:00 UTC
 Python: 3.11
-Version: 2.2.7 - Bugfixes
+Version: 2.2.8 - Critical Bugfix (Dupli Query Execute)
 
 Description:
 Main Streamlit application with authentication and multiple pages.
 Core modules: Interactive Structure Viewer (main hub), Add Activity,
 Show Events (with integrated Excel Export/Import).
 
-NEW in v2.2.7:
+NEW in v2.2.8:
+- 🐛 CRITICAL FIX in Show Events (v2.6.4):
+  - ✅ Removed duplicate query.execute() that was overriding UI sort!
+  - ✅ Parent-child events NOW properly grouped in UI table
+  - ✅ Cardio event always appears above Running event for same timestamp
+- 🔍 DEBUG in Excel Export (v2.5.7):
+  - ✅ Added extensive console logging to merge_session_events()
+  - ✅ Helps diagnose why Excel export might not be merging correctly
+  - ✅ Shows session grouping, hierarchy detection, merge decisions
+
+PREVIOUS v2.2.7:
 - 🐛 CRITICAL BUGFIXES:
   - ✅ UI Sort: Fixed parent-child grouping (stable sort by level only)
   - ✅ Export Merge: Fixed grouping by (timestamp, comment) combination

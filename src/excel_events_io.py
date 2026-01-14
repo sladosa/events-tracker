@@ -1,13 +1,25 @@
 """
-Events Tracker - Unified Excel Events I/O Module V2.5.6
+Events Tracker - Unified Excel Events I/O Module V2.5.7
 ========================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-13 15:30 UTC
+Last Modified: 2025-01-14 08:00 UTC
 Python: 3.11
-Version: 2.5.6
+Version: 2.5.7
 
 Description:
 Unified Excel Export/Import for events with enhanced formatting and LEGEND-BASED import.
+
+DEBUG IMPROVEMENTS in V2.5.7:
+- 🔍 ADDED: Extensive debug logging in merge_session_events()
+  - Logs session grouping, hierarchy detection, merge decisions
+  - Helps diagnose Excel export merge issues
+  - Can be removed once bugs are resolved
+  - Console output shows:
+    * Number of sessions found
+    * Events per session
+    * Category levels and hierarchy detection
+    * Merge vs separate export decisions
+    * Final merged event count
 
 BUGFIXES in V2.5.6:
 - 🐛 FIXED: Export merging now works correctly!
@@ -522,6 +534,7 @@ def merge_session_events(events: List[Dict], categories_dict: Dict[str, Dict]) -
     """
     Merge hierarchical events with same session_start AND comment into single export rows.
     
+    V2.5.7 DEBUG: Added extensive logging to diagnose merge issues.
     V2.5.6 FIXED: Group by (timestamp, comment) combination, not just timestamp.
     
     Logic:
@@ -547,6 +560,10 @@ def merge_session_events(events: List[Dict], categories_dict: Dict[str, Dict]) -
     Returns:
         List of events with merged attributes
     """
+    print(f"\n{'='*60}")
+    print(f"DEBUG merge_session_events: Called with {len(events)} events")
+    print(f"{'='*60}")
+    
     # V2.5.6 FIX: Group by (timestamp, comment) combination
     # This prevents merging unrelated events with same timestamp but different comments
     sessions = {}
@@ -557,21 +574,33 @@ def merge_session_events(events: List[Dict], categories_dict: Dict[str, Dict]) -
             sessions[key] = []
         sessions[key].append(event)
     
+    print(f"DEBUG: Found {len(sessions)} unique sessions (timestamp+comment groups)")
+    
     merged_events = []
     
     for (timestamp, comment), session_events in sessions.items():
+        print(f"\nDEBUG Session: timestamp={timestamp}, comment={comment}")
+        print(f"  → {len(session_events)} event(s) in this session")
+        
         if len(session_events) == 1:
             # Single event - no merging needed
+            print(f"  → SINGLE event - no merge needed")
             merged_events.append(session_events[0])
             continue
         
         # Multiple events with same timestamp AND comment
+        print(f"  → MULTIPLE events - checking for hierarchy...")
+        
         # Get category levels for each event
         event_levels = []
         for event in session_events:
             cat_id = event.get('category_id')
             cat_info = categories_dict.get(cat_id, {})
             level = cat_info.get('level', 0)
+            cat_name = cat_info.get('name', 'Unknown')
+            num_attrs = len(event.get('event_attributes', []))
+            
+            print(f"    Event: cat={cat_name}, level={level}, attrs={num_attrs}")
             event_levels.append((event, level))
         
         # Sort by level (parent first)
@@ -581,16 +610,26 @@ def merge_session_events(events: List[Dict], categories_dict: Dict[str, Dict]) -
         levels = [el[1] for el in event_levels]
         unique_levels = set(levels)
         
+        print(f"  → Levels: {levels}")
+        print(f"  → Unique levels: {unique_levels}")
+        print(f"  → Is hierarchy? {len(unique_levels) == len(levels) and len(unique_levels) > 1}")
+        
         if len(unique_levels) == len(levels) and len(unique_levels) > 1:
             # All different levels - this is a parent-child hierarchy
             # Merge into the deepest (leaf) event
+            
+            print(f"  → ✅ MERGING into leaf event (level={event_levels[-1][1]})")
             
             leaf_event = event_levels[-1][0].copy()  # Deepest level
             
             # Merge all attributes from all events in the session
             merged_attributes = []
-            for event, _ in event_levels:
-                merged_attributes.extend(event.get('event_attributes', []))
+            for event, level in event_levels:
+                attrs = event.get('event_attributes', [])
+                merged_attributes.extend(attrs)
+                print(f"    Added {len(attrs)} attrs from level={level}")
+            
+            print(f"  → Total merged attributes: {len(merged_attributes)}")
             
             # Replace leaf event's attributes with merged list
             leaf_event['event_attributes'] = merged_attributes
@@ -600,7 +639,11 @@ def merge_session_events(events: List[Dict], categories_dict: Dict[str, Dict]) -
             # Not all different levels - these are independent events
             # (e.g., 2 Cardio events at same time, or same-level siblings)
             # Export separately
+            print(f"  → ❌ NOT a hierarchy - exporting {len(session_events)} events separately")
             merged_events.extend(session_events)
+    
+    print(f"\nDEBUG: Returning {len(merged_events)} merged events (was {len(events)})")
+    print(f"{'='*60}\n")
     
     return merged_events
 
