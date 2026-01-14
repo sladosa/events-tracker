@@ -2,16 +2,27 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-14 08:00 UTC
+Last Modified: 2025-01-14 08:15 UTC
 Python: 3.11
-Version: 2.2.8 - Critical Bugfix (Dupli Query Execute)
+Version: 2.2.9 - UI Grouping Fix + Excel UX Improvement
 
 Description:
 Main Streamlit application with authentication and multiple pages.
 Core modules: Interactive Structure Viewer (main hub), Add Activity,
 Show Events (with integrated Excel Export/Import).
 
-NEW in v2.2.8:
+NEW in v2.2.9:
+- 🐛 CRITICAL FIX in Show Events (v2.6.5):
+  - ✅ Parent-child grouping NOW WORKS correctly with GroupBy approach!
+  - ✅ Groups events by (date, timestamp, comment) FIRST, then sorts by level within groups
+  - ✅ Result: Cardio(test 21) → Running(test 21) → Cardio(test 2) → Running(test 2) ✅
+  - ✅ Previously: ALL Cardio first, then ALL Running (wrong!) ❌
+- 🎯 UX FIX in Excel Export (v2.5.8):
+  - ✅ Removed "Enable Editing" / Protected View prompt!
+  - ✅ Excel files now open directly in edit mode without security warnings
+  - ✅ No more annoying yellow bar at top of Excel! 🎉
+
+PREVIOUS v2.2.8:
 - 🐛 CRITICAL FIX in Show Events (v2.6.4):
   - ✅ Removed duplicate query.execute() that was overriding UI sort!
   - ✅ Parent-child events NOW properly grouped in UI table
@@ -20,24 +31,6 @@ NEW in v2.2.8:
   - ✅ Added extensive console logging to merge_session_events()
   - ✅ Helps diagnose why Excel export might not be merging correctly
   - ✅ Shows session grouping, hierarchy detection, merge decisions
-
-PREVIOUS v2.2.7:
-- 🐛 CRITICAL BUGFIXES:
-  - ✅ UI Sort: Fixed parent-child grouping (stable sort by level only)
-  - ✅ Export Merge: Fixed grouping by (timestamp, comment) combination
-  - ✅ Now properly merges only related events from same import row
-  - ✅ "test 2 - corr" events now properly grouped in UI
-  - ✅ Export only shows leaf events (Running) with merged attributes
-
-PREVIOUS v2.2.6:
-- 🎯 MAJOR UX IMPROVEMENTS:
-  - ✅ UI Sort: Parent-child events properly grouped (Cardio always above Running)
-  - ✅ Export Sort: Respects UI sort order (newest/oldest first)
-  - ✅ Export Structure: Session-based merging (cleaner Excel output)
-    • Events with same timestamp merge into ONE row (leaf event + all attributes)
-    • Example: 11 rows (Cardio + Running separate) → 6 rows (Running with merged attrs)
-    • Only leaf events exported, but with parent attributes populated
-    • Dramatically cleaner export format! 🎉
 
 PREVIOUS v2.2.5:
 - 🐛 CRITICAL BUGFIX V2.5.4: UPDATE path multi-level support

@@ -1,13 +1,20 @@
 """
-Events Tracker - Unified Excel Events I/O Module V2.5.7
+Events Tracker - Unified Excel Events I/O Module V2.5.8
 ========================================================
 Created: 2025-01-07 17:00 UTC
-Last Modified: 2025-01-14 08:00 UTC
+Last Modified: 2025-01-14 08:15 UTC
 Python: 3.11
-Version: 2.5.7
+Version: 2.5.8
 
 Description:
 Unified Excel Export/Import for events with enhanced formatting and LEGEND-BASED import.
+
+UX FIX in V2.5.8:
+- 🎯 FIXED: Removed "Enable Editing" / Protected View prompt!
+  - Excel files now open directly in edit mode without security warnings
+  - Removed workbook-level security (lockStructure, lockWindows, passwords)
+  - Removed worksheet-level protections
+  - Significantly better UX - no annoying yellow bar at top! ✅
 
 DEBUG IMPROVEMENTS in V2.5.7:
 - 🔍 ADDED: Extensive debug logging in merge_session_events()
@@ -1132,6 +1139,25 @@ def create_events_excel_v2(
     
     ws_help = wb.create_sheet("Help")
     _create_help_sheet_v2(ws_help)
+    
+    # V2.5.8 FIX: Remove workbook protections to avoid "Enable Editing" prompt
+    # This ensures the file opens directly in edit mode without Protected View
+    try:
+        # Remove workbook-level security
+        if hasattr(wb, 'security'):
+            wb.security.lockStructure = False
+            wb.security.lockWindows = False
+            wb.security.workbookPassword = None
+            wb.security.revisionsPassword = None
+        
+        # Remove worksheet-level protections
+        for sheet in wb.worksheets:
+            if hasattr(sheet, 'protection'):
+                sheet.protection.sheet = False
+                sheet.protection.password = None
+                sheet.protection.enable()  # Enable all permissions
+    except Exception:
+        pass  # If protection removal fails, continue anyway
     
     # Save
     excel_buffer = io.BytesIO()

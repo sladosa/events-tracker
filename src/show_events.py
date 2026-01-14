@@ -2,9 +2,9 @@
 Events Tracker - Show Events Module
 ====================================
 Created: 2025-12-15 09:45 UTC
-Last Modified: 2025-01-14 08:00 UTC
+Last Modified: 2025-01-14 08:15 UTC
 Python: 3.11
-Version: 2.6.4 - Critical Bugfix (Dupli Query Execute)
+Version: 2.6.5 - Fixed Parent-Child Grouping (GroupBy Approach)
 
 Description:
 View, edit, and delete events with:
@@ -16,6 +16,15 @@ View, edit, and delete events with:
 - Category_Path display (ISV-style)
 - Attribute value formatting by type
 - Excel Export/Import with unified format (Master Plan V2)
+
+CHANGELOG v2.6.5:
+- 🐛 CRITICAL FIX: Parent-child grouping NOW WORKS correctly!
+  - Changed from global sort by level to GROUP BY approach
+  - Groups events by (date, timestamp, comment) FIRST
+  - Then sorts within each group by level (parent → child)
+  - Result: Cardio (test 21) → Running (test 21) → Cardio (test 2) → Running (test 2) ✅
+  - Previously: ALL Cardio first, then ALL Running (wrong grouping) ❌
+  - Uses itertools.groupby to preserve SQL order while sorting within groups
 
 CHANGELOG v2.6.4:
 - 🐛 CRITICAL FIX: Removed duplicate query.execute() that was overriding sorted events!
@@ -30,11 +39,6 @@ CHANGELOG v2.6.3:
   - Python re-sorts only by category.level (ascending always)
   - Parent (level=1) now ALWAYS above child (level=2) for same timestamp
   - Result: "test 2 - corr" events properly grouped together ✅
-
-CHANGELOG v2.6.2:
-- 🎯 IMPROVED: Parent-child sorting in UI
-  - Events with same timestamp now properly grouped
-  - Parent category (e.g., Cardio) ALWAYS appears above child (e.g., Running)
   - Added tertiary sort by category.level (ascending)
   - Much cleaner visual grouping of multi-level activities ✅
 
@@ -355,11 +359,36 @@ def load_events_with_attributes(
         resp = query.execute()
         events = resp.data or []
         
-        # V2.5.7 FIX: Stable sort by category.level (ascending ALWAYS)
-        # This ensures parent categories appear before child categories for same timestamp
-        # Python's sort is stable - preserves original order for equal keys
-        # So date/time order from SQL is preserved, we just re-order same-timestamp groups by level
-        events = sorted(events, key=lambda e: e.get('categories', {}).get('level', 999))
+        # V2.6.5 FIX: Group by (date, timestamp, comment) and sort within groups by level
+        # This ensures parent-child events stay together instead of all parents first, then all children
+        # Example: Cardio(test 21) → Running(test 21) → Cardio(test 2) → Running(test 2)
+        # Instead of: Cardio(test 21) → Cardio(test 2) → Running(test 21) → Running(test 2)
+        
+        from itertools import groupby
+        
+        def group_and_sort_events(events):
+            """
+            Group events by (date, timestamp, comment) and sort within groups by level.
+            Preserves original SQL order of groups.
+            """
+            # Group consecutive events with same (date, timestamp, comment)
+            # NOTE: groupby only groups CONSECUTIVE items, so SQL order is preserved
+            grouped = []
+            for key, group in groupby(events, key=lambda e: (
+                e.get('event_date'),
+                e.get('session_start'),
+                e.get('comment')
+            )):
+                # Sort group by level ascending (parent before child)
+                sorted_group = sorted(
+                    list(group), 
+                    key=lambda e: e.get('categories', {}).get('level', 999)
+                )
+                grouped.extend(sorted_group)
+            
+            return grouped
+        
+        events = group_and_sort_events(events)
         
         # Get total count from response (count='exact' in select)
         total_count = resp.count if hasattr(resp, 'count') and resp.count is not None else len(events)
