@@ -2,16 +2,28 @@
 Events Tracker - Main Application
 ==================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-14 08:30 UTC
+Last Modified: 2025-01-16 12:30 UTC
 Python: 3.11
-Version: 2.3.0 - Dictionary-Based Grouping Fix
+Version: 2.4.0 - Password Reset Support
 
 Description:
 Main Streamlit application with authentication and multiple pages.
 Core modules: Interactive Structure Viewer (main hub), Add Activity,
 Show Events (with integrated Excel Export/Import).
 
-NEW in v2.3.0:
+NEW in v2.4.0:
+- 🔐 PASSWORD RESET SUPPORT:
+  - ✅ Complete "Forgot Password" flow now works!
+  - ✅ User receives reset email (Gmail SMTP - no spam!)
+  - ✅ Click link → automatic reset form displayed
+  - ✅ Enter new password → automatically updates
+  - ✅ Redirect to login on success
+  - ✅ Hash params converted to query params (Streamlit compatibility)
+- 📧 Improved email delivery (requires Gmail SMTP setup)
+- 🔧 Better error handling for expired/invalid reset links
+- ✨ Clean UX for password reset flow
+
+PREVIOUS v2.3.0:
 - 🐛 CRITICAL FIX in Show Events (v2.6.6):
   - ✅ Dictionary-based grouping NOW WORKS correctly!
   - ✅ Changed from itertools.groupby to defaultdict approach
@@ -72,6 +84,7 @@ PREVIOUS v2.2.3:
 - 🛡️ SECURITY FIX: Removed Forgot Password feature (security vulnerability)
   - Prevented arbitrary email reset attempts
   - Users can change password when logged in (secure alternative)
+  - NOTE: V2.4.0 RESTORES Forgot Password with proper security!
 
 PREVIOUS v2.2.2:
 - 🐛 CRITICAL FIXES V2.5.2:
@@ -95,6 +108,9 @@ PREVIOUS v2.2.0:
 - 🎨 Improved Excel format clarity and consistency
 
 CHANGELOG:
+- v2.4.0: Password reset support + Gmail SMTP integration
+- v2.3.0: Dictionary-based grouping fix
+- v2.2.9: Parent-child grouping fix
 - v2.2.7: Bugfixes (UI sort stable, export merge by comment)
 - v2.2.6: UX improvements (UI sort, export sort, session merging)
 - v2.2.5: UPDATE multi-level fix (parent events created from UPDATE rows)
@@ -114,13 +130,14 @@ CHANGELOG:
 - v1.7.0: Add Activity module (mobile-optimized)
 
 Modules:
-- auth: User authentication
+- auth: User authentication (with password reset)
 - interactive_structure_viewer: Excel-like editing interface (main hub)
 - add_activity: Mobile-optimized activity entry with shortcuts
 - show_events: View, edit, delete events + Excel Export/Import
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import os
 from dotenv import load_dotenv
 
@@ -157,6 +174,171 @@ def init_supabase():
     return supabase_client.SupabaseManager(url, key)
 
 
+def handle_password_reset():
+    """
+    Handle password reset callback from email link.
+    
+    This function:
+    1. Converts Supabase hash params to query params (via JavaScript)
+    2. Detects if user is in password reset flow
+    3. Shows form for new password
+    4. Updates password via Supabase
+    5. Redirects to login on success
+    
+    Supabase sends reset links with hash params:
+    https://app.com#access_token=...&type=recovery
+    
+    Streamlit can't read hash params, so we convert to query params:
+    https://app.com?access_token=...&type=recovery
+    """
+    
+    # STEP 1: Convert hash params to query params using JavaScript
+    # This runs client-side in the browser
+    components.html("""
+    <script>
+    // Check if URL has hash params (from Supabase)
+    if (window.location.hash && window.location.hash.includes('access_token')) {
+        // Parse hash params
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+        
+        // Get existing query params
+        const queryParams = new URLSearchParams(window.location.search);
+        
+        // Copy hash params to query params
+        hashParams.forEach((value, key) => {
+            queryParams.set(key, value);
+        });
+        
+        // Redirect to same page with query params (no hash)
+        const newUrl = window.location.pathname + '?' + queryParams.toString();
+        window.location.href = newUrl;
+    }
+    </script>
+    """, height=0)
+    
+    # STEP 2: Check if we're in password reset flow
+    query_params = st.query_params
+    
+    if 'type' in query_params and query_params['type'] == 'recovery':
+        if 'access_token' in query_params:
+            # User is in password reset flow!
+            st.info("🔐 **Password Reset**")
+            st.markdown("Please enter your new password below.")
+            
+            # STEP 3: Show password reset form
+            with st.form("password_reset_form", clear_on_submit=False):
+                st.markdown("### Set New Password")
+                
+                new_password = st.text_input(
+                    "New Password",
+                    type="password",
+                    placeholder="Enter new password (min 6 characters)",
+                    key="reset_new_password"
+                )
+                
+                confirm_password = st.text_input(
+                    "Confirm New Password",
+                    type="password",
+                    placeholder="Re-enter new password",
+                    key="reset_confirm_password"
+                )
+                
+                st.caption("⚠️ Password must be at least 6 characters long")
+                
+                submit_button = st.form_submit_button(
+                    "✅ Reset Password",
+                    use_container_width=True
+                )
+                
+                if submit_button:
+                    # Validate inputs
+                    if not new_password or not confirm_password:
+                        st.error("❌ Please fill in both fields.")
+                    elif new_password != confirm_password:
+                        st.error("❌ Passwords do not match.")
+                    elif len(new_password) < 6:
+                        st.error("❌ Password must be at least 6 characters long.")
+                    else:
+                        # STEP 4: Update password via Supabase
+                        try:
+                            # Get access token from URL
+                            access_token = query_params['access_token']
+                            
+                            # Create a temporary Supabase client with the access token
+                            # This allows us to update password without being logged in
+                            from supabase import create_client
+                            
+                            # Get Supabase credentials from environment
+                            supabase_url = os.getenv("SUPABASE_URL")
+                            supabase_key = os.getenv("SUPABASE_KEY")
+                            
+                            # Create client
+                            temp_client = create_client(supabase_url, supabase_key)
+                            
+                            # Set the session with access token
+                            # This authenticates us for the password update
+                            temp_client.auth.set_session(
+                                access_token, 
+                                query_params.get('refresh_token', '')
+                            )
+                            
+                            # Update password
+                            response = temp_client.auth.update_user({
+                                "password": new_password
+                            })
+                            
+                            if response.user:
+                                # Success!
+                                st.success("✅ **Password reset successful!**")
+                                st.info("🎉 Your password has been updated. You can now login with your new password.")
+                                
+                                # Clear query params
+                                st.query_params.clear()
+                                
+                                # Wait a moment, then rerun to show login page
+                                import time
+                                with st.spinner("Redirecting to login..."):
+                                    time.sleep(2)
+                                st.rerun()
+                            else:
+                                st.error("❌ Failed to reset password. Please try again.")
+                                
+                        except Exception as e:
+                            error_msg = str(e)
+                            
+                            # User-friendly error messages
+                            if "expired" in error_msg.lower() or "invalid" in error_msg.lower():
+                                st.error("❌ **Reset link has expired or is invalid.**")
+                                st.info("💡 Please request a new password reset link from the login page.")
+                                
+                                # Clear invalid params
+                                st.query_params.clear()
+                                
+                                # Offer to go back to login
+                                if st.button("← Back to Login", use_container_width=True):
+                                    st.rerun()
+                            else:
+                                st.error(f"❌ Error resetting password: {error_msg}")
+                                st.info("💡 Please try again or contact support if the problem persists.")
+            
+            # Don't show normal login form while in reset flow
+            st.stop()
+        
+        else:
+            # type=recovery but no access_token (shouldn't happen, but handle it)
+            st.error("❌ **Invalid password reset link.**")
+            st.info("💡 Please request a new password reset link from the login page.")
+            
+            # Clear invalid params
+            st.query_params.clear()
+            
+            # Show button to go back
+            if st.button("← Back to Login", use_container_width=True):
+                st.rerun()
+            
+            st.stop()
+
+
 def main():
     """Main application logic"""
     
@@ -169,6 +351,11 @@ def main():
     # Check authentication
     if not auth_manager.is_authenticated():
         auth_manager.show_login_page()
+        
+        # Password reset handler
+        # This handles the callback from password reset email links
+        handle_password_reset()
+        
         return
     
     # Get user info
@@ -445,7 +632,7 @@ def render_help_page():
     
     # Version info
     st.markdown("---")
-    st.caption("Version: 2.2.7 | 2025-01-13 | Python: 3.11 | Streamlit: 1.28.0")
+    st.caption("Version: 2.4.0 | 2025-01-16 | Python: 3.11 | Streamlit: 1.28.0 | Password Reset: ✅")
 
 
 if __name__ == "__main__":
