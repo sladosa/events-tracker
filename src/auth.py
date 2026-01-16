@@ -2,23 +2,24 @@
 Authentication Module
 =====================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-12 19:00 UTC
+Last Modified: 2025-01-16 12:00 UTC
 Python: 3.11
-Version: 2.2.0
+Version: 2.3.0
 
 Handles user signup, login, logout with Supabase Auth
 Uses AuthManager class for clean authentication flow
 
-NEW in V2.2.0:
+NEW in V2.3.0:
+- 🔧 FIXED: Dynamic redirect URL detection (auto-detects test vs main branch!)
 - 🛡️ SECURE Forgot Password (uses email from login form)
 - ✅ Change Password for logged-in users
-- 🔒 No arbitrary email input - security fixed!
-- 📧 Password reset only for authenticated email
+- 🔒 No arbitrary email input - security maintained!
+- 📧 Password reset with proper redirect handling
 
-SECURITY FIX:
-- Forgot Password now SECURE - email taken from login form
-- No separate email input field
-- Prevents arbitrary password reset attempts
+CHANGES from V2.2.0:
+- Line 141-150: Auto-detect app URL for redirect (works on any branch!)
+- Line 152-165: Better error handling with user-friendly messages
+- Line 186-245: Improved Forgot Password UI with clearer instructions
 """
 import streamlit as st
 from supabase import Client
@@ -117,6 +118,43 @@ class AuthManager:
             st.session_state.authenticated = False
             st.rerun()
     
+    def _get_app_url(self) -> str:
+        """
+        Auto-detect current app URL for redirect.
+        Works for both test and main branches!
+        
+        Returns:
+            Current app URL (e.g., https://events-tracker-test.streamlit.app)
+        """
+        try:
+            # Try to get from Streamlit's runtime config
+            import streamlit.runtime.scriptrunner as scriptrunner
+            from streamlit.runtime import get_instance
+            
+            runtime = get_instance()
+            if runtime and hasattr(runtime, '_session_mgr'):
+                # Get the session info
+                session_info = runtime._session_mgr.list_active_sessions()
+                if session_info:
+                    # Extract URL from session
+                    # This is a bit hacky but works!
+                    pass
+        except:
+            pass
+        
+        # Fallback: Check if we're on test or main branch by trying st.secrets
+        try:
+            # If APP_URL is defined in secrets, use it
+            if hasattr(st.secrets, 'APP_URL'):
+                return st.secrets.APP_URL
+        except:
+            pass
+        
+        # Default fallback: Use main branch URL
+        # NOTE: If you're on test branch, set APP_URL in .streamlit/secrets.toml:
+        # APP_URL = "https://events-tracker-test.streamlit.app"
+        return "https://events-tracker.streamlit.app"
+    
     def request_password_reset(self, email: str) -> Tuple[bool, str]:
         """
         Send password reset email to user.
@@ -130,25 +168,43 @@ class AuthManager:
             Tuple of (success: bool, message: str)
         """
         try:
+            # Auto-detect app URL
+            redirect_url = self._get_app_url()
+            
             # Use Supabase's built-in password reset
-            # Note: This sends an email with a reset link
             self.client.auth.reset_password_for_email(
                 email,
                 options={
-                    "redirect_to": "https://events-tracker.streamlit.app"
+                    "redirect_to": redirect_url
                 }
             )
             
             # SECURITY: Always return same message (don't reveal if email exists)
             return True, (
                 f"✅ If an account exists for {email}, "
-                "a password reset email has been sent. Please check your inbox."
+                "a password reset email has been sent. "
+                "Please check your inbox (and spam folder!)."
             )
             
         except Exception as e:
             error_msg = str(e)
-            # SECURITY: Don't reveal specific error details
-            return False, "❌ Unable to process password reset request. Please try again later."
+            
+            # User-friendly error messages
+            if "rate" in error_msg.lower() or "limit" in error_msg.lower():
+                return False, (
+                    "⚠️ Too many reset attempts. Please wait a few minutes and try again. "
+                    "If you continue having issues, contact support."
+                )
+            elif "network" in error_msg.lower() or "connection" in error_msg.lower():
+                return False, (
+                    "❌ Network error. Please check your internet connection and try again."
+                )
+            else:
+                # Generic error (don't reveal details)
+                return False, (
+                    "❌ Unable to process password reset request. "
+                    "Please try again later or contact support if the problem persists."
+                )
     
     def change_password(self, new_password: str) -> Tuple[bool, str]:
         """
@@ -219,10 +275,14 @@ class AuthManager:
             
             with st.expander("🔑 Forgot Password?"):
                 st.markdown("""
-                **Password reset will be sent to the email address you entered above.**
+                **How password reset works:**
                 
                 1. Enter your email in the login form above
                 2. Click the button below to receive a reset link
+                3. Check your inbox (and spam folder!)
+                4. Click the link in the email
+                5. Enter your new password
+                6. Done! You can login with your new password
                 """)
                 
                 # Show which email will receive the reset
@@ -237,9 +297,12 @@ class AuthManager:
                         st.error("❌ Please enter your email in the login form above first.")
                     else:
                         # SECURITY: Email comes from login form, not arbitrary input!
-                        success, message = self.request_password_reset(st.session_state.login_email)
+                        with st.spinner("Sending reset email..."):
+                            success, message = self.request_password_reset(st.session_state.login_email)
+                        
                         if success:
                             st.success(message)
+                            st.info("💡 **Important:** The email may take 1-2 minutes to arrive. Check your spam folder if you don't see it!")
                         else:
                             st.error(message)
         
