@@ -2,32 +2,30 @@
 Authentication Module
 =====================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-17 09:00 UTC
+Last Modified: 2025-01-17 10:00 UTC
 Python: 3.11
-Version: 2.3.1 (BUGFIX: Email detection)
+Version: 2.4.0 (REDESIGN: Independent Forgot Password)
 
 Handles user signup, login, logout with Supabase Auth
 Uses AuthManager class for clean authentication flow
 
-NEW in V2.3.1:
-- 🐛 CRITICAL BUGFIX: Forgot Password now properly detects email from input field!
-- ✅ Email detected IMMEDIATELY when user types (no form submit required)
-- ✅ Uses st.session_state.email_input directly (from key="email_input")
-- ✅ Fallback to st.session_state.login_email (for after-submit)
-- 🎯 Result: User can type email → open expander → click button → works!
+NEW in V2.4.0:
+- 🎯 REDESIGN: Forgot Password now INDEPENDENT section (outside form!)
+- ✅ Own email input field (no form isolation issues!)
+- ✅ Simple, clean UI - no more confusing expanders
+- ✅ Works IMMEDIATELY - no form submit needed!
+- 🎨 Better visual separation: Login | Forgot Password | Sign Up
 
-PREVIOUS V2.3.0:
-- 🔧 FIXED: Dynamic redirect URL detection (auto-detects test vs main branch!)
-- 🛡️ SECURE Forgot Password (uses email from login form)
-- ✅ Change Password for logged-in users
-- 🔒 No arbitrary email input - security maintained!
-- 📧 Password reset with proper redirect handling
+PREVIOUS V2.3.1:
+- 🐛 FAILED FIX: Tried to read email from form input
+- ❌ Didn't work: Forms ISOLATE inputs until submission!
+- ❌ Session state not updated for inputs inside forms!
 
-CHANGES from V2.3.0:
-- Line 289-292: Check BOTH email_input (immediate) and login_email (after submit)
-- Line 296-298: Same fix for button click validation
-- Line 299: Use detected email (either from input or session)
-- RESULT: Works WITHOUT requiring form submission! 🎉
+WHY V2.4.0 IS BETTER:
+- ✅ No form isolation issues
+- ✅ User understands: separate actions → separate inputs
+- ✅ Cleaner UX: "Forgot password? Enter your email below"
+- ✅ No security issues: still using validated email input
 """
 import streamlit as st
 from supabase import Client
@@ -167,10 +165,8 @@ class AuthManager:
         """
         Send password reset email to user.
         
-        SECURITY: Email parameter should come from login form, not arbitrary input!
-        
         Args:
-            email: User's email address (from login form)
+            email: User's email address
             
         Returns:
             Tuple of (success: bool, message: str)
@@ -242,94 +238,84 @@ class AuthManager:
             return False, f"❌ Error changing password: {error_msg}"
     
     def show_login_page(self):
-        """Display login/signup page."""
+        """Display login/signup page with independent Forgot Password section."""
         st.title("🔐 Events Tracker - Login")
         
-        tab1, tab2 = st.tabs(["Login", "Sign Up"])
+        tab1, tab2, tab3 = st.tabs(["Login", "Forgot Password?", "Sign Up"])
         
+        # ============================================
+        # TAB 1: LOGIN
+        # ============================================
         with tab1:
             st.subheader("Login to Your Account")
-            
-            # Store email in session state for Forgot Password
-            if 'login_email' not in st.session_state:
-                st.session_state.login_email = ''
             
             with st.form("login_form"):
                 email = st.text_input(
                     "Email", 
                     placeholder="your.email@example.com",
-                    value=st.session_state.login_email,
-                    key="email_input"
+                    key="login_email_input"
                 )
-                password = st.text_input("Password", type="password")
+                password = st.text_input("Password", type="password", key="login_password_input")
                 submit = st.form_submit_button("🔓 Login", use_container_width=True)
                 
                 if submit:
                     if not email or not password:
                         st.error("❌ Please enter both email and password.")
                     else:
-                        # Save email for potential Forgot Password use
-                        st.session_state.login_email = email
-                        
                         success, message = self.login(email, password)
                         if success:
                             st.success(message)
                             st.rerun()
                         else:
                             st.error(message)
+        
+        # ============================================
+        # TAB 2: FORGOT PASSWORD (INDEPENDENT!)
+        # ============================================
+        with tab2:
+            st.subheader("🔑 Reset Your Password")
             
-            # SECURE Forgot Password - uses email from login form
+            st.markdown("""
+            **How it works:**
+            1. Enter your email address below
+            2. Click "Send Reset Link"
+            3. Check your email inbox (and spam folder!)
+            4. Click the link to set a new password
+            5. Login with your new password
+            """)
+            
             st.markdown("---")
             
-            with st.expander("🔑 Forgot Password?"):
-                st.markdown("""
-                **How password reset works:**
-                
-                1. Enter your email in the login form above
-                2. Click the button below to receive a reset link
-                3. Check your inbox (and spam folder!)
-                4. Click the link in the email
-                5. Enter your new password
-                6. Done! You can login with your new password
-                """)
-                
-                # 🐛 BUGFIX V2.3.1: Check BOTH email_input (immediate) and login_email (after submit)
-                # Priority: email_input (what user typed NOW) > login_email (from previous submit)
-                current_email = None
-                if 'email_input' in st.session_state and st.session_state.email_input:
-                    current_email = st.session_state.email_input
-                elif st.session_state.login_email:
-                    current_email = st.session_state.login_email
-                
-                # Show which email will receive the reset
-                if current_email:
-                    st.info(f"📧 Reset link will be sent to: **{current_email}**")
+            # INDEPENDENT email input - NOT inside a form!
+            # This means it's accessible immediately, no form submission needed!
+            forgot_email = st.text_input(
+                "📧 Your Email Address",
+                placeholder="your.email@example.com",
+                key="forgot_password_email",
+                help="Enter the email you used to create your account"
+            )
+            
+            # Button to send reset
+            if st.button("📧 Send Password Reset Link", use_container_width=True, type="primary"):
+                if not forgot_email:
+                    st.error("❌ Please enter your email address.")
+                elif not '@' in forgot_email or not '.' in forgot_email:
+                    st.error("❌ Please enter a valid email address.")
                 else:
-                    st.warning("⚠️ Please enter your email in the login form above first.")
-                
-                # Button to send reset
-                if st.button("📧 Send Password Reset Link", use_container_width=True):
-                    # 🐛 BUGFIX V2.3.1: Check BOTH sources again
-                    email_to_use = None
-                    if 'email_input' in st.session_state and st.session_state.email_input:
-                        email_to_use = st.session_state.email_input
-                    elif st.session_state.login_email:
-                        email_to_use = st.session_state.login_email
+                    # Send reset email
+                    with st.spinner("Sending reset email..."):
+                        success, message = self.request_password_reset(forgot_email)
                     
-                    if not email_to_use:
-                        st.error("❌ Please enter your email in the login form above first.")
+                    if success:
+                        st.success(message)
+                        st.info("💡 **Important:** The email may take 1-2 minutes to arrive. Check your spam folder if you don't see it!")
                     else:
-                        # SECURITY: Email comes from login form, not arbitrary input!
-                        with st.spinner("Sending reset email..."):
-                            success, message = self.request_password_reset(email_to_use)
-                        
-                        if success:
-                            st.success(message)
-                            st.info("💡 **Important:** The email may take 1-2 minutes to arrive. Check your spam folder if you don't see it!")
-                        else:
-                            st.error(message)
+                        st.error(message)
         
-        with tab2:
+        # ============================================
+        # TAB 3: SIGN UP
+        # ============================================
+        with tab3:
             st.subheader("Create New Account")
             
             with st.form("signup_form"):
