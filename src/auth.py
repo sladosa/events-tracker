@@ -2,24 +2,32 @@
 Authentication Module
 =====================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-16 12:00 UTC
+Last Modified: 2025-01-17 09:00 UTC
 Python: 3.11
-Version: 2.3.0
+Version: 2.3.1 (BUGFIX: Email detection)
 
 Handles user signup, login, logout with Supabase Auth
 Uses AuthManager class for clean authentication flow
 
-NEW in V2.3.0:
+NEW in V2.3.1:
+- 🐛 CRITICAL BUGFIX: Forgot Password now properly detects email from input field!
+- ✅ Email detected IMMEDIATELY when user types (no form submit required)
+- ✅ Uses st.session_state.email_input directly (from key="email_input")
+- ✅ Fallback to st.session_state.login_email (for after-submit)
+- 🎯 Result: User can type email → open expander → click button → works!
+
+PREVIOUS V2.3.0:
 - 🔧 FIXED: Dynamic redirect URL detection (auto-detects test vs main branch!)
 - 🛡️ SECURE Forgot Password (uses email from login form)
 - ✅ Change Password for logged-in users
 - 🔒 No arbitrary email input - security maintained!
 - 📧 Password reset with proper redirect handling
 
-CHANGES from V2.2.0:
-- Line 141-150: Auto-detect app URL for redirect (works on any branch!)
-- Line 152-165: Better error handling with user-friendly messages
-- Line 186-245: Improved Forgot Password UI with clearer instructions
+CHANGES from V2.3.0:
+- Line 289-292: Check BOTH email_input (immediate) and login_email (after submit)
+- Line 296-298: Same fix for button click validation
+- Line 299: Use detected email (either from input or session)
+- RESULT: Works WITHOUT requiring form submission! 🎉
 """
 import streamlit as st
 from supabase import Client
@@ -285,20 +293,35 @@ class AuthManager:
                 6. Done! You can login with your new password
                 """)
                 
+                # 🐛 BUGFIX V2.3.1: Check BOTH email_input (immediate) and login_email (after submit)
+                # Priority: email_input (what user typed NOW) > login_email (from previous submit)
+                current_email = None
+                if 'email_input' in st.session_state and st.session_state.email_input:
+                    current_email = st.session_state.email_input
+                elif st.session_state.login_email:
+                    current_email = st.session_state.login_email
+                
                 # Show which email will receive the reset
-                if st.session_state.login_email:
-                    st.info(f"📧 Reset link will be sent to: **{st.session_state.login_email}**")
+                if current_email:
+                    st.info(f"📧 Reset link will be sent to: **{current_email}**")
                 else:
                     st.warning("⚠️ Please enter your email in the login form above first.")
                 
                 # Button to send reset
                 if st.button("📧 Send Password Reset Link", use_container_width=True):
-                    if not st.session_state.login_email:
+                    # 🐛 BUGFIX V2.3.1: Check BOTH sources again
+                    email_to_use = None
+                    if 'email_input' in st.session_state and st.session_state.email_input:
+                        email_to_use = st.session_state.email_input
+                    elif st.session_state.login_email:
+                        email_to_use = st.session_state.login_email
+                    
+                    if not email_to_use:
                         st.error("❌ Please enter your email in the login form above first.")
                     else:
                         # SECURITY: Email comes from login form, not arbitrary input!
                         with st.spinner("Sending reset email..."):
-                            success, message = self.request_password_reset(st.session_state.login_email)
+                            success, message = self.request_password_reset(email_to_use)
                         
                         if success:
                             st.success(message)
