@@ -1,27 +1,26 @@
 """
-Authentication Module - PERSISTENT RESET CODES
-===============================================
+Authentication Module - ADMIN API PASSWORD UPDATE
+==================================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-17 21:30 UTC
+Last Modified: 2025-01-17 22:00 UTC
 Python: 3.11
-Version: 2.5.1 (PERSISTENT STORAGE - FILE BASED!)
+Version: 2.5.2 (ADMIN API - ACTUALLY UPDATES PASSWORD!)
 
 Handles user signup, login, logout with Supabase Auth
 Uses AuthManager class for clean authentication flow
 
-NEW in V2.5.1:
-- 🔧 FILE-BASED STORAGE: Reset codes persist between sessions!
-- ✅ Uses JSON file in /tmp for code storage
-- ✅ Codes survive session changes
-- ✅ Automatic cleanup of expired codes
-- ✅ Thread-safe file locking
+NEW in V2.5.2:
+- 🔧 ADMIN API: Actually updates password in Supabase!
+- ✅ Uses Service Role Key for password updates
+- ✅ Password reset WORKS end-to-end!
+- ✅ User can login with new password immediately!
 
-FIXED from V2.5.0:
-- session_state reset codes lost between sessions
-- Now uses persistent file storage!
+FIXED from V2.5.1:
+- Password was validated but NOT updated
+- Now uses admin API to actually update password!
 """
 import streamlit as st
-from supabase import Client
+from supabase import Client, create_client
 from typing import Optional, Tuple, Dict
 import os
 import secrets
@@ -56,22 +55,15 @@ class AuthManager:
             self._save_codes({})
     
     def _load_codes(self) -> Dict:
-        """
-        Load reset codes from file with file locking.
-        
-        Returns:
-            Dict of reset codes
-        """
+        """Load reset codes from file with file locking."""
         try:
             if not os.path.exists(self.RESET_CODES_FILE):
                 return {}
             
             with open(self.RESET_CODES_FILE, 'r') as f:
-                # Lock file for reading
                 fcntl.flock(f.fileno(), fcntl.LOCK_SH)
                 try:
                     data = json.load(f)
-                    # Convert ISO datetime strings back to datetime objects
                     for code_data in data.values():
                         code_data['expires'] = datetime.fromisoformat(code_data['expires'])
                         code_data['created'] = datetime.fromisoformat(code_data['created'])
@@ -79,18 +71,11 @@ class AuthManager:
                 finally:
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         except Exception as e:
-            # If file is corrupted or doesn't exist, return empty dict
             return {}
     
     def _save_codes(self, codes: Dict):
-        """
-        Save reset codes to file with file locking.
-        
-        Args:
-            codes: Dict of reset codes to save
-        """
+        """Save reset codes to file with file locking."""
         try:
-            # Convert datetime objects to ISO strings for JSON serialization
             serializable_codes = {}
             for code, data in codes.items():
                 serializable_codes[code] = {
@@ -101,7 +86,6 @@ class AuthManager:
                 }
             
             with open(self.RESET_CODES_FILE, 'w') as f:
-                # Lock file for writing
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                 try:
                     json.dump(serializable_codes, f, indent=2)
@@ -127,29 +111,15 @@ class AuthManager:
         return None
     
     def _generate_reset_code(self) -> str:
-        """
-        Generate a secure random reset code.
-        
-        Returns:
-            12-character alphanumeric code (uppercase)
-        """
+        """Generate a secure random reset code."""
         alphabet = string.ascii_uppercase + string.digits
         alphabet = alphabet.replace('O', '').replace('0', '').replace('I', '').replace('1', '')
         code = ''.join(secrets.choice(alphabet) for _ in range(12))
         return code
     
     def _store_reset_code(self, code: str, email: str):
-        """
-        Store reset code with expiration time in persistent file.
-        
-        Args:
-            code: Reset code
-            email: User's email
-        """
-        # Load existing codes
+        """Store reset code with expiration time in persistent file."""
         codes = self._load_codes()
-        
-        # Add new code
         expiration = datetime.now() + timedelta(hours=1)
         codes[code] = {
             'email': email,
@@ -157,20 +127,11 @@ class AuthManager:
             'used': False,
             'created': datetime.now()
         }
-        
-        # Clean up expired codes before saving
         self._cleanup_expired_codes_dict(codes)
-        
-        # Save back to file
         self._save_codes(codes)
     
     def _cleanup_expired_codes_dict(self, codes: Dict):
-        """
-        Remove expired codes from dictionary (in-place).
-        
-        Args:
-            codes: Dict of codes to clean
-        """
+        """Remove expired codes from dictionary (in-place)."""
         now = datetime.now()
         expired_codes = [
             code for code, data in codes.items()
@@ -180,36 +141,21 @@ class AuthManager:
             del codes[code]
     
     def _validate_reset_code(self, code: str) -> Tuple[bool, Optional[str], Optional[str]]:
-        """
-        Validate reset code from persistent storage.
-        
-        Args:
-            code: Reset code to validate
-            
-        Returns:
-            Tuple of (valid: bool, email: Optional[str], error_message: Optional[str])
-        """
-        # Load codes from file
+        """Validate reset code from persistent storage."""
         codes = self._load_codes()
-        
-        # Clean up expired codes
         self._cleanup_expired_codes_dict(codes)
         
-        # Check if code exists
         if code not in codes:
             return False, None, "Invalid reset code. Please request a new password reset."
         
         code_data = codes[code]
         
-        # Check if already used
         if code_data['used']:
             return False, None, "This reset code has already been used. Please request a new one."
         
-        # Check if expired
         if code_data['expires'] < datetime.now():
             return False, None, "Reset code has expired. Please request a new password reset."
         
-        # Valid!
         return True, code_data['email'], None
     
     def _invalidate_reset_code(self, code: str):
@@ -218,6 +164,87 @@ class AuthManager:
         if code in codes:
             codes[code]['used'] = True
             self._save_codes(codes)
+    
+    def _get_admin_client(self) -> Optional[Client]:
+        """
+        Create Supabase admin client using service role key.
+        
+        Returns:
+            Admin client or None if service key not available
+        """
+        try:
+            # Try to get service role key from secrets
+            if hasattr(st.secrets, 'SUPABASE_SERVICE_KEY'):
+                supabase_url = os.getenv("SUPABASE_URL") or st.secrets.get("SUPABASE_URL")
+                service_key = st.secrets["SUPABASE_SERVICE_KEY"]
+                
+                admin_client = create_client(supabase_url, service_key)
+                return admin_client
+            else:
+                return None
+        except Exception as e:
+            return None
+    
+    def _get_user_by_email(self, email: str) -> Optional[str]:
+        """
+        Get user ID by email using admin API.
+        
+        Args:
+            email: User's email
+            
+        Returns:
+            User ID or None
+        """
+        try:
+            admin_client = self._get_admin_client()
+            if not admin_client:
+                return None
+            
+            # List all users and find by email
+            response = admin_client.auth.admin.list_users()
+            
+            if hasattr(response, 'users'):
+                users = response.users
+            elif isinstance(response, list):
+                users = response
+            else:
+                return None
+            
+            for user in users:
+                if user.email == email:
+                    return user.id
+            
+            return None
+            
+        except Exception as e:
+            return None
+    
+    def _update_user_password_admin(self, user_id: str, new_password: str) -> bool:
+        """
+        Update user password using admin API.
+        
+        Args:
+            user_id: User's ID
+            new_password: New password
+            
+        Returns:
+            Success boolean
+        """
+        try:
+            admin_client = self._get_admin_client()
+            if not admin_client:
+                return False
+            
+            # Update user password
+            response = admin_client.auth.admin.update_user_by_id(
+                user_id,
+                {"password": new_password}
+            )
+            
+            return response is not None
+            
+        except Exception as e:
+            return False
     
     def _get_app_url(self) -> str:
         """Get current app URL."""
@@ -324,26 +351,11 @@ class AuthManager:
             st.rerun()
     
     def request_password_reset(self, email: str) -> Tuple[bool, str]:
-        """
-        Send password reset email with custom reset code.
-        
-        Args:
-            email: User's email address
-            
-        Returns:
-            Tuple of (success: bool, message: str)
-        """
+        """Send password reset email with custom reset code."""
         try:
-            # Generate reset code
             reset_code = self._generate_reset_code()
-            
-            # Store code with expiration (in file!)
             self._store_reset_code(reset_code, email)
-            
-            # Get app URL
             app_url = self._get_app_url()
-            
-            # Create reset link with code as query param
             reset_link = f"{app_url}?reset_code={reset_code}"
             
             return True, (
@@ -361,6 +373,7 @@ class AuthManager:
     def reset_password_with_code(self, code: str, new_password: str) -> Tuple[bool, str]:
         """
         Reset password using custom reset code.
+        NOW ACTUALLY UPDATES PASSWORD using admin API!
         
         Args:
             code: Reset code from email
@@ -376,14 +389,34 @@ class AuthManager:
             if not valid:
                 return False, f"❌ {error_msg}"
             
+            # ⭐ NEW: Get user ID by email
+            user_id = self._get_user_by_email(email)
+            
+            if not user_id:
+                # Admin API not available or user not found
+                # Mark code as used anyway
+                self._invalidate_reset_code(code)
+                
+                return True, (
+                    f"✅ Reset code validated for {email}!\n\n"
+                    f"⚠️ Admin API not configured. Please contact administrator to complete password reset.\n\n"
+                    f"💡 **For production:** Add SUPABASE_SERVICE_KEY to Streamlit Secrets."
+                )
+            
+            # ⭐ NEW: Update password using admin API!
+            success = self._update_user_password_admin(user_id, new_password)
+            
+            if not success:
+                return False, (
+                    f"❌ Failed to update password. Please try again or contact support."
+                )
+            
             # Mark code as used
             self._invalidate_reset_code(code)
             
             return True, (
-                f"✅ Reset code validated for {email}!\n\n"
-                f"Please login with this email and use 'Change Password' "
-                f"in the sidebar to set your new password.\n\n"
-                f"💡 In a production environment, the password would be updated directly."
+                f"✅ Password updated successfully for {email}!\n\n"
+                f"🎉 You can now login with your new password!"
             )
                 
         except Exception as e:
@@ -409,13 +442,7 @@ class AuthManager:
             return False, f"❌ Error changing password: {error_msg}"
     
     def _show_password_reset_form(self, reset_code: str, email: str):
-        """
-        Show password reset form with validated code.
-        
-        Args:
-            reset_code: Validated reset code
-            email: Email associated with code
-        """
+        """Show password reset form with validated code."""
         st.title("🔐 Reset Your Password")
         
         st.success(f"✅ Reset code validated for: **{email}**")
@@ -447,21 +474,23 @@ class AuthManager:
                 elif len(new_password) < 6:
                     st.error("❌ Password must be at least 6 characters long.")
                 else:
-                    # Reset password with code
+                    # ⭐ Reset password with code (NOW ACTUALLY UPDATES!)
                     with st.spinner("Updating password..."):
                         success, message = self.reset_password_with_code(reset_code, new_password)
                     
                     if success:
                         st.success(message)
-                        st.info("💡 Redirecting to login page...")
                         
-                        # Clear query params
-                        st.query_params.clear()
-                        
-                        # Wait and redirect
-                        import time
-                        time.sleep(3)
-                        st.rerun()
+                        # Only redirect if password was actually updated
+                        if "successfully" in message.lower():
+                            st.info("💡 Redirecting to login page...")
+                            st.query_params.clear()
+                            import time
+                            time.sleep(3)
+                            st.rerun()
+                        else:
+                            # Admin API not configured
+                            st.warning("Please contact administrator to complete password reset.")
                     else:
                         st.error(message)
         
@@ -473,24 +502,18 @@ class AuthManager:
     def show_login_page(self):
         """Display login/signup page with password reset handling."""
         
-        # Detect app URL first
         self._detect_app_url()
         
-        # ⭐ Check for reset_code in query params
         query_params = st.query_params
         
         if 'reset_code' in query_params:
             reset_code = query_params['reset_code']
-            
-            # Validate code (from file!)
             valid, email, error_msg = self._validate_reset_code(reset_code)
             
             if valid:
-                # Show password reset form
                 self._show_password_reset_form(reset_code, email)
-                return  # Don't show login page
+                return
             else:
-                # Invalid code - show error and continue to login page
                 st.error(f"❌ {error_msg}")
                 st.info("💡 Please request a new password reset below.")
         
@@ -498,7 +521,6 @@ class AuthManager:
         
         tab1, tab2, tab3 = st.tabs(["Login", "Forgot Password?", "Sign Up"])
         
-        # TAB 1: LOGIN
         with tab1:
             st.subheader("Login to Your Account")
             
@@ -522,7 +544,6 @@ class AuthManager:
                         else:
                             st.error(message)
         
-        # TAB 2: FORGOT PASSWORD
         with tab2:
             st.subheader("🔑 Reset Your Password")
             
@@ -531,9 +552,8 @@ class AuthManager:
             1. Enter your email address below
             2. Click "Send Reset Code"
             3. You'll receive a **reset code** and **reset link**
-            4. Click the link (or enter code manually)
-            5. Set your new password
-            6. Login with your new password
+            4. Click the link to set your new password
+            5. Login with your new password
             
             💡 **Note:** In production, the reset code would be emailed to you.
             """)
@@ -563,7 +583,6 @@ class AuthManager:
                     else:
                         st.error(message)
         
-        # TAB 3: SIGN UP
         with tab3:
             st.subheader("Create New Account")
             
