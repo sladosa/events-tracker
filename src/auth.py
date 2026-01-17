@@ -1,15 +1,22 @@
 """
-Authentication Module - COMPATIBILITY FIX + AUTO URL DETECTION
-===============================================================
+Authentication Module - COMPLETE PASSWORD RESET FLOW
+=====================================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-17 11:30 UTC
+Last Modified: 2025-01-17 20:30 UTC
 Python: 3.11
-Version: 2.4.2 (COMPATIBILITY FIX + URL AUTO-DETECTION)
+Version: 2.4.3 (COMPLETE PASSWORD RESET FLOW)
 
 Handles user signup, login, logout with Supabase Auth
 Uses AuthManager class for clean authentication flow
 
-NEW in V2.4.2:
+NEW in V2.4.3:
+- 🎯 PASSWORD RESET HANDLER: Handles incoming reset tokens from email!
+- ✅ Detects #access_token and type=recovery in URL
+- ✅ Shows password reset form automatically
+- ✅ Updates password via Supabase API
+- ✅ Complete end-to-end password reset flow!
+
+PREVIOUS V2.4.2:
 - 🎯 AUTO URL DETECTION: Automatically detects test vs main branch!
 - ✅ Uses JavaScript to read window.location.origin
 - ✅ No manual secrets needed!
@@ -20,11 +27,6 @@ PREVIOUS V2.4.1:
 - ✅ Tries multiple method names (reset_password_for_email, send_reset_password_email, etc.)
 - ✅ Falls back to direct HTTP API call if methods don't exist
 - ✅ Guaranteed to work regardless of Supabase client version!
-
-PREVIOUS V2.4.0:
-- 3 tabs: Login | Forgot Password? | Sign Up
-- Independent email input in Forgot Password tab
-- Clean UI, professional design
 """
 import streamlit as st
 from supabase import Client
@@ -43,6 +45,8 @@ class AuthManager:
             st.session_state.user = None
         if 'authenticated' not in st.session_state:
             st.session_state.authenticated = False
+        if 'reset_token' not in st.session_state:
+            st.session_state.reset_token = None
     
     def is_authenticated(self) -> bool:
         """Check if user is authenticated."""
@@ -122,6 +126,7 @@ class AuthManager:
         finally:
             st.session_state.user = None
             st.session_state.authenticated = False
+            st.session_state.reset_token = None
             st.rerun()
     
     def _get_app_url(self) -> str:
@@ -302,6 +307,45 @@ class AuthManager:
                     "Please try again later."
                 )
     
+    def update_password_with_token(self, access_token: str, new_password: str) -> Tuple[bool, str]:
+        """
+        Update password using access token from reset email.
+        
+        Args:
+            access_token: Token from password reset email
+            new_password: New password to set
+            
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        try:
+            # Set the session with the access token
+            # This authenticates the user temporarily to allow password change
+            response = self.client.auth.set_session(access_token, "")
+            
+            if not response.user:
+                return False, "❌ Invalid or expired reset link. Please request a new one."
+            
+            # Now update the password
+            update_response = self.client.auth.update_user({
+                "password": new_password
+            })
+            
+            if update_response.user:
+                # Clear the token from session state
+                st.session_state.reset_token = None
+                return True, "✅ Password updated successfully! You can now login with your new password."
+            else:
+                return False, "❌ Failed to update password. Please try again."
+                
+        except Exception as e:
+            error_msg = str(e)
+            if "expired" in error_msg.lower():
+                return False, "❌ Reset link has expired. Please request a new one."
+            elif "invalid" in error_msg.lower():
+                return False, "❌ Invalid reset link. Please request a new one."
+            return False, f"❌ Error updating password: {error_msg}"
+    
     def change_password(self, new_password: str) -> Tuple[bool, str]:
         """
         Change password for currently logged in user.
@@ -329,8 +373,116 @@ class AuthManager:
             error_msg = str(e)
             return False, f"❌ Error changing password: {error_msg}"
     
+    def _extract_token_from_url(self):
+        """
+        Extract access_token and type from URL hash fragment using JavaScript.
+        URL hash (#) is not accessible to Python, so we need JavaScript.
+        """
+        import streamlit.components.v1 as components
+        
+        # JavaScript to extract token from URL hash and store in session
+        components.html("""
+        <script>
+        // Get URL hash (e.g., #access_token=...&type=recovery)
+        const hash = window.location.hash;
+        
+        if (hash) {
+            // Parse hash parameters
+            const params = new URLSearchParams(hash.substring(1)); // Remove #
+            const access_token = params.get('access_token');
+            const type = params.get('type');
+            
+            // If this is a password reset callback
+            if (access_token && type === 'recovery') {
+                // Store in query params so Streamlit can read it
+                const urlParams = new URLSearchParams(window.location.search);
+                urlParams.set('reset_token', access_token);
+                urlParams.set('reset_type', type);
+                
+                // Reload with query params (without hash)
+                const newUrl = window.location.pathname + '?' + urlParams.toString();
+                window.location.href = newUrl;
+            }
+        }
+        </script>
+        """, height=0)
+    
+    def _show_password_reset_form(self, access_token: str):
+        """
+        Show password reset form when user clicks link from email.
+        
+        Args:
+            access_token: Token from password reset email
+        """
+        st.title("🔐 Reset Your Password")
+        
+        st.markdown("""
+        ### Set Your New Password
+        
+        Please enter a new password for your account.
+        """)
+        
+        with st.form("password_reset_form"):
+            new_password = st.text_input(
+                "New Password",
+                type="password",
+                help="Minimum 6 characters"
+            )
+            confirm_password = st.text_input(
+                "Confirm New Password",
+                type="password"
+            )
+            
+            submit = st.form_submit_button("✅ Update Password", use_container_width=True, type="primary")
+            
+            if submit:
+                if not new_password or not confirm_password:
+                    st.error("❌ Please fill in both fields.")
+                elif new_password != confirm_password:
+                    st.error("❌ Passwords do not match.")
+                elif len(new_password) < 6:
+                    st.error("❌ Password must be at least 6 characters long.")
+                else:
+                    # Update password with token
+                    with st.spinner("Updating password..."):
+                        success, message = self.update_password_with_token(access_token, new_password)
+                    
+                    if success:
+                        st.success(message)
+                        st.info("💡 Redirecting to login page...")
+                        # Clear query params and redirect to login
+                        st.query_params.clear()
+                        import time
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.error(message)
+                        if "expired" in message.lower() or "invalid" in message.lower():
+                            st.info("💡 You can request a new reset link from the 'Forgot Password?' tab.")
+                            if st.button("← Back to Login"):
+                                st.query_params.clear()
+                                st.rerun()
+        
+        st.divider()
+        if st.button("← Cancel and Return to Login"):
+            st.query_params.clear()
+            st.rerun()
+    
     def show_login_page(self):
         """Display login/signup page with independent Forgot Password section."""
+        
+        # ⭐ NEW V2.4.3: Check if this is a password reset callback!
+        # Extract token from URL hash first
+        if 'reset_token' not in st.query_params:
+            self._extract_token_from_url()
+        
+        # Check if we have a reset token in query params
+        query_params = st.query_params
+        if 'reset_token' in query_params and query_params.get('reset_type') == 'recovery':
+            # Show password reset form instead of login
+            self._show_password_reset_form(query_params['reset_token'])
+            return  # Don't show normal login page
+        
         # AUTO-DETECT APP URL from browser (V2.4.2)
         # This JavaScript runs client-side and detects the actual URL
         if 'app_base_url' not in st.session_state:

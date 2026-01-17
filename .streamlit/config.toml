@@ -3,3 +3,5 @@ fileWatcherType = "none"
 
 [runner]
 magicEnabled = true
+
+APP_URL = "https://events-tracker-test.streamlit.app"
