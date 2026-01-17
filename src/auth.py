@@ -1,31 +1,16 @@
 """
-Authentication Module
-=====================
+Authentication Module - DEBUG VERSION
+======================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-17 10:00 UTC
+Last Modified: 2025-01-17 10:30 UTC
 Python: 3.11
-Version: 2.4.0 (REDESIGN: Independent Forgot Password)
+Version: 2.4.0-DEBUG
 
-Handles user signup, login, logout with Supabase Auth
-Uses AuthManager class for clean authentication flow
+⚠️ TEMPORARY DEBUG VERSION - SHOWS DETAILED ERRORS!
+⚠️ USE ONLY FOR DEBUGGING - REMOVE BEFORE PRODUCTION!
 
-NEW in V2.4.0:
-- 🎯 REDESIGN: Forgot Password now INDEPENDENT section (outside form!)
-- ✅ Own email input field (no form isolation issues!)
-- ✅ Simple, clean UI - no more confusing expanders
-- ✅ Works IMMEDIATELY - no form submit needed!
-- 🎨 Better visual separation: Login | Forgot Password | Sign Up
-
-PREVIOUS V2.3.1:
-- 🐛 FAILED FIX: Tried to read email from form input
-- ❌ Didn't work: Forms ISOLATE inputs until submission!
-- ❌ Session state not updated for inputs inside forms!
-
-WHY V2.4.0 IS BETTER:
-- ✅ No form isolation issues
-- ✅ User understands: separate actions → separate inputs
-- ✅ Cleaner UX: "Forgot password? Enter your email below"
-- ✅ No security issues: still using validated email input
+This version shows EXACT error messages to help diagnose issues.
+After fixing, replace with production version (without debug messages).
 """
 import streamlit as st
 from supabase import Client
@@ -165,6 +150,8 @@ class AuthManager:
         """
         Send password reset email to user.
         
+        ⚠️ DEBUG VERSION - SHOWS DETAILED ERRORS!
+        
         Args:
             email: User's email address
             
@@ -175,15 +162,22 @@ class AuthManager:
             # Auto-detect app URL
             redirect_url = self._get_app_url()
             
+            # 🐛 DEBUG: Show what we're sending
+            st.info(f"🐛 DEBUG: Sending reset to: {email}")
+            st.info(f"🐛 DEBUG: Redirect URL: {redirect_url}")
+            
             # Use Supabase's built-in password reset
-            self.client.auth.reset_password_for_email(
+            response = self.client.auth.reset_password_for_email(
                 email,
                 options={
                     "redirect_to": redirect_url
                 }
             )
             
-            # SECURITY: Always return same message (don't reveal if email exists)
+            # 🐛 DEBUG: Show response
+            st.success(f"🐛 DEBUG: Supabase response: {response}")
+            
+            # Success!
             return True, (
                 f"✅ If an account exists for {email}, "
                 "a password reset email has been sent. "
@@ -191,24 +185,28 @@ class AuthManager:
             )
             
         except Exception as e:
+            # 🐛 DEBUG: Show FULL error details!
             error_msg = str(e)
+            error_type = type(e).__name__
             
-            # User-friendly error messages
-            if "rate" in error_msg.lower() or "limit" in error_msg.lower():
-                return False, (
-                    "⚠️ Too many reset attempts. Please wait a few minutes and try again. "
-                    "If you continue having issues, contact support."
-                )
-            elif "network" in error_msg.lower() or "connection" in error_msg.lower():
-                return False, (
-                    "❌ Network error. Please check your internet connection and try again."
-                )
-            else:
-                # Generic error (don't reveal details)
-                return False, (
-                    "❌ Unable to process password reset request. "
-                    "Please try again later or contact support if the problem persists."
-                )
+            # Show full error in UI (for debugging)
+            st.error(f"🐛 DEBUG ERROR TYPE: {error_type}")
+            st.error(f"🐛 DEBUG ERROR MESSAGE: {error_msg}")
+            
+            # Try to extract more details
+            if hasattr(e, 'args'):
+                st.error(f"🐛 DEBUG ERROR ARGS: {e.args}")
+            
+            # Also return detailed error
+            return False, (
+                f"❌ Password reset failed!\n\n"
+                f"**Error Type:** {error_type}\n"
+                f"**Error Message:** {error_msg}\n\n"
+                f"Please check:\n"
+                f"1. Supabase SMTP settings (Dashboard → Authentication → Email)\n"
+                f"2. Gmail App Password configured correctly\n"
+                f"3. Supabase Audit Logs for more details"
+            )
     
     def change_password(self, new_password: str) -> Tuple[bool, str]:
         """
@@ -240,6 +238,9 @@ class AuthManager:
     def show_login_page(self):
         """Display login/signup page with independent Forgot Password section."""
         st.title("🔐 Events Tracker - Login")
+        
+        # 🐛 DEBUG: Show version
+        st.caption("⚠️ DEBUG VERSION 2.4.0-DEBUG - Showing detailed errors")
         
         tab1, tab2, tab3 = st.tabs(["Login", "Forgot Password?", "Sign Up"])
         
@@ -287,7 +288,6 @@ class AuthManager:
             st.markdown("---")
             
             # INDEPENDENT email input - NOT inside a form!
-            # This means it's accessible immediately, no form submission needed!
             forgot_email = st.text_input(
                 "📧 Your Email Address",
                 placeholder="your.email@example.com",
