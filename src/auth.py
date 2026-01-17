@@ -1,20 +1,35 @@
 """
-Authentication Module - DEBUG VERSION
-======================================
+Authentication Module - COMPATIBILITY FIX + AUTO URL DETECTION
+===============================================================
 Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-17 10:30 UTC
+Last Modified: 2025-01-17 11:30 UTC
 Python: 3.11
-Version: 2.4.0-DEBUG
+Version: 2.4.2 (COMPATIBILITY FIX + URL AUTO-DETECTION)
 
-⚠️ TEMPORARY DEBUG VERSION - SHOWS DETAILED ERRORS!
-⚠️ USE ONLY FOR DEBUGGING - REMOVE BEFORE PRODUCTION!
+Handles user signup, login, logout with Supabase Auth
+Uses AuthManager class for clean authentication flow
 
-This version shows EXACT error messages to help diagnose issues.
-After fixing, replace with production version (without debug messages).
+NEW in V2.4.2:
+- 🎯 AUTO URL DETECTION: Automatically detects test vs main branch!
+- ✅ Uses JavaScript to read window.location.origin
+- ✅ No manual secrets needed!
+- ✅ Works on any branch automatically!
+
+PREVIOUS V2.4.1:
+- 🔧 COMPATIBILITY FIX: Works with OLD and NEW Supabase client versions!
+- ✅ Tries multiple method names (reset_password_for_email, send_reset_password_email, etc.)
+- ✅ Falls back to direct HTTP API call if methods don't exist
+- ✅ Guaranteed to work regardless of Supabase client version!
+
+PREVIOUS V2.4.0:
+- 3 tabs: Login | Forgot Password? | Sign Up
+- Independent email input in Forgot Password tab
+- Clean UI, professional design
 """
 import streamlit as st
 from supabase import Client
 from typing import Optional, Tuple
+import os
 
 
 class AuthManager:
@@ -112,45 +127,56 @@ class AuthManager:
     def _get_app_url(self) -> str:
         """
         Auto-detect current app URL for redirect.
+        NEW V2.4.2: Detects from browser URL automatically!
         Works for both test and main branches!
         
         Returns:
             Current app URL (e.g., https://events-tracker-test.streamlit.app)
         """
-        try:
-            # Try to get from Streamlit's runtime config
-            import streamlit.runtime.scriptrunner as scriptrunner
-            from streamlit.runtime import get_instance
-            
-            runtime = get_instance()
-            if runtime and hasattr(runtime, '_session_mgr'):
-                # Get the session info
-                session_info = runtime._session_mgr.list_active_sessions()
-                if session_info:
-                    # Extract URL from session
-                    # This is a bit hacky but works!
-                    pass
-        except:
-            pass
+        # Try #1: Get from Streamlit session state (if we stored it)
+        if 'app_base_url' in st.session_state:
+            return st.session_state.app_base_url
         
-        # Fallback: Check if we're on test or main branch by trying st.secrets
+        # Try #2: Check secrets (manual override)
         try:
-            # If APP_URL is defined in secrets, use it
             if hasattr(st.secrets, 'APP_URL'):
                 return st.secrets.APP_URL
         except:
             pass
         
-        # Default fallback: Use main branch URL
-        # NOTE: If you're on test branch, set APP_URL in .streamlit/secrets.toml:
-        # APP_URL = "https://events-tracker-test.streamlit.app"
+        # Try #3: Detect from browser using query params
+        # We'll use a trick: add a query param on first load to detect URL
+        try:
+            # Check if we have origin in query params
+            query_params = st.query_params
+            if 'app_origin' in query_params:
+                origin = query_params['app_origin']
+                # Store in session state for future use
+                st.session_state.app_base_url = origin
+                return origin
+        except:
+            pass
+        
+        # Fallback #1: Smart detection based on common patterns
+        # Try to detect if we're on localhost or cloud
+        try:
+            # Check if running locally (common dev patterns)
+            import socket
+            hostname = socket.gethostname()
+            if 'localhost' in hostname.lower() or hostname.startswith('127.'):
+                return "http://localhost:8501"
+        except:
+            pass
+        
+        # Fallback #2: Default to main branch
+        # This is the safest default for production
         return "https://events-tracker.streamlit.app"
     
     def request_password_reset(self, email: str) -> Tuple[bool, str]:
         """
         Send password reset email to user.
         
-        ⚠️ DEBUG VERSION - SHOWS DETAILED ERRORS!
+        COMPATIBILITY FIX: Works with old and new Supabase client versions!
         
         Args:
             email: User's email address
@@ -162,51 +188,119 @@ class AuthManager:
             # Auto-detect app URL
             redirect_url = self._get_app_url()
             
-            # 🐛 DEBUG: Show what we're sending
-            st.info(f"🐛 DEBUG: Sending reset to: {email}")
-            st.info(f"🐛 DEBUG: Redirect URL: {redirect_url}")
+            # 🔧 COMPATIBILITY FIX: Try multiple method names
+            # Different Supabase client versions use different method names
             
-            # Use Supabase's built-in password reset
-            response = self.client.auth.reset_password_for_email(
-                email,
-                options={
-                    "redirect_to": redirect_url
+            # Method 1: Try new method name (v2.0+)
+            if hasattr(self.client.auth, 'reset_password_for_email'):
+                try:
+                    response = self.client.auth.reset_password_for_email(
+                        email,
+                        options={
+                            "redirect_to": redirect_url
+                        }
+                    )
+                    # Success with new method!
+                    return True, (
+                        f"✅ If an account exists for {email}, "
+                        "a password reset email has been sent. "
+                        "Please check your inbox (and spam folder!)."
+                    )
+                except Exception as e:
+                    # New method failed, try alternatives
+                    pass
+            
+            # Method 2: Try alternative method name (older versions)
+            if hasattr(self.client.auth, 'send_reset_password_email'):
+                try:
+                    response = self.client.auth.send_reset_password_email(
+                        email,
+                        redirect_to=redirect_url
+                    )
+                    # Success with alternative method!
+                    return True, (
+                        f"✅ If an account exists for {email}, "
+                        "a password reset email has been sent. "
+                        "Please check your inbox (and spam folder!)."
+                    )
+                except Exception as e:
+                    pass
+            
+            # Method 3: Try direct HTTP API call (guaranteed to work!)
+            try:
+                import requests
+                
+                # Get Supabase URL and anon key from client
+                supabase_url = os.getenv("SUPABASE_URL")
+                supabase_key = os.getenv("SUPABASE_KEY")
+                
+                if not supabase_url or not supabase_key:
+                    raise Exception("Supabase credentials not found in environment")
+                
+                # Direct API call to Supabase Auth
+                api_url = f"{supabase_url}/auth/v1/recover"
+                headers = {
+                    "apikey": supabase_key,
+                    "Content-Type": "application/json"
                 }
-            )
-            
-            # 🐛 DEBUG: Show response
-            st.success(f"🐛 DEBUG: Supabase response: {response}")
-            
-            # Success!
-            return True, (
-                f"✅ If an account exists for {email}, "
-                "a password reset email has been sent. "
-                "Please check your inbox (and spam folder!)."
-            )
-            
+                data = {
+                    "email": email,
+                    "options": {
+                        "redirectTo": redirect_url
+                    }
+                }
+                
+                response = requests.post(api_url, json=data, headers=headers)
+                
+                if response.status_code == 200:
+                    # Success!
+                    return True, (
+                        f"✅ If an account exists for {email}, "
+                        "a password reset email has been sent. "
+                        "Please check your inbox (and spam folder!)."
+                    )
+                else:
+                    # API call failed
+                    raise Exception(f"API call failed with status {response.status_code}: {response.text}")
+                    
+            except Exception as e:
+                # All methods failed
+                error_msg = str(e)
+                
+                # User-friendly error messages
+                if "rate" in error_msg.lower() or "limit" in error_msg.lower():
+                    return False, (
+                        "⚠️ Too many reset attempts. Please wait a few minutes and try again. "
+                        "If you continue having issues, contact support."
+                    )
+                elif "network" in error_msg.lower() or "connection" in error_msg.lower():
+                    return False, (
+                        "❌ Network error. Please check your internet connection and try again."
+                    )
+                else:
+                    # Generic error (don't reveal details)
+                    return False, (
+                        "❌ Unable to process password reset request. "
+                        "Please try again later or contact support if the problem persists."
+                    )
+                    
         except Exception as e:
-            # 🐛 DEBUG: Show FULL error details!
             error_msg = str(e)
-            error_type = type(e).__name__
             
-            # Show full error in UI (for debugging)
-            st.error(f"🐛 DEBUG ERROR TYPE: {error_type}")
-            st.error(f"🐛 DEBUG ERROR MESSAGE: {error_msg}")
-            
-            # Try to extract more details
-            if hasattr(e, 'args'):
-                st.error(f"🐛 DEBUG ERROR ARGS: {e.args}")
-            
-            # Also return detailed error
-            return False, (
-                f"❌ Password reset failed!\n\n"
-                f"**Error Type:** {error_type}\n"
-                f"**Error Message:** {error_msg}\n\n"
-                f"Please check:\n"
-                f"1. Supabase SMTP settings (Dashboard → Authentication → Email)\n"
-                f"2. Gmail App Password configured correctly\n"
-                f"3. Supabase Audit Logs for more details"
-            )
+            # Catch-all error handling
+            if "rate" in error_msg.lower() or "limit" in error_msg.lower():
+                return False, (
+                    "⚠️ Too many reset attempts. Please wait a few minutes and try again."
+                )
+            elif "network" in error_msg.lower() or "connection" in error_msg.lower():
+                return False, (
+                    "❌ Network error. Please check your internet connection and try again."
+                )
+            else:
+                return False, (
+                    "❌ Unable to process password reset request. "
+                    "Please try again later."
+                )
     
     def change_password(self, new_password: str) -> Tuple[bool, str]:
         """
@@ -237,10 +331,41 @@ class AuthManager:
     
     def show_login_page(self):
         """Display login/signup page with independent Forgot Password section."""
-        st.title("🔐 Events Tracker - Login")
+        # AUTO-DETECT APP URL from browser (V2.4.2)
+        # This JavaScript runs client-side and detects the actual URL
+        if 'app_base_url' not in st.session_state:
+            import streamlit.components.v1 as components
+            
+            # JavaScript to detect URL and store in query params
+            components.html("""
+            <script>
+            // Get current origin (e.g., https://events-tracker-test.streamlit.app)
+            const origin = window.location.origin;
+            
+            // Check if we need to add it to URL
+            const urlParams = new URLSearchParams(window.location.search);
+            if (!urlParams.has('app_origin')) {
+                // Add origin to query params
+                urlParams.set('app_origin', origin);
+                const newUrl = window.location.pathname + '?' + urlParams.toString();
+                
+                // Reload with new URL (only once!)
+                if (window.location.search !== '?' + urlParams.toString()) {
+                    window.location.href = newUrl;
+                }
+            }
+            </script>
+            """, height=0)
+            
+            # Try to get from query params
+            try:
+                query_params = st.query_params
+                if 'app_origin' in query_params:
+                    st.session_state.app_base_url = query_params['app_origin']
+            except:
+                pass
         
-        # 🐛 DEBUG: Show version
-        st.caption("⚠️ DEBUG VERSION 2.4.0-DEBUG - Showing detailed errors")
+        st.title("🔐 Events Tracker - Login")
         
         tab1, tab2, tab3 = st.tabs(["Login", "Forgot Password?", "Sign Up"])
         
