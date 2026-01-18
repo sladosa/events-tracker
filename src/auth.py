@@ -1,23 +1,6 @@
 """
-Authentication Module - ADMIN API PASSWORD UPDATE
-==================================================
-Created: 2025-11-13 10:20 UTC
-Last Modified: 2025-01-17 22:00 UTC
-Python: 3.11
-Version: 2.5.2 (ADMIN API - ACTUALLY UPDATES PASSWORD!)
-
-Handles user signup, login, logout with Supabase Auth
-Uses AuthManager class for clean authentication flow
-
-NEW in V2.5.2:
-- 🔧 ADMIN API: Actually updates password in Supabase!
-- ✅ Uses Service Role Key for password updates
-- ✅ Password reset WORKS end-to-end!
-- ✅ User can login with new password immediately!
-
-FIXED from V2.5.1:
-- Password was validated but NOT updated
-- Now uses admin API to actually update password!
+DEBUG VERSION - Authentication Module
+Shows detailed info about secrets configuration
 """
 import streamlit as st
 from supabase import Client, create_client
@@ -165,24 +148,111 @@ class AuthManager:
             codes[code]['used'] = True
             self._save_codes(codes)
     
+    def _debug_secrets_info(self) -> str:
+        """
+        🔍 DEBUG: Show detailed secrets configuration info
+        """
+        debug_info = []
+        
+        debug_info.append("=" * 60)
+        debug_info.append("🔍 SECRETS DEBUG INFO")
+        debug_info.append("=" * 60)
+        
+        # Check if secrets exist
+        debug_info.append(f"\n1. st.secrets exists: {hasattr(st, 'secrets')}")
+        
+        if hasattr(st, 'secrets'):
+            # List all available secrets (without showing values)
+            try:
+                available_keys = list(st.secrets.keys())
+                debug_info.append(f"2. Available secret keys: {available_keys}")
+            except:
+                debug_info.append("2. Cannot list secret keys")
+            
+            # Check specific keys
+            has_url = hasattr(st.secrets, 'SUPABASE_URL')
+            has_key = hasattr(st.secrets, 'SUPABASE_KEY')
+            has_service = hasattr(st.secrets, 'SUPABASE_SERVICE_KEY')
+            
+            debug_info.append(f"\n3. Has SUPABASE_URL: {has_url}")
+            debug_info.append(f"4. Has SUPABASE_KEY: {has_key}")
+            debug_info.append(f"5. Has SUPABASE_SERVICE_KEY: {has_service}")
+            
+            # Show partial values (first/last 10 chars)
+            if has_url:
+                url = st.secrets.get("SUPABASE_URL", "")
+                debug_info.append(f"\n6. SUPABASE_URL: {url[:30]}...{url[-10:] if len(url) > 40 else ''}")
+            
+            if has_key:
+                key = st.secrets.get("SUPABASE_KEY", "")
+                debug_info.append(f"7. SUPABASE_KEY (first 20 chars): {key[:20]}...")
+            
+            if has_service:
+                service_key = st.secrets.get("SUPABASE_SERVICE_KEY", "")
+                debug_info.append(f"8. SUPABASE_SERVICE_KEY (first 20 chars): {service_key[:20]}...")
+            else:
+                debug_info.append("\n⚠️ SUPABASE_SERVICE_KEY NOT FOUND!")
+                debug_info.append("   This is why password reset fails!")
+                
+            # Check environment variables
+            debug_info.append(f"\n9. ENV SUPABASE_URL: {os.getenv('SUPABASE_URL', 'NOT SET')[:30]}...")
+            debug_info.append(f"10. ENV SUPABASE_KEY: {'SET' if os.getenv('SUPABASE_KEY') else 'NOT SET'}")
+            debug_info.append(f"11. ENV SUPABASE_SERVICE_KEY: {'SET' if os.getenv('SUPABASE_SERVICE_KEY') else 'NOT SET'}")
+            
+        debug_info.append("\n" + "=" * 60)
+        
+        return "\n".join(debug_info)
+    
     def _get_admin_client(self) -> Optional[Client]:
         """
         Create Supabase admin client using service role key.
+        NOW WITH DETAILED DEBUG INFO!
         
         Returns:
             Admin client or None if service key not available
         """
         try:
+            # 🔍 DEBUG: Log what we're checking
+            st.info("🔍 Checking for SUPABASE_SERVICE_KEY...")
+            
+            # Check method 1: Direct attribute check
+            has_service_key_attr = hasattr(st.secrets, 'SUPABASE_SERVICE_KEY')
+            st.write(f"hasattr(st.secrets, 'SUPABASE_SERVICE_KEY'): {has_service_key_attr}")
+            
+            # Check method 2: Try to get it
+            try:
+                service_key_get = st.secrets.get("SUPABASE_SERVICE_KEY")
+                st.write(f"st.secrets.get('SUPABASE_SERVICE_KEY'): {'Found' if service_key_get else 'None'}")
+            except Exception as e:
+                st.write(f"st.secrets.get() failed: {e}")
+            
+            # Check method 3: Dictionary access
+            try:
+                service_key_dict = st.secrets["SUPABASE_SERVICE_KEY"]
+                st.write(f"st.secrets['SUPABASE_SERVICE_KEY']: Found")
+            except Exception as e:
+                st.write(f"st.secrets['...'] failed: {e}")
+            
             # Try to get service role key from secrets
             if hasattr(st.secrets, 'SUPABASE_SERVICE_KEY'):
+                st.success("✅ SUPABASE_SERVICE_KEY found!")
+                
                 supabase_url = os.getenv("SUPABASE_URL") or st.secrets.get("SUPABASE_URL")
                 service_key = st.secrets["SUPABASE_SERVICE_KEY"]
                 
+                # Show partial key for verification
+                st.write(f"Service key (first 20 chars): {service_key[:20]}...")
+                
                 admin_client = create_client(supabase_url, service_key)
+                st.success("✅ Admin client created successfully!")
                 return admin_client
             else:
+                st.error("❌ SUPABASE_SERVICE_KEY NOT FOUND in secrets!")
+                st.write("Available keys:", list(st.secrets.keys()))
                 return None
         except Exception as e:
+            st.error(f"❌ Error creating admin client: {e}")
+            st.exception(e)
             return None
     
     def _get_user_by_email(self, email: str) -> Optional[str]:
@@ -193,30 +263,28 @@ class AuthManager:
             email: User's email
             
         Returns:
-            User ID or None
+            User ID or None if not found
         """
+        admin_client = self._get_admin_client()
+        if not admin_client:
+            st.error("❌ Admin client not available - cannot get user by email")
+            return None
+        
         try:
-            admin_client = self._get_admin_client()
-            if not admin_client:
-                return None
-            
-            # List all users and find by email
+            # Use admin API to list users and find by email
             response = admin_client.auth.admin.list_users()
             
-            if hasattr(response, 'users'):
-                users = response.users
-            elif isinstance(response, list):
-                users = response
-            else:
-                return None
+            if response and hasattr(response, 'users'):
+                for user in response.users:
+                    if user.email == email:
+                        st.success(f"✅ Found user: {user.id}")
+                        return user.id
             
-            for user in users:
-                if user.email == email:
-                    return user.id
-            
+            st.warning(f"⚠️ User not found: {email}")
             return None
-            
         except Exception as e:
+            st.error(f"❌ Error getting user by email: {e}")
+            st.exception(e)
             return None
     
     def _update_user_password_admin(self, user_id: str, new_password: str) -> bool:
@@ -224,77 +292,35 @@ class AuthManager:
         Update user password using admin API.
         
         Args:
-            user_id: User's ID
-            new_password: New password
+            user_id: User's UUID
+            new_password: New password to set
             
         Returns:
-            Success boolean
+            True if successful, False otherwise
         """
+        admin_client = self._get_admin_client()
+        if not admin_client:
+            st.error("❌ Admin client not available - cannot update password")
+            return False
+        
         try:
-            admin_client = self._get_admin_client()
-            if not admin_client:
-                return False
+            st.info(f"🔄 Updating password for user: {user_id}")
             
-            # Update user password
             response = admin_client.auth.admin.update_user_by_id(
                 user_id,
                 {"password": new_password}
             )
             
-            return response is not None
-            
+            if response:
+                st.success("✅ Password updated in Supabase!")
+                return True
+            else:
+                st.error("❌ Password update returned no response")
+                return False
         except Exception as e:
+            st.error(f"❌ Error updating password: {e}")
+            st.exception(e)
             return False
-    
-    def _get_app_url(self) -> str:
-        """Get current app URL."""
-        if 'app_base_url' in st.session_state:
-            return st.session_state.app_base_url
-        
-        try:
-            if hasattr(st.secrets, 'APP_URL'):
-                return st.secrets.APP_URL
-        except:
-            pass
-        
-        try:
-            query_params = st.query_params
-            if 'app_origin' in query_params:
-                url = query_params['app_origin']
-                st.session_state.app_base_url = url
-                return url
-        except:
-            pass
-        
-        return "https://events-tracker.streamlit.app"
-    
-    def _detect_app_url(self):
-        """Use JavaScript to detect and store app URL."""
-        if 'app_base_url' not in st.session_state:
-            import streamlit.components.v1 as components
-            
-            components.html("""
-            <script>
-            const origin = window.location.origin;
-            const urlParams = new URLSearchParams(window.location.search);
-            
-            if (!urlParams.has('app_origin')) {
-                urlParams.set('app_origin', origin);
-                const newUrl = window.location.pathname + '?' + urlParams.toString();
-                
-                if (window.location.search !== '?' + urlParams.toString()) {
-                    window.location.href = newUrl;
-                }
-            }
-            </script>
-            """, height=0)
-            
-            try:
-                query_params = st.query_params
-                if 'app_origin' in query_params:
-                    st.session_state.app_base_url = query_params['app_origin']
-            except:
-                pass
     
     def signup(self, email: str, password: str) -> Tuple[bool, str]:
         """Sign up a new user."""
@@ -305,15 +331,19 @@ class AuthManager:
             })
             
             if response.user:
-                return True, "✅ Sign up successful! Please check your email to confirm your account."
+                return True, "✅ Account created! Please check your email to confirm."
             else:
-                return False, "❌ Sign up failed. Please try again."
-                
+                return False, "❌ Signup failed. Please try again."
         except Exception as e:
             error_msg = str(e)
             if "already registered" in error_msg.lower():
-                return False, "❌ This email is already registered. Please login instead."
-            return False, f"❌ Sign up error: {error_msg}"
+                return False, "❌ Email already registered. Try logging in or resetting password."
+            elif "invalid email" in error_msg.lower():
+                return False, "❌ Invalid email format."
+            elif "password" in error_msg.lower():
+                return False, "❌ Password must be at least 6 characters."
+            else:
+                return False, f"❌ Signup error: {error_msg}"
     
     def login(self, email: str, password: str) -> Tuple[bool, str]:
         """Log in an existing user."""
@@ -329,15 +359,17 @@ class AuthManager:
                     'email': response.user.email
                 }
                 st.session_state.authenticated = True
-                return True, f"✅ Welcome back, {response.user.email}!"
+                return True, f"✅ Welcome back, {email}!"
             else:
-                return False, "❌ Login failed. Please check your credentials."
-                
+                return False, "❌ Login failed."
         except Exception as e:
             error_msg = str(e)
-            if "invalid" in error_msg.lower():
+            if "invalid" in error_msg.lower() or "credentials" in error_msg.lower():
                 return False, "❌ Invalid email or password."
-            return False, f"❌ Login error: {error_msg}"
+            elif "email not confirmed" in error_msg.lower():
+                return False, "❌ Please confirm your email first."
+            else:
+                return False, f"❌ Login error: {error_msg}"
     
     def logout(self):
         """Log out the current user."""
@@ -350,80 +382,8 @@ class AuthManager:
             st.session_state.authenticated = False
             st.rerun()
     
-    def request_password_reset(self, email: str) -> Tuple[bool, str]:
-        """Send password reset email with custom reset code."""
-        try:
-            reset_code = self._generate_reset_code()
-            self._store_reset_code(reset_code, email)
-            app_url = self._get_app_url()
-            reset_link = f"{app_url}?reset_code={reset_code}"
-            
-            return True, (
-                f"✅ Password reset requested!\n\n"
-                f"**Reset Code:** `{reset_code}`\n\n"
-                f"**Reset Link:** [Click here]({reset_link})\n\n"
-                f"💡 In production, this would be sent to {email}. "
-                f"Code expires in 1 hour."
-            )
-                    
-        except Exception as e:
-            error_msg = str(e)
-            return False, f"❌ Error requesting password reset: {error_msg}"
-    
-    def reset_password_with_code(self, code: str, new_password: str) -> Tuple[bool, str]:
-        """
-        Reset password using custom reset code.
-        NOW ACTUALLY UPDATES PASSWORD using admin API!
-        
-        Args:
-            code: Reset code from email
-            new_password: New password to set
-            
-        Returns:
-            Tuple of (success: bool, message: str)
-        """
-        try:
-            # Validate code
-            valid, email, error_msg = self._validate_reset_code(code)
-            
-            if not valid:
-                return False, f"❌ {error_msg}"
-            
-            # ⭐ NEW: Get user ID by email
-            user_id = self._get_user_by_email(email)
-            
-            if not user_id:
-                # Admin API not available or user not found
-                # Mark code as used anyway
-                self._invalidate_reset_code(code)
-                
-                return True, (
-                    f"✅ Reset code validated for {email}!\n\n"
-                    f"⚠️ Admin API not configured. Please contact administrator to complete password reset.\n\n"
-                    f"💡 **For production:** Add SUPABASE_SERVICE_KEY to Streamlit Secrets."
-                )
-            
-            # ⭐ NEW: Update password using admin API!
-            success = self._update_user_password_admin(user_id, new_password)
-            
-            if not success:
-                return False, (
-                    f"❌ Failed to update password. Please try again or contact support."
-                )
-            
-            # Mark code as used
-            self._invalidate_reset_code(code)
-            
-            return True, (
-                f"✅ Password updated successfully for {email}!\n\n"
-                f"🎉 You can now login with your new password!"
-            )
-                
-        except Exception as e:
-            return False, f"❌ Error: {str(e)}"
-    
     def change_password(self, new_password: str) -> Tuple[bool, str]:
-        """Change password for currently logged in user."""
+        """Change password for authenticated user."""
         if not self.is_authenticated():
             return False, "❌ You must be logged in to change password."
         
@@ -432,28 +392,121 @@ class AuthManager:
                 "password": new_password
             })
             
-            if response.user:
+            if response:
                 return True, "✅ Password changed successfully!"
             else:
-                return False, "❌ Failed to change password. Please try again."
-                
+                return False, "❌ Password change failed."
         except Exception as e:
-            error_msg = str(e)
-            return False, f"❌ Error changing password: {error_msg}"
+            return False, f"❌ Error changing password: {str(e)}"
+    
+    def request_password_reset(self, email: str) -> Tuple[bool, str]:
+        """
+        Request password reset - generates reset code and link.
+        NOW WITH DEBUG INFO!
+        """
+        try:
+            # 🔍 SHOW DEBUG INFO
+            st.code(self._debug_secrets_info())
+            
+            # Generate secure reset code
+            reset_code = self._generate_reset_code()
+            
+            # Store code with email
+            self._store_reset_code(reset_code, email)
+            
+            # Get current app URL
+            app_url = st.session_state.get('app_url', 'http://localhost:8501')
+            
+            # Create reset link
+            reset_link = f"{app_url}?reset_code={reset_code}"
+            
+            # 🚧 DEMO MODE: Show link in UI instead of sending email
+            return True, (
+                f"✅ Password reset requested!\n\n"
+                f"**Reset Code:** `{reset_code}`\n\n"
+                f"**Reset Link:** [Click here]({reset_link})\n\n"
+                f"💡 In production, this would be sent to {email}."
+            )
+            
+        except Exception as e:
+            return False, f"❌ Error requesting password reset: {str(e)}"
+    
+    def reset_password_with_code(self, reset_code: str, new_password: str) -> Tuple[bool, str]:
+        """
+        Reset password using reset code.
+        V2.5.2: NOW ACTUALLY UPDATES PASSWORD IN SUPABASE!
+        """
+        try:
+            # Validate code
+            valid, email, error_msg = self._validate_reset_code(reset_code)
+            if not valid:
+                return False, error_msg
+            
+            # 🔑 TRY TO GET ADMIN CLIENT (with debug info)
+            admin_client = self._get_admin_client()
+            if not admin_client:
+                st.error("⚠️ Admin API not configured. Please contact administrator to complete password reset.")
+                st.info("💡 For production: Add SUPABASE_SERVICE_KEY to Streamlit Secrets.")
+                # Still mark code as used even if we can't update password
+                self._invalidate_reset_code(reset_code)
+                return True, f"✅ Reset code validated for {email}!"
+            
+            # ⭐ GET USER ID BY EMAIL
+            st.info(f"🔍 Looking up user: {email}")
+            user_id = self._get_user_by_email(email)
+            if not user_id:
+                return False, f"❌ Could not find user with email: {email}"
+            
+            # ⭐ UPDATE PASSWORD VIA ADMIN API
+            st.info(f"🔄 Updating password via Admin API...")
+            success = self._update_user_password_admin(user_id, new_password)
+            
+            if success:
+                # Mark code as used
+                self._invalidate_reset_code(reset_code)
+                
+                return True, (
+                    f"✅ Password updated successfully for {email}!\n\n"
+                    f"🎉 You can now login with your new password!"
+                )
+            else:
+                return False, "❌ Failed to update password in Supabase."
+            
+        except Exception as e:
+            return False, f"❌ Error resetting password: {str(e)}"
+    
+    def _detect_app_url(self):
+        """Detect the current app URL for reset links."""
+        if 'app_url' not in st.session_state:
+            st.session_state.app_url = "http://localhost:8501"
+            
+            # Inject JavaScript to detect URL
+            js_code = """
+            <script>
+            const url = window.location.origin + window.location.pathname;
+            window.parent.postMessage({type: 'streamlit:setComponentValue', value: url}, '*');
+            </script>
+            """
+            
+            try:
+                import streamlit.components.v1 as components
+                detected_url = components.html(js_code, height=0)
+                if detected_url:
+                    st.session_state.app_url = detected_url
+            except:
+                pass
     
     def _show_password_reset_form(self, reset_code: str, email: str):
-        """Show password reset form with validated code."""
+        """Show password reset form after validating code."""
         st.title("🔐 Reset Your Password")
         
         st.success(f"✅ Reset code validated for: **{email}**")
         
-        st.markdown("""
-        ### Set Your New Password
+        st.markdown("---")
+        st.subheader("Set Your New Password")
+        st.caption("Enter a new password for your account.")
         
-        Enter a new password for your account.
-        """)
-        
-        with st.form("password_reset_form"):
+        with st.form("reset_password_form"):
             new_password = st.text_input(
                 "New Password",
                 type="password",
