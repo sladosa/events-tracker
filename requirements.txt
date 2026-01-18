@@ -7,3 +7,4 @@ pydantic==1.10.13
 numpy==1.24.0
 plotly==5.18.0
 streamlit-agraph==0.0.45
+httpx>=0.25.0  # Required for V2.6.2 password reset workaround
