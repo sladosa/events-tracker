@@ -178,18 +178,33 @@ class AuthManager:
             debug_info.append(f"4. Has SUPABASE_KEY: {has_key}")
             debug_info.append(f"5. Has SUPABASE_SERVICE_KEY: {has_service}")
             
-            # Show partial values (first/last 10 chars)
+            # Show partial values (first/last chars + length)
             if has_url:
                 url = st.secrets.get("SUPABASE_URL", "")
                 debug_info.append(f"\n6. SUPABASE_URL: {url[:30]}...{url[-10:] if len(url) > 40 else ''}")
             
             if has_key:
                 key = st.secrets.get("SUPABASE_KEY", "")
-                debug_info.append(f"7. SUPABASE_KEY (first 20 chars): {key[:20]}...")
+                debug_info.append(f"\n7. SUPABASE_KEY:")
+                debug_info.append(f"   Length: {len(key)} chars")
+                debug_info.append(f"   First 20: {key[:20]}...")
+                debug_info.append(f"   Last 15:  ...{key[-15:]}")
             
             if has_service:
                 service_key = st.secrets.get("SUPABASE_SERVICE_KEY", "")
-                debug_info.append(f"8. SUPABASE_SERVICE_KEY (first 20 chars): {service_key[:20]}...")
+                debug_info.append(f"\n8. SUPABASE_SERVICE_KEY:")
+                debug_info.append(f"   Length: {len(service_key)} chars")
+                debug_info.append(f"   First 20: {service_key[:20]}...")
+                debug_info.append(f"   Last 15:  ...{service_key[-15:]}")
+                
+                # Compare with anon key
+                if has_key:
+                    anon_key = st.secrets.get("SUPABASE_KEY", "")
+                    if service_key == anon_key:
+                        debug_info.append(f"\n   ⚠️ WARNING: Service key is SAME as anon key!")
+                        debug_info.append(f"   ⚠️ This is WRONG! They must be different!")
+                    else:
+                        debug_info.append(f"\n   ✅ Service key is DIFFERENT from anon key (Good!)")
             else:
                 debug_info.append("\n⚠️ SUPABASE_SERVICE_KEY NOT FOUND!")
                 debug_info.append("   This is why password reset fails!")
@@ -414,21 +429,41 @@ class AuthManager:
             # Store code with email
             self._store_reset_code(reset_code, email)
             
-            # Get current app URL
-            app_url = st.session_state.get('app_url', 'http://localhost:8501')
+            # Get current app URL - simplified approach
+            try:
+                # Try to get from session state first
+                app_url = st.session_state.get('app_url')
+                
+                # If not in session state, construct manually
+                if not app_url:
+                    # Use a simple JavaScript approach to get current URL
+                    import streamlit.components.v1 as components
+                    
+                    # This will just use the browser's location
+                    app_url = "https://events-tracker-test.streamlit.app"  # Fallback
+                    
+                st.write(f"🔗 Using app URL: {app_url}")
+            except:
+                app_url = "https://events-tracker-test.streamlit.app"  # Default fallback
             
-            # Create reset link
+            # Create reset link - SIMPLE format
             reset_link = f"{app_url}?reset_code={reset_code}"
+            
+            st.write(f"🔗 Generated reset link: {reset_link}")
             
             # 🚧 DEMO MODE: Show link in UI instead of sending email
             return True, (
                 f"✅ Password reset requested!\n\n"
                 f"**Reset Code:** `{reset_code}`\n\n"
-                f"**Reset Link:** [Click here]({reset_link})\n\n"
+                f"**Reset Link (copy-paste to new tab):**\n\n"
+                f"`{reset_link}`\n\n"
                 f"💡 In production, this would be sent to {email}."
             )
             
         except Exception as e:
+            st.error(f"Exception details: {e}")
+            import traceback
+            st.code(traceback.format_exc())
             return False, f"❌ Error requesting password reset: {str(e)}"
     
     def reset_password_with_code(self, reset_code: str, new_password: str) -> Tuple[bool, str]:
