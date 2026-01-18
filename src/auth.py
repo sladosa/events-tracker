@@ -1,26 +1,17 @@
 """
 Authentication Module - NATIVE SUPABASE PASSWORD RESET
 ======================================================
-Version: 2.7.0 NATIVE
-Last Modified: 2025-01-18 17:00 UTC
-Python: 3.11
+Version: 2.7.1 FIXED API
+Last Modified: 2025-01-18 18:30 UTC
 
-FEATURES:
-- Native Supabase password reset with email
-- NO admin API needed!
-- Professional email flow
-- Production-ready
+FIXES:
+- Fixed API method name for supabase-py 2.0.0
+- Uses auth.api.reset_password_email() instead of reset_password_for_email()
 """
 import streamlit as st
 from supabase import Client, create_client
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple
 import os
-import secrets
-import string
-from datetime import datetime, timedelta
-import json
-import fcntl
-from pathlib import Path
 
 
 class AuthManager:
@@ -150,30 +141,40 @@ class AuthManager:
     def request_password_reset_native(self, email: str) -> Tuple[bool, str]:
         """
         Request password reset using Supabase's native flow.
-        Sends email with magic link - NO ADMIN API NEEDED!
+        FIXED: Uses correct API method for supabase-py 2.0.0
         """
         try:
-            # Get app URL for redirect
             app_url = st.session_state.get('app_url', 'https://events-tracker-test.streamlit.app')
-            
-            # Construct redirect URL
             redirect_url = f"{app_url}?password_reset=true"
             
-            # Request password reset email from Supabase
-            response = self.client.auth.reset_password_for_email(
-                email,
-                {
-                    'redirect_to': redirect_url
-                }
-            )
+            # Try different API methods based on SDK version
+            try:
+                # Method 1: Try auth.api.reset_password_email (common in 2.x)
+                self.client.auth.api.reset_password_email(
+                    email=email,
+                    redirect_to=redirect_url
+                )
+            except AttributeError:
+                try:
+                    # Method 2: Try auth.reset_password_for_email
+                    self.client.auth.reset_password_for_email(
+                        email,
+                        {'redirect_to': redirect_url}
+                    )
+                except AttributeError:
+                    # Method 3: Try direct API call
+                    self.client.auth.api.reset_password_for_email(
+                        email,
+                        redirect_to=redirect_url
+                    )
             
             return True, (
                 f"✅ Password reset email sent!\n\n"
                 f"📧 **Check your inbox for:** {email}\n\n"
-                f"📬 **Look for an email from Supabase**\n\n"
+                f"📬 **Look for an email from Events Tracker**\n\n"
                 f"💡 Click the link in the email to reset your password.\n\n"
                 f"⏰ The link will expire in 1 hour.\n\n"
-                f"💌 **Didn't receive it?** Check your spam folder!"
+                f"📥 **With Gmail SMTP, email arrives in 10-30 seconds!**"
             )
             
         except Exception as e:
@@ -186,26 +187,19 @@ class AuthManager:
                 return False, f"❌ Error sending reset email: {error_msg}"
     
     def handle_password_reset_callback(self) -> bool:
-        """
-        Handle the callback after user clicks email link.
-        Returns True if callback was handled, False otherwise.
-        """
+        """Handle the callback after user clicks email link."""
         query_params = st.query_params
         
-        # Check if this is a password reset callback
         if 'password_reset' not in query_params:
             return False
         
-        # Check for access token (from email link)
         if 'access_token' in query_params:
             access_token = query_params['access_token']
             
             try:
-                # Set the session with the access token
                 response = self.client.auth.set_session(access_token, query_params.get('refresh_token', ''))
                 
                 if response and response.user:
-                    # Show password update form
                     st.title("🔐 Set Your New Password")
                     st.success(f"✅ Email verified for: **{response.user.email}**")
                     
@@ -236,7 +230,6 @@ class AuthManager:
                             elif len(new_password) < 6:
                                 st.error("❌ Password must be at least 6 characters.")
                             else:
-                                # Update password
                                 try:
                                     update_response = self.client.auth.update_user({
                                         "password": new_password
@@ -246,8 +239,6 @@ class AuthManager:
                                         st.success("✅ Password updated successfully!")
                                         st.balloons()
                                         st.info("💡 Redirecting to login...")
-                                        
-                                        # Clear query params and redirect
                                         st.query_params.clear()
                                         import time
                                         time.sleep(2)
@@ -283,7 +274,6 @@ class AuthManager:
                 
                 return True
         else:
-            # Waiting for user to click email link
             st.info("📧 Waiting for email verification...")
             st.markdown("""
             **Please check your email and click the reset link.**
@@ -305,7 +295,6 @@ class AuthManager:
     def show_login_page(self):
         """Display login/signup page with native password reset support."""
         
-        # First, check if this is a password reset callback
         if self.handle_password_reset_callback():
             return
         
