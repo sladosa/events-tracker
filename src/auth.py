@@ -417,7 +417,7 @@ class AuthManager:
     def request_password_reset(self, email: str) -> Tuple[bool, str]:
         """
         Request password reset - generates reset code and link.
-        NOW WITH DEBUG INFO!
+        NOW WITH DEBUG INFO AND FIXED URL!
         """
         try:
             # 🔍 SHOW DEBUG INFO
@@ -429,22 +429,10 @@ class AuthManager:
             # Store code with email
             self._store_reset_code(reset_code, email)
             
-            # Get current app URL - simplified approach
-            try:
-                # Try to get from session state first
-                app_url = st.session_state.get('app_url')
-                
-                # If not in session state, construct manually
-                if not app_url:
-                    # Use a simple JavaScript approach to get current URL
-                    import streamlit.components.v1 as components
-                    
-                    # This will just use the browser's location
-                    app_url = "https://events-tracker-test.streamlit.app"  # Fallback
-                    
-                st.write(f"🔗 Using app URL: {app_url}")
-            except:
-                app_url = "https://events-tracker-test.streamlit.app"  # Default fallback
+            # Get current app URL - use session state
+            app_url = st.session_state.get('app_url', 'https://events-tracker-test.streamlit.app')
+            
+            st.write(f"🔗 Using app URL: {app_url}")
             
             # Create reset link - SIMPLE format
             reset_link = f"{app_url}?reset_code={reset_code}"
@@ -455,8 +443,9 @@ class AuthManager:
             return True, (
                 f"✅ Password reset requested!\n\n"
                 f"**Reset Code:** `{reset_code}`\n\n"
-                f"**Reset Link (copy-paste to new tab):**\n\n"
+                f"**Reset Link (copy this URL to a new tab):**\n\n"
                 f"`{reset_link}`\n\n"
+                f"💡 Copy the link above and paste it into a new browser tab.\n\n"
                 f"💡 In production, this would be sent to {email}."
             )
             
@@ -511,25 +500,28 @@ class AuthManager:
             return False, f"❌ Error resetting password: {str(e)}"
     
     def _detect_app_url(self):
-        """Detect the current app URL for reset links."""
+        """
+        Detect the current app URL for reset links.
+        SIMPLIFIED: Use environment variable or default.
+        """
         if 'app_url' not in st.session_state:
-            st.session_state.app_url = "http://localhost:8501"
+            # Try to get from environment first
+            env_url = os.getenv('APP_URL')
             
-            # Inject JavaScript to detect URL
-            js_code = """
-            <script>
-            const url = window.location.origin + window.location.pathname;
-            window.parent.postMessage({type: 'streamlit:setComponentValue', value: url}, '*');
-            </script>
-            """
-            
-            try:
-                import streamlit.components.v1 as components
-                detected_url = components.html(js_code, height=0)
-                if detected_url:
-                    st.session_state.app_url = detected_url
-            except:
-                pass
+            if env_url:
+                st.session_state.app_url = env_url
+            else:
+                # Default to test-branch
+                # User can override this in Streamlit Secrets if needed
+                try:
+                    custom_url = st.secrets.get('APP_URL')
+                    if custom_url:
+                        st.session_state.app_url = custom_url
+                    else:
+                        # Hardcoded default
+                        st.session_state.app_url = "https://events-tracker-test.streamlit.app"
+                except:
+                    st.session_state.app_url = "https://events-tracker-test.streamlit.app"
     
     def _show_password_reset_form(self, reset_code: str, email: str):
         """Show password reset form after validating code."""
