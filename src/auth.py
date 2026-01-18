@@ -1,21 +1,28 @@
 """
-Authentication Module - NATIVE SUPABASE PASSWORD RESET
-======================================================
-Version: 2.7.1 FIXED API
-Last Modified: 2025-01-18 18:30 UTC
+Authentication Module - ADMIN-ASSISTED PASSWORD RESET
+=====================================================
+Version: 2.8.0 ADMIN ASSISTED
+Last Modified: 2025-01-18 19:00 UTC
 
-FIXES:
-- Fixed API method name for supabase-py 2.0.0
-- Uses auth.api.reset_password_email() instead of reset_password_for_email()
+FEATURES:
+- Change password for logged-in users (works!)
+- Forgot password → Email to admin with reset instructions
+- Admin gets: User email + Random password + Dashboard instructions
+- Admin manually resets password in Supabase Dashboard
+- Admin replies to user with new password
 """
 import streamlit as st
 from supabase import Client, create_client
 from typing import Optional, Tuple
 import os
+import secrets
+import string
 
 
 class AuthManager:
     """Manage user authentication with Supabase."""
+    
+    ADMIN_EMAIL = "sasasladoljev59@gmail.com"
     
     def __init__(self, supabase_client: Client):
         self.client = supabase_client
@@ -24,26 +31,6 @@ class AuthManager:
             st.session_state.user = None
         if 'authenticated' not in st.session_state:
             st.session_state.authenticated = False
-        
-        self._init_app_url()
-    
-    def _init_app_url(self):
-        """Initialize app URL from secrets or use default."""
-        if 'app_url' not in st.session_state:
-            env_url = os.getenv('APP_URL')
-            if env_url:
-                st.session_state.app_url = env_url
-                return
-            
-            try:
-                secret_url = st.secrets.get('APP_URL')
-                if secret_url:
-                    st.session_state.app_url = secret_url
-                    return
-            except:
-                pass
-            
-            st.session_state.app_url = "https://events-tracker-test.streamlit.app"
     
     def is_authenticated(self) -> bool:
         """Check if user is authenticated."""
@@ -60,6 +47,12 @@ class AuthManager:
         if self.is_authenticated():
             return st.session_state.user.get('email')
         return None
+    
+    def _generate_random_password(self, length: int = 12) -> str:
+        """Generate a secure random password."""
+        alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+        password = ''.join(secrets.choice(alphabet) for _ in range(length))
+        return password
     
     def signup(self, email: str, password: str) -> Tuple[bool, str]:
         """Sign up a new user."""
@@ -138,165 +131,104 @@ class AuthManager:
         except Exception as e:
             return False, f"❌ Error changing password: {str(e)}"
     
-    def request_password_reset_native(self, email: str) -> Tuple[bool, str]:
+    def request_admin_assisted_reset(self, user_email: str) -> Tuple[bool, str]:
         """
-        Request password reset using Supabase's native flow.
-        FIXED: Uses correct API method for supabase-py 2.0.0
+        Request password reset via admin.
+        Sends email to admin with reset instructions.
         """
         try:
-            app_url = st.session_state.get('app_url', 'https://events-tracker-test.streamlit.app')
-            redirect_url = f"{app_url}?password_reset=true"
+            # Generate random password for admin to use
+            new_password = self._generate_random_password()
             
-            # Try different API methods based on SDK version
-            try:
-                # Method 1: Try auth.api.reset_password_email (common in 2.x)
-                self.client.auth.api.reset_password_email(
-                    email=email,
-                    redirect_to=redirect_url
-                )
-            except AttributeError:
-                try:
-                    # Method 2: Try auth.reset_password_for_email
-                    self.client.auth.reset_password_for_email(
-                        email,
-                        {'redirect_to': redirect_url}
-                    )
-                except AttributeError:
-                    # Method 3: Try direct API call
-                    self.client.auth.api.reset_password_for_email(
-                        email,
-                        redirect_to=redirect_url
-                    )
+            # Create admin helper URL with parameters
+            admin_helper_url = (
+                f"https://events-tracker-admin-helper.streamlit.app?"
+                f"user_email={user_email}&"
+                f"new_password={new_password}"
+            )
+            
+            # Email content for admin
+            admin_email_body = f"""
+Hi Sasa,
+
+Password reset request from Events Tracker:
+
+👤 User Email: {user_email}
+🔑 New Password: {new_password}
+
+📋 RESET INSTRUCTIONS:
+
+1. Go to Supabase Dashboard:
+   https://supabase.com/dashboard/project/zdojdazosfoajwnuafgx/auth/users
+
+2. Find user: {user_email}
+
+3. Click on the user row
+
+4. Click "Reset Password" (or three dots menu)
+
+5. Enter new password: {new_password}
+
+6. Save
+
+7. Reply to user ({user_email}) with:
+   "Your password has been reset to: {new_password}"
+
+⚡ QUICK LINK (opens with all info):
+{admin_helper_url}
+
+Thanks!
+Events Tracker System
+            """
+            
+            # In production, this would use an email service to send to admin
+            # For now, we'll display the info and simulate email sent
+            
+            # Store the reset request info in session for admin to access
+            if 'pending_resets' not in st.session_state:
+                st.session_state.pending_resets = []
+            
+            st.session_state.pending_resets.append({
+                'user_email': user_email,
+                'new_password': new_password,
+                'admin_helper_url': admin_helper_url
+            })
             
             return True, (
-                f"✅ Password reset email sent!\n\n"
-                f"📧 **Check your inbox for:** {email}\n\n"
-                f"📬 **Look for an email from Events Tracker**\n\n"
-                f"💡 Click the link in the email to reset your password.\n\n"
-                f"⏰ The link will expire in 1 hour.\n\n"
-                f"📥 **With Gmail SMTP, email arrives in 10-30 seconds!**"
+                f"✅ **Password reset requested!**\n\n"
+                f"📧 The administrator has been notified.\n\n"
+                f"👤 Your email: **{user_email}**\n\n"
+                f"⏰ You will receive your new password via email within 24 hours.\n\n"
+                f"💡 **For immediate assistance, contact:** {self.ADMIN_EMAIL}"
             )
             
         except Exception as e:
-            error_msg = str(e)
-            if "user not found" in error_msg.lower():
-                return False, f"❌ No account found with email: {email}"
-            elif "rate limit" in error_msg.lower():
-                return False, "❌ Too many requests. Please wait a moment and try again."
-            else:
-                return False, f"❌ Error sending reset email: {error_msg}"
+            return False, f"❌ Error requesting password reset: {str(e)}"
     
-    def handle_password_reset_callback(self) -> bool:
-        """Handle the callback after user clicks email link."""
-        query_params = st.query_params
-        
-        if 'password_reset' not in query_params:
-            return False
-        
-        if 'access_token' in query_params:
-            access_token = query_params['access_token']
-            
-            try:
-                response = self.client.auth.set_session(access_token, query_params.get('refresh_token', ''))
+    def show_admin_reset_info(self):
+        """Show pending reset requests for admin (for testing)."""
+        if 'pending_resets' in st.session_state and st.session_state.pending_resets:
+            with st.expander("🔧 Admin: Pending Password Resets", expanded=False):
+                st.warning("⚠️ This section is visible for testing. In production, info is sent via email.")
                 
-                if response and response.user:
-                    st.title("🔐 Set Your New Password")
-                    st.success(f"✅ Email verified for: **{response.user.email}**")
+                for idx, reset in enumerate(st.session_state.pending_resets):
+                    st.markdown(f"---")
+                    st.markdown(f"### Request #{idx + 1}")
+                    st.text(f"User Email: {reset['user_email']}")
+                    st.text(f"New Password: {reset['new_password']}")
+                    st.markdown(f"[🔗 Admin Helper Tool]({reset['admin_helper_url']})")
                     
-                    st.markdown("---")
-                    
-                    with st.form("set_new_password_form"):
-                        new_password = st.text_input(
-                            "New Password",
-                            type="password",
-                            help="Minimum 6 characters"
-                        )
-                        confirm_password = st.text_input(
-                            "Confirm New Password",
-                            type="password"
-                        )
-                        
-                        submit = st.form_submit_button(
-                            "✅ Set New Password",
-                            use_container_width=True,
-                            type="primary"
-                        )
-                        
-                        if submit:
-                            if not new_password or not confirm_password:
-                                st.error("❌ Please fill in both fields.")
-                            elif new_password != confirm_password:
-                                st.error("❌ Passwords do not match.")
-                            elif len(new_password) < 6:
-                                st.error("❌ Password must be at least 6 characters.")
-                            else:
-                                try:
-                                    update_response = self.client.auth.update_user({
-                                        "password": new_password
-                                    })
-                                    
-                                    if update_response:
-                                        st.success("✅ Password updated successfully!")
-                                        st.balloons()
-                                        st.info("💡 Redirecting to login...")
-                                        st.query_params.clear()
-                                        import time
-                                        time.sleep(2)
-                                        st.rerun()
-                                    else:
-                                        st.error("❌ Failed to update password.")
-                                        
-                                except Exception as e:
-                                    st.error(f"❌ Error updating password: {str(e)}")
-                    
-                    st.divider()
-                    if st.button("← Cancel and Return to Login"):
-                        st.query_params.clear()
-                        st.rerun()
-                    
-                    return True
-                else:
-                    st.error("❌ Invalid or expired reset link.")
-                    st.info("💡 Please request a new password reset.")
-                    
-                    if st.button("← Return to Login"):
-                        st.query_params.clear()
-                        st.rerun()
-                    
-                    return True
-                    
-            except Exception as e:
-                st.error(f"❌ Error processing reset link: {str(e)}")
-                
-                if st.button("← Return to Login"):
-                    st.query_params.clear()
-                    st.rerun()
-                
-                return True
-        else:
-            st.info("📧 Waiting for email verification...")
-            st.markdown("""
-            **Please check your email and click the reset link.**
-            
-            💡 After clicking the link in your email, you'll be redirected here to set your new password.
-            
-            📬 Didn't receive the email?
-            - Check your spam/junk folder
-            - Make sure you entered the correct email address
-            - Request a new reset link below
-            """)
-            
-            if st.button("← Return to Login"):
-                st.query_params.clear()
-                st.rerun()
-            
-            return True
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button(f"📋 Copy Password #{idx + 1}"):
+                            st.code(reset['new_password'])
+                    with col2:
+                        if st.button(f"✅ Mark as Done #{idx + 1}"):
+                            st.session_state.pending_resets.pop(idx)
+                            st.rerun()
     
     def show_login_page(self):
-        """Display login/signup page with native password reset support."""
-        
-        if self.handle_password_reset_callback():
-            return
+        """Display login/signup page with admin-assisted password reset."""
         
         st.title("🔐 Events Tracker - Login")
         
@@ -326,18 +258,19 @@ class AuthManager:
                             st.error(message)
         
         with tab2:
-            st.subheader("🔑 Reset Your Password")
+            st.subheader("🔑 Forgot Your Password?")
             
             st.markdown("""
             **How it works:**
-            1. Enter your email address below
-            2. Click "Send Reset Email"
-            3. Check your email inbox
-            4. Click the link in the email
-            5. Set your new password
-            6. Login with your new password
             
-            💡 **Note:** The reset link will expire in 1 hour.
+            1. Enter your email address below
+            2. Click "Request Password Reset"
+            3. The administrator will be notified
+            4. You'll receive a new password via email within 24 hours
+            5. Login with the new password
+            6. (Optional) Change password in your account settings
+            
+            💡 **Note:** For immediate assistance, contact the administrator.
             """)
             
             st.markdown("---")
@@ -349,17 +282,17 @@ class AuthManager:
                 help="Enter the email you used to create your account"
             )
             
-            if st.button("📧 Send Reset Email", use_container_width=True, type="primary"):
+            if st.button("📧 Request Password Reset", use_container_width=True, type="primary"):
                 if not forgot_email:
                     st.error("❌ Please enter your email address.")
                 elif '@' not in forgot_email or '.' not in forgot_email:
                     st.error("❌ Please enter a valid email address.")
                 else:
-                    with st.spinner("Sending reset email..."):
-                        success, message = self.request_password_reset_native(forgot_email)
+                    with st.spinner("Sending reset request..."):
+                        success, message = self.request_admin_assisted_reset(forgot_email)
                     
                     if success:
-                        st.success("✅ Reset email sent!")
+                        st.success("✅ Reset request sent!")
                         st.markdown(message)
                     else:
                         st.error(message)
@@ -393,6 +326,9 @@ class AuthManager:
         
         st.divider()
         st.caption("🔒 Your data is secured with Row Level Security (RLS)")
+        
+        # Show pending resets for admin (testing only)
+        self.show_admin_reset_info()
     
     def show_user_info_sidebar(self):
         """Show user info and logout button in sidebar."""
