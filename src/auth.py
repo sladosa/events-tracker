@@ -286,20 +286,53 @@ class AuthManager:
             return None
         
         try:
+            st.info(f"🔍 Looking up user: {email}")
+            
             # Use admin API to list users and find by email
+            st.write("Calling admin_client.auth.admin.list_users()...")
             response = admin_client.auth.admin.list_users()
             
-            if response and hasattr(response, 'users'):
-                for user in response.users:
-                    if user.email == email:
-                        st.success(f"✅ Found user: {user.id}")
-                        return user.id
+            st.write(f"Response type: {type(response)}")
+            st.write(f"Response has 'users' attr: {hasattr(response, 'users')}")
+            
+            if response:
+                st.write(f"Response dir: {dir(response)}")
+                
+                # Try to access users in different ways
+                if hasattr(response, 'users'):
+                    users = response.users
+                    st.success(f"✅ Got users list: {len(users)} users")
+                    for user in users:
+                        st.write(f"  User: {user.email}")
+                        if user.email == email:
+                            st.success(f"✅ Found user: {user.id}")
+                            return user.id
+                elif isinstance(response, list):
+                    st.success(f"✅ Response is list: {len(response)} users")
+                    for user in response:
+                        if hasattr(user, 'email') and user.email == email:
+                            st.success(f"✅ Found user: {user.id}")
+                            return user.id
+                elif hasattr(response, 'data'):
+                    st.info("Response has 'data' attribute, checking...")
+                    users = response.data
+                    if isinstance(users, list):
+                        st.success(f"✅ Got users from data: {len(users)} users")
+                        for user in users:
+                            if hasattr(user, 'email') and user.email == email:
+                                st.success(f"✅ Found user: {user.id}")
+                                return user.id
+                else:
+                    st.error(f"❌ Don't know how to handle response type: {type(response)}")
             
             st.warning(f"⚠️ User not found: {email}")
             return None
         except Exception as e:
             st.error(f"❌ Error getting user by email: {e}")
-            st.exception(e)
+            st.write(f"Exception type: {type(e)}")
+            st.write(f"Exception args: {e.args}")
+            import traceback
+            st.code(traceback.format_exc())
             return None
     
     def _update_user_password_admin(self, user_id: str, new_password: str) -> bool:
