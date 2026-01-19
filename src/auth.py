@@ -1,14 +1,13 @@
 """
-Authentication Module - WITH SQL TEMPLATE
-==========================================
-Version: 2.8.2 WITH SQL
-Last Modified: 2025-01-18 20:45 UTC
+Authentication Module - SIMPLE ADMIN PANEL IN SIDEBAR
+======================================================
+Version: 2.8.3 SIMPLE
+Last Modified: 2025-01-18 21:10 UTC
 
 FEATURES:
-- Admin-only visibility for pending resets
-- SQL template included for easy password reset
-- Copy buttons for everything
-- Clear step-by-step instructions
+- Admin panel completely in sidebar
+- All info visible when logged in as admin
+- No external pages needed
 """
 import streamlit as st
 from supabase import Client, create_client
@@ -161,115 +160,8 @@ class AuthManager:
         except Exception as e:
             return False, f"❌ Error requesting password reset: {str(e)}"
     
-    def show_admin_reset_panel(self):
-        """Show pending reset requests ONLY to admin."""
-        if not self.is_admin():
-            return
-        
-        if 'pending_resets' in st.session_state and st.session_state.pending_resets:
-            st.divider()
-            st.markdown("### 🔧 Admin: Pending Password Resets")
-            st.info("👋 Hi Admin! You have pending password reset requests.")
-            
-            for idx, reset in enumerate(st.session_state.pending_resets):
-                with st.expander(f"📋 Request #{idx + 1}: {reset['user_email']}", expanded=True):
-                    
-                    # User Info
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("**👤 User Email:**")
-                        st.code(reset['user_email'], language=None)
-                    with col2:
-                        st.markdown("**🔑 New Password:**")
-                        st.code(reset['new_password'], language=None)
-                    
-                    st.markdown("---")
-                    
-                    # SQL Method
-                    st.markdown("### 💻 Method 1: SQL Editor (RECOMMENDED)")
-                    
-                    sql_query = f"""UPDATE auth.users
-SET 
-  encrypted_password = crypt('{reset['new_password']}', gen_salt('bf')),
-  updated_at = now()
-WHERE email = '{reset['user_email']}';"""
-                    
-                    st.code(sql_query, language='sql')
-                    
-                    st.markdown("""
-                    **Steps:**
-                    1. Open [Supabase SQL Editor](https://supabase.com/dashboard/project/zdojdazosfoajwnuafgx/sql/new)
-                    2. Copy SQL above (it's ready to use!)
-                    3. Paste in SQL Editor
-                    4. Click "Run" (or press F5)
-                    5. You should see: "Success. No rows returned"
-                    6. Done! Password is reset! ✅
-                    """)
-                    
-                    st.markdown("---")
-                    
-                    # Dashboard Method (Alternative)
-                    st.markdown("### 🖱️ Method 2: Dashboard UI (If Available)")
-                    
-                    dashboard_url = "https://supabase.com/dashboard/project/zdojdazosfoajwnuafgx/auth/users"
-                    
-                    st.markdown(f"""
-                    1. Open [Users Page]({dashboard_url})
-                    2. Search for: `{reset['user_email']}`
-                    3. Click on user row
-                    4. Look for THREE DOTS (⋮) menu
-                    5. If you see "Update Password" → Click it
-                    6. Paste password: `{reset['new_password']}`
-                    7. Save
-                    
-                    **Note:** If you don't see this option, use SQL method above!
-                    """)
-                    
-                    st.link_button(
-                        "🚀 Open Supabase Users",
-                        dashboard_url,
-                        use_container_width=True
-                    )
-                    
-                    st.markdown("---")
-                    
-                    # Email Template
-                    st.markdown("### 📧 Email Template")
-                    
-                    email_template = f"""Hi,
-
-Your password for Events Tracker has been reset.
-
-Your new password is: {reset['new_password']}
-
-Please login at: https://events-tracker-test.streamlit.app
-
-For security, we recommend changing your password after logging in:
-1. Login with the new password
-2. Click on your profile in the sidebar
-3. Click "Change Password"
-4. Enter a new password of your choice
-
-Best regards,
-Events Tracker Team"""
-                    
-                    st.text_area(
-                        "Copy & Send to User",
-                        email_template,
-                        height=300,
-                        key=f"email_template_{idx}"
-                    )
-                    
-                    # Done Button
-                    col_space, col_done = st.columns([3, 1])
-                    with col_done:
-                        if st.button(f"✅ Done", key=f"done_{idx}", use_container_width=True):
-                            st.session_state.pending_resets.pop(idx)
-                            st.success("✅ Request completed!")
-                            st.rerun()
-    
     def show_login_page(self):
-        """Display login/signup page with admin-assisted password reset."""
+        """Display login/signup page."""
         
         st.title("🔐 Events Tracker - Login")
         
@@ -367,12 +259,9 @@ Events Tracker Team"""
         
         st.divider()
         st.caption("🔒 Your data is secured with Row Level Security (RLS)")
-        
-        # Show admin panel ONLY if admin is logged in
-        self.show_admin_reset_panel()
     
     def show_user_info_sidebar(self):
-        """Show user info and logout button in sidebar."""
+        """Show user info and admin panel in sidebar."""
         if self.is_authenticated():
             with st.sidebar:
                 st.divider()
@@ -381,6 +270,42 @@ Events Tracker Team"""
                 
                 if self.is_admin():
                     st.success("⭐ Administrator")
+                    
+                    # ADMIN PANEL - Show pending resets
+                    if 'pending_resets' in st.session_state and st.session_state.pending_resets:
+                        reset_count = len(st.session_state.pending_resets)
+                        
+                        with st.expander(f"🔧 Password Resets ({reset_count})", expanded=True):
+                            for idx, reset in enumerate(st.session_state.pending_resets):
+                                st.markdown(f"**Request #{idx + 1}**")
+                                st.text(f"Email: {reset['user_email']}")
+                                st.code(reset['new_password'])
+                                
+                                # SQL Query
+                                sql_query = f"UPDATE auth.users SET encrypted_password = crypt('{reset['new_password']}', gen_salt('bf')), updated_at = now() WHERE email = '{reset['user_email']}';"
+                                st.text_area("SQL:", sql_query, height=100, key=f"sql_{idx}")
+                                
+                                # Links
+                                st.link_button(
+                                    "Open SQL Editor",
+                                    "https://supabase.com/dashboard/project/zdojdazosfoajwnuafgx/sql/new",
+                                    use_container_width=True,
+                                    type="primary"
+                                )
+                                
+                                # Email template (shortened for sidebar)
+                                email_short = f"Password: {reset['new_password']}\nLogin: https://events-tracker-test.streamlit.app"
+                                st.text_area("Email:", email_short, height=60, key=f"email_{idx}")
+                                
+                                if st.button(f"✅ Done", key=f"done_{idx}", use_container_width=True):
+                                    st.session_state.pending_resets.pop(idx)
+                                    st.success("✅ Completed!")
+                                    st.rerun()
+                                
+                                if idx < reset_count - 1:
+                                    st.divider()
+                    else:
+                        st.caption("✅ No pending resets")
                 
                 with st.expander("🔑 Change Password"):
                     with st.form("change_password_form"):
