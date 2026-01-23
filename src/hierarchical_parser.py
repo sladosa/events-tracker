@@ -1,11 +1,15 @@
+"""Hierarchical Parser v4 - FIXED VERSION
 
-"""Hierarchical Parser v4
+FIXES APPLIED (2026-01-23):
+- Fixed database naming convention: all table/column names now use snake_case
+- Table: attributedefinitions → attribute_definitions
+- Columns: areaid → area_id, categoryid → category_id, etc.
 
 Reads the v4 HierarchicalView Excel format and updates Supabase structure.
 Adds support for:
 - ValidationType column (K): none/suggest/enum
 - For text attributes, ValidationMin column (M) can contain pipe-separated options
-  which are stored as validationrules.{enum|suggest} depending on ValidationType.
+  which are stored as validation_rules.{enum|suggest} depending on ValidationType.
 - Default ValidationType for text is 'suggest' when blank.
 
 Keeps number min/max behavior.
@@ -53,10 +57,10 @@ class HierarchicalParser:
 
     def __init__(self, client, user_id: str, excel_path: str):
         self.client = client
-        self.userid = user_id
-        self.excelpath = excel_path
+        self.user_id = user_id
+        self.excel_path = excel_path
         self.df: Optional[pd.DataFrame] = None
-        self.existingstructure: Dict = {}
+        self.existing_structure: Dict = {}
         self.changes = ChangeSet()
 
     def parse_and_validate(self) -> ChangeSet:
@@ -65,7 +69,7 @@ class HierarchicalParser:
             self.changes.validation_errors.append(ValidationError(0, 'File', 'Failed to read Excel file'))
             return self.changes
 
-        self.existingstructure = self._load_existing_structure()
+        self.existing_structure = self._load_existing_structure()
         self._validate_data_format()
         if not self.changes.has_errors() or len(self.changes.validation_errors) < self.MAXERRORS:
             self._detect_changes()
@@ -75,7 +79,7 @@ class HierarchicalParser:
 
     def _read_excel(self) -> Optional[pd.DataFrame]:
         try:
-            df = pd.read_excel(self.excelpath, sheet_name='HierarchicalView', header=1)
+            df = pd.read_excel(self.excel_path, sheet_name='HierarchicalView', header=1)
             df.columns = df.columns.str.strip()
             return df
         except Exception as e:
@@ -83,17 +87,22 @@ class HierarchicalParser:
             return None
 
     def _load_existing_structure(self) -> Dict:
+        """Load existing structure from database using correct snake_case naming."""
         structure = {'areas': {}, 'categories': {}, 'attributes': {}}
         try:
-            areas = self.client.table('areas').select('*').eq('user_id', self.userid).execute().data or []
+            # FIXED: use snake_case column names
+            areas = self.client.table('areas').select('*').eq('user_id', self.user_id).execute().data or []
             for a in areas:
                 structure['areas'][(a.get('name') or '').lower()] = a
 
-            cats = self.client.table('categories').select('*').eq('user_id', self.userid).execute().data or []
-            attrs = self.client.table('attributedefinitions').select('*').eq('user_id', self.userid).execute().data or []
+            cats = self.client.table('categories').select('*').eq('user_id', self.user_id).execute().data or []
+            
+            # FIXED: table name is attribute_definitions (with underscore)
+            attrs = self.client.table('attribute_definitions').select('*').eq('user_id', self.user_id).execute().data or []
 
             for at in attrs:
-                key = f"{at.get('categoryid')}::{(at.get('name') or '').lower()}"
+                # FIXED: column is category_id not categoryid
+                key = f"{at.get('category_id')}::{(at.get('name') or '').lower()}"
                 structure['attributes'][key] = at
 
             cat_by_id = {c['id']: c for c in cats if c.get('id')}
@@ -104,14 +113,16 @@ class HierarchicalParser:
                 if not cat:
                     return ''
                 parts = [cat.get('name','')]
-                pid = cat.get('parentcategoryid')
+                # FIXED: column is parent_category_id not parentcategoryid
+                pid = cat.get('parent_category_id')
                 while pid:
                     p = cat_by_id.get(pid)
                     if not p:
                         break
                     parts.insert(0, p.get('name',''))
-                    pid = p.get('parentcategoryid')
-                area = area_by_id.get(cat.get('areaid'))
+                    pid = p.get('parent_category_id')
+                # FIXED: column is area_id not areaid
+                area = area_by_id.get(cat.get('area_id'))
                 if area:
                     parts.insert(0, area.get('name',''))
                 return ' > '.join([p for p in parts if p])
@@ -215,7 +226,8 @@ class HierarchicalParser:
         except Exception:
             return None
 
-    def _build_validationrules(self, datatype: str, vtype: str, default_vtype_for_text: str, valmin_cell, valmax_cell) -> Optional[Dict]:
+    def _build_validation_rules(self, datatype: str, vtype: str, default_vtype_for_text: str, valmin_cell, valmax_cell) -> Optional[Dict]:
+        """Build validation rules dict for an attribute."""
         datatype = (datatype or '').strip()
         vtype = (vtype or '').strip().lower()
 
@@ -245,8 +257,8 @@ class HierarchicalParser:
         return rules if rules else None
 
     def _detect_changes(self):
-        createdareas: Dict[str, str] = {}
-        createdcategories: Dict[str, str] = {}
+        created_areas: Dict[str, str] = {}
+        created_categories: Dict[str, str] = {}
 
         for idx, row in self.df.iterrows():
             excelrow = idx + 3
@@ -254,139 +266,150 @@ class HierarchicalParser:
                 continue
             rowtype = str(row.get('Type', '')).strip()
             if rowtype == 'Area':
-                self._process_area_row(row, excelrow, createdareas)
+                self._process_area_row(row, excelrow, created_areas)
             elif rowtype == 'Category':
-                self._process_category_row(row, excelrow, createdareas, createdcategories)
+                self._process_category_row(row, excelrow, created_areas, created_categories)
             elif rowtype == 'Attribute':
-                self._process_attribute_row(row, excelrow, createdcategories)
+                self._process_attribute_row(row, excelrow, created_categories)
 
-    def _process_area_row(self, row, excelrow: int, createdareas: Dict[str, str]):
-        areaname = str(row.get('CategoryPath', '')).strip()
-        if not areaname:
+    def _process_area_row(self, row, excelrow: int, created_areas: Dict[str, str]):
+        area_name = str(row.get('CategoryPath', '')).strip()
+        if not area_name:
             return
-        existing = self.existingstructure['areas'].get(areaname.lower())
+        existing = self.existing_structure['areas'].get(area_name.lower())
         updates = {}
-        newdesc = str(row.get('Description', '')).strip() if pd.notna(row.get('Description', '')) else ''
-        newsort = int(row.get('SortOrder', 0)) if pd.notna(row.get('SortOrder', 0)) else 0
+        new_desc = str(row.get('Description', '')).strip() if pd.notna(row.get('Description', '')) else ''
+        new_sort = int(row.get('SortOrder', 0)) if pd.notna(row.get('SortOrder', 0)) else 0
         if existing:
-            if newdesc != (existing.get('description') or ''):
-                updates['description'] = newdesc
-            if newsort != (existing.get('sortorder') or 0):
-                updates['sortorder'] = newsort
+            if new_desc != (existing.get('description') or ''):
+                updates['description'] = new_desc
+            # FIXED: column is sort_order not sortorder
+            if new_sort != (existing.get('sort_order') or 0):
+                updates['sort_order'] = new_sort
             if updates:
                 self.changes.updated_areas.append({'id': existing['id'], 'updates': updates, 'excelrow': excelrow})
         else:
             aid = str(uuid.uuid4())
-            createdareas[areaname.lower()] = aid
-            self.changes.new_areas.append({'uuid': aid, 'name': areaname, 'sortorder': newsort, 'description': newdesc, 'excelrow': excelrow})
+            created_areas[area_name.lower()] = aid
+            self.changes.new_areas.append({
+                'uuid': aid, 
+                'name': area_name, 
+                'sort_order': new_sort,  # FIXED
+                'description': new_desc, 
+                'excelrow': excelrow
+            })
 
-    def _process_category_row(self, row, excelrow: int, createdareas: Dict[str, str], createdcategories: Dict[str, str]):
+    def _process_category_row(self, row, excelrow: int, created_areas: Dict[str, str], created_categories: Dict[str, str]):
         catpath = str(row.get('CategoryPath', '')).strip()
         catname = str(row.get('Category', '')).strip()
         if not catpath or not catname:
             return
         parts = [p.strip() for p in catpath.split(' > ') if p.strip()]
-        areaname = parts[0] if parts else ''
-        parentname = parts[-2] if len(parts) >= 2 else None
+        area_name = parts[0] if parts else ''
         level = len(parts) - 1
 
-        areaid = None
-        if areaname.lower() in self.existingstructure['areas']:
-            areaid = self.existingstructure['areas'][areaname.lower()]['id']
-        elif areaname.lower() in createdareas:
-            areaid = createdareas[areaname.lower()]
+        area_id = None
+        if area_name.lower() in self.existing_structure['areas']:
+            area_id = self.existing_structure['areas'][area_name.lower()]['id']
+        elif area_name.lower() in created_areas:
+            area_id = created_areas[area_name.lower()]
         else:
-            self.changes.validation_errors.append(ValidationError(excelrow, 'CategoryPath', f'Area {areaname} not found'))
+            self.changes.validation_errors.append(ValidationError(excelrow, 'CategoryPath', f'Area {area_name} not found'))
             return
 
-        parentcategoryid = None
+        parent_category_id = None
         if level > 1:  # Only look for parent category if level > 1
             parentpath = ' > '.join(parts[:-1])
-            if parentpath.lower() in self.existingstructure['categories']:
-                parentcategoryid = self.existingstructure['categories'][parentpath.lower()]['id']
-            elif parentpath.lower() in createdcategories:
-                parentcategoryid = createdcategories[parentpath.lower()]
+            if parentpath.lower() in self.existing_structure['categories']:
+                parent_category_id = self.existing_structure['categories'][parentpath.lower()]['id']
+            elif parentpath.lower() in created_categories:
+                parent_category_id = created_categories[parentpath.lower()]
             else:
                 self.changes.validation_errors.append(ValidationError(excelrow, 'CategoryPath', f'Parent category {parentpath} not found'))
                 return
 
-        existing = self.existingstructure['categories'].get(catpath.lower())
+        existing = self.existing_structure['categories'].get(catpath.lower())
         updates = {}
-        newdesc = str(row.get('Description', '')).strip() if pd.notna(row.get('Description', '')) else ''
-        newsort = int(row.get('SortOrder', 0)) if pd.notna(row.get('SortOrder', 0)) else 0
+        new_desc = str(row.get('Description', '')).strip() if pd.notna(row.get('Description', '')) else ''
+        new_sort = int(row.get('SortOrder', 0)) if pd.notna(row.get('SortOrder', 0)) else 0
 
         if existing:
             if catname != (existing.get('name') or ''):
                 updates['name'] = catname
-            if newdesc != (existing.get('description') or ''):
-                updates['description'] = newdesc
-            if newsort != (existing.get('sortorder') or 0):
-                updates['sortorder'] = newsort
+            if new_desc != (existing.get('description') or ''):
+                updates['description'] = new_desc
+            # FIXED: column is sort_order
+            if new_sort != (existing.get('sort_order') or 0):
+                updates['sort_order'] = new_sort
             if updates:
                 self.changes.updated_categories.append({'id': existing['id'], 'updates': updates, 'excelrow': excelrow})
         else:
             cid = str(uuid.uuid4())
-            createdcategories[catpath.lower()] = cid
+            created_categories[catpath.lower()] = cid
             self.changes.new_categories.append({
                 'uuid': cid,
-                'areaid': areaid,
-                'parentcategoryid': parentcategoryid,
+                'area_id': area_id,  # FIXED
+                'parent_category_id': parent_category_id,  # FIXED
                 'name': catname,
                 'level': level,
-                'sortorder': newsort,
-                'description': newdesc,
+                'sort_order': new_sort,  # FIXED
+                'description': new_desc,
                 'path': catpath,
                 'excelrow': excelrow
             })
 
-    def _process_attribute_row(self, row, excelrow: int, createdcategories: Dict[str, str]):
+    def _process_attribute_row(self, row, excelrow: int, created_categories: Dict[str, str]):
         catpath = str(row.get('CategoryPath', '')).strip()
         attrname = str(row.get('AttributeName', '')).strip()
         if not catpath or not attrname:
             return
 
         category = None
-        if catpath.lower() in self.existingstructure['categories']:
-            category = self.existingstructure['categories'][catpath.lower()]
-        elif catpath.lower() in createdcategories:
-            category = {'id': createdcategories[catpath.lower()]}
+        if catpath.lower() in self.existing_structure['categories']:
+            category = self.existing_structure['categories'][catpath.lower()]
+        elif catpath.lower() in created_categories:
+            category = {'id': created_categories[catpath.lower()]}
         else:
             self.changes.validation_errors.append(ValidationError(excelrow, 'CategoryPath', f'Category {catpath} not found'))
             return
 
-        categoryid = category['id']
-        key = f"{categoryid}::{attrname.lower()}"
-        existing = self.existingstructure['attributes'].get(key)
+        category_id = category['id']
+        key = f"{category_id}::{attrname.lower()}"
+        existing = self.existing_structure['attributes'].get(key)
 
         datatype = str(row.get('DataType', '')).strip()
         unit = str(row.get('Unit', '')).strip() if pd.notna(row.get('Unit', '')) else ''
         isreq_raw = str(row.get('IsRequired', '')).strip() if pd.notna(row.get('IsRequired', '')) else ''
-        isrequired = isreq_raw.upper() == 'TRUE'
+        is_required = isreq_raw.upper() == 'TRUE'
 
         vtype_raw = str(row.get('ValidationType', '')).strip().lower() if pd.notna(row.get('ValidationType', '')) else ''
         default_value = str(row.get('DefaultValue', '')).strip() if pd.notna(row.get('DefaultValue', '')) else ''
         valmin_cell = row.get('ValidationMin', None)
         valmax_cell = row.get('ValidationMax', None)
 
-        vr = self._build_validationrules(datatype, vtype_raw, default_vtype_for_text='suggest', valmin_cell=valmin_cell, valmax_cell=valmax_cell)
+        vr = self._build_validation_rules(datatype, vtype_raw, default_vtype_for_text='suggest', valmin_cell=valmin_cell, valmax_cell=valmax_cell)
 
         desc = str(row.get('Description', '')).strip() if pd.notna(row.get('Description', '')) else ''
-        sortorder = int(row.get('SortOrder', 0)) if pd.notna(row.get('SortOrder', 0)) else 0
+        sort_order = int(row.get('SortOrder', 0)) if pd.notna(row.get('SortOrder', 0)) else 0
 
         if existing:
             updates = {}
             if attrname != (existing.get('name') or ''):
                 updates['name'] = attrname
-            if datatype and datatype != (existing.get('datatype') or ''):
-                updates['datatype'] = datatype
+            # FIXED: column is data_type
+            if datatype and datatype != (existing.get('data_type') or ''):
+                updates['data_type'] = datatype
             if unit != (existing.get('unit') or ''):
                 updates['unit'] = unit
-            if isrequired != bool(existing.get('isrequired', False)):
-                updates['isrequired'] = isrequired
-            if default_value != (existing.get('defaultvalue') or ''):
-                updates['defaultvalue'] = default_value
+            # FIXED: column is is_required
+            if is_required != bool(existing.get('is_required', False)):
+                updates['is_required'] = is_required
+            # FIXED: column is default_value
+            if default_value != (existing.get('default_value') or ''):
+                updates['default_value'] = default_value
 
-            old_vr = existing.get('validationrules')
+            # FIXED: column is validation_rules
+            old_vr = existing.get('validation_rules')
             if isinstance(old_vr, str):
                 try:
                     old_vr = json.loads(old_vr)
@@ -396,10 +419,11 @@ class HierarchicalParser:
                 old_vr = {}
 
             if vr != old_vr:
-                updates['validationrules'] = json.dumps(vr) if vr else None
+                updates['validation_rules'] = json.dumps(vr) if vr else None
 
-            if sortorder != (existing.get('sortorder') or 0):
-                updates['sortorder'] = sortorder
+            # FIXED: column is sort_order
+            if sort_order != (existing.get('sort_order') or 0):
+                updates['sort_order'] = sort_order
             if desc != (existing.get('description') or ''):
                 updates['description'] = desc
 
@@ -409,14 +433,14 @@ class HierarchicalParser:
             aid = str(uuid.uuid4())
             self.changes.new_attributes.append({
                 'uuid': aid,
-                'categoryid': categoryid,
+                'category_id': category_id,  # FIXED
                 'name': attrname,
-                'datatype': datatype,
+                'data_type': datatype,  # FIXED
                 'unit': unit,
-                'isrequired': isrequired,
-                'defaultvalue': default_value,
-                'validationrules': json.dumps(vr) if vr else None,
-                'sortorder': sortorder,
+                'is_required': is_required,  # FIXED
+                'default_value': default_value,  # FIXED
+                'validation_rules': json.dumps(vr) if vr else None,  # FIXED
+                'sort_order': sort_order,  # FIXED
                 'description': desc,
                 'categorypath': catpath,
                 'excelrow': excelrow
@@ -431,59 +455,71 @@ class HierarchicalParser:
             self.changes.validation_warnings.append(ValidationError(0, 'Changes', f'Large number of changes detected ({total}). Please review carefully.', 'warning'))
 
     def apply_changes(self) -> Tuple[bool, str]:
+        """Apply validated changes to database using correct snake_case naming."""
         if self.changes.has_errors():
             return False, 'Cannot apply changes due to validation errors.'
         if not self.changes.has_changes():
             return True, 'No changes to apply.'
 
         try:
+            # Insert new areas
             if self.changes.new_areas:
                 payload = [{
-                    'id': a['uuid'], 'userid': self.userid, 'name': a['name'],
-                    'icon': '', 'color': '4472C4',
-                    'sortorder': a.get('sortorder', 0),
+                    'id': a['uuid'], 
+                    'user_id': self.user_id,  # FIXED
+                    'name': a['name'],
+                    'icon': '', 
+                    'color': '4472C4',
+                    'sort_order': a.get('sort_order', 0),  # FIXED
                     'description': a.get('description', ''),
                     'slug': a['name'].lower().replace(' ', '-')
                 } for a in self.changes.new_areas]
                 self.client.table('areas').insert(payload).execute()
 
+            # Insert new categories
             if self.changes.new_categories:
                 payload = [{
-                    'id': c['uuid'], 'userid': self.userid,
-                    'areaid': c['areaid'],
-                    'parentcategoryid': c.get('parentcategoryid'),
+                    'id': c['uuid'], 
+                    'user_id': self.user_id,  # FIXED
+                    'area_id': c['area_id'],  # FIXED
+                    'parent_category_id': c.get('parent_category_id'),  # FIXED
                     'name': c['name'],
                     'level': c['level'],
-                    'sortorder': c.get('sortorder', 0),
+                    'sort_order': c.get('sort_order', 0),  # FIXED
                     'description': c.get('description', ''),
                     'slug': c['name'].lower().replace(' ', '-'),
                 } for c in self.changes.new_categories]
                 self.client.table('categories').insert(payload).execute()
 
+            # Insert new attributes - FIXED: table name is attribute_definitions
             if self.changes.new_attributes:
                 payload = []
                 for a in self.changes.new_attributes:
                     payload.append({
-                        'id': a['uuid'], 'userid': self.userid,
-                        'categoryid': a['categoryid'],
+                        'id': a['uuid'], 
+                        'user_id': self.user_id,  # FIXED
+                        'category_id': a['category_id'],  # FIXED
                         'name': a['name'],
-                        'datatype': a.get('datatype','text'),
-                        'unit': a.get('unit',''),
-                        'isrequired': a.get('isrequired', False),
-                        'defaultvalue': a.get('defaultvalue',''),
-                        'validationrules': a.get('validationrules'),
-                        'sortorder': a.get('sortorder', 0),
-                        'description': a.get('description',''),
+                        'data_type': a.get('data_type', 'text'),  # FIXED
+                        'unit': a.get('unit', ''),
+                        'is_required': a.get('is_required', False),  # FIXED
+                        'default_value': a.get('default_value', ''),  # FIXED
+                        'validation_rules': a.get('validation_rules'),  # FIXED
+                        'sort_order': a.get('sort_order', 0),  # FIXED
+                        'description': a.get('description', ''),
                         'slug': a['name'].lower().replace(' ', '-')
                     })
-                self.client.table('attributedefinitions').insert(payload).execute()
+                # FIXED: table name
+                self.client.table('attribute_definitions').insert(payload).execute()
 
+            # Update existing records
             for upd in self.changes.updated_areas:
-                self.client.table('areas').update(upd['updates']).eq('id', upd['id']).eq('user_id', self.userid).execute()
+                self.client.table('areas').update(upd['updates']).eq('id', upd['id']).eq('user_id', self.user_id).execute()
             for upd in self.changes.updated_categories:
-                self.client.table('categories').update(upd['updates']).eq('id', upd['id']).eq('user_id', self.userid).execute()
+                self.client.table('categories').update(upd['updates']).eq('id', upd['id']).eq('user_id', self.user_id).execute()
             for upd in self.changes.updated_attributes:
-                self.client.table('attributedefinitions').update(upd['updates']).eq('id', upd['id']).eq('user_id', self.userid).execute()
+                # FIXED: table name
+                self.client.table('attribute_definitions').update(upd['updates']).eq('id', upd['id']).eq('user_id', self.user_id).execute()
 
             parts = []
             for name, lst in [
