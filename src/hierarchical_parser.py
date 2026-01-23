@@ -285,7 +285,7 @@ class HierarchicalParser:
         catname = str(row.get('Category', '')).strip()
         if not catpath or not catname:
             return
-        parts = [p.strip() for p in catpath.split(' ') if p.strip()]
+        parts = [p.strip() for p in catpath.split(' > ') if p.strip()]
         areaname = parts[0] if parts else ''
         parentname = parts[-2] if len(parts) >= 2 else None
         level = len(parts) - 1
@@ -300,8 +300,8 @@ class HierarchicalParser:
             return
 
         parentcategoryid = None
-        if parentname:
-            parentpath = ' '.join(parts[:-1])
+        if level > 1:  # Only look for parent category if level > 1
+            parentpath = ' > '.join(parts[:-1])
             if parentpath.lower() in self.existingstructure['categories']:
                 parentcategoryid = self.existingstructure['categories'][parentpath.lower()]['id']
             elif parentpath.lower() in createdcategories:
