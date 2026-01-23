@@ -53,7 +53,7 @@ class ErrorReporter:
         """
         # Load workbook
         self.wb = openpyxl.load_workbook(self.excel_path)
-        self.ws = self.wb['Hierarchical_View']
+        self.ws = self.wb['HierarchicalView']
         
         # Build column map (row 2 contains headers)
         self._build_column_map()

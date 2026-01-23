@@ -97,7 +97,7 @@ class EnhancedStructureExporter:
 
     def _load_hierarchical_data(self) -> pd.DataFrame:
         rows: List[Dict] = []
-        areasq = self.client.table('areas').select('*').eq('userid', self.userid)
+        areasq = self.client.table('areas').select('*').eq('user_id', self.userid)
         if self.filterarea:
             areasq = areasq.eq('name', self.filterarea)
         areas = areasq.order('sortorder').execute().data or []
@@ -122,7 +122,7 @@ class EnhancedStructureExporter:
         return df
 
     def _load_categories_recursive(self, areaid: str, areaname: str, rows: List[Dict], parentid: Optional[str] = None, parentpath: str = '', level: int = 1):
-        q = self.client.table('categories').select('*').eq('userid', self.userid).eq('areaid', areaid).eq('level', level)
+        q = self.client.table('categories').select('*').eq('user_id', self.userid).eq('areaid', areaid).eq('level', level)
         if parentid:
             q = q.eq('parentcategoryid', parentid)
         else:
@@ -143,7 +143,7 @@ class EnhancedStructureExporter:
                 'Description': cat.get('description', '')
             })
 
-            attrs = self.client.table('attributedefinitions').select('*').eq('userid', self.userid).eq('categoryid', cat['id']).order('sortorder').execute().data or []
+            attrs = self.client.table('attributedefinitions').select('*').eq('user_id', self.userid).eq('categoryid', cat['id']).order('sortorder').execute().data or []
             for attr in attrs:
                 vr = attr.get('validationrules')
                 if isinstance(vr, str):

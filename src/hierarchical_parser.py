@@ -85,12 +85,12 @@ class HierarchicalParser:
     def _load_existing_structure(self) -> Dict:
         structure = {'areas': {}, 'categories': {}, 'attributes': {}}
         try:
-            areas = self.client.table('areas').select('*').eq('userid', self.userid).execute().data or []
+            areas = self.client.table('areas').select('*').eq('user_id', self.userid).execute().data or []
             for a in areas:
                 structure['areas'][(a.get('name') or '').lower()] = a
 
-            cats = self.client.table('categories').select('*').eq('userid', self.userid).execute().data or []
-            attrs = self.client.table('attributedefinitions').select('*').eq('userid', self.userid).execute().data or []
+            cats = self.client.table('categories').select('*').eq('user_id', self.userid).execute().data or []
+            attrs = self.client.table('attributedefinitions').select('*').eq('user_id', self.userid).execute().data or []
 
             for at in attrs:
                 key = f"{at.get('categoryid')}::{(at.get('name') or '').lower()}"
@@ -479,11 +479,11 @@ class HierarchicalParser:
                 self.client.table('attributedefinitions').insert(payload).execute()
 
             for upd in self.changes.updated_areas:
-                self.client.table('areas').update(upd['updates']).eq('id', upd['id']).eq('userid', self.userid).execute()
+                self.client.table('areas').update(upd['updates']).eq('id', upd['id']).eq('user_id', self.userid).execute()
             for upd in self.changes.updated_categories:
-                self.client.table('categories').update(upd['updates']).eq('id', upd['id']).eq('userid', self.userid).execute()
+                self.client.table('categories').update(upd['updates']).eq('id', upd['id']).eq('user_id', self.userid).execute()
             for upd in self.changes.updated_attributes:
-                self.client.table('attributedefinitions').update(upd['updates']).eq('id', upd['id']).eq('userid', self.userid).execute()
+                self.client.table('attributedefinitions').update(upd['updates']).eq('id', upd['id']).eq('user_id', self.userid).execute()
 
             parts = []
             for name, lst in [
