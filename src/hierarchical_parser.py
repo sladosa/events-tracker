@@ -442,8 +442,8 @@ class HierarchicalParser:
                 'validation_rules': json.dumps(vr) if vr else None,  # FIXED
                 'sort_order': sort_order,  # FIXED
                 'description': desc,
-                'categorypath': catpath,
-                'excel_row': excelrow  # FIXED: was excelrow
+                'category_path': catpath,  # FIXED: was categorypath
+                'excel_row': excelrow
             })
 
     def _validate_business_logic(self):
