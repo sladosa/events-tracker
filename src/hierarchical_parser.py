@@ -28,20 +28,20 @@ class ValidationError:
 
 @dataclass
 class ChangeSet:
-    newareas: List[Dict] = field(default_factory=list)
-    newcategories: List[Dict] = field(default_factory=list)
-    newattributes: List[Dict] = field(default_factory=list)
-    updatedareas: List[Dict] = field(default_factory=list)
-    updatedcategories: List[Dict] = field(default_factory=list)
-    updatedattributes: List[Dict] = field(default_factory=list)
-    validationerrors: List[ValidationError] = field(default_factory=list)
-    validationwarnings: List[ValidationError] = field(default_factory=list)
+    new_areas: List[Dict] = field(default_factory=list)
+    new_categories: List[Dict] = field(default_factory=list)
+    new_attributes: List[Dict] = field(default_factory=list)
+    updated_areas: List[Dict] = field(default_factory=list)
+    updated_categories: List[Dict] = field(default_factory=list)
+    updated_attributes: List[Dict] = field(default_factory=list)
+    validation_errors: List[ValidationError] = field(default_factory=list)
+    validation_warnings: List[ValidationError] = field(default_factory=list)
 
-    def haschanges(self) -> bool:
-        return any([self.newareas, self.newcategories, self.newattributes, self.updatedareas, self.updatedcategories, self.updatedattributes])
+    def has_changes(self) -> bool:
+        return any([self.new_areas, self.new_categories, self.new_attributes, self.updated_areas, self.updated_categories, self.updated_attributes])
 
-    def haserrors(self) -> bool:
-        return len(self.validationerrors) > 0
+    def has_errors(self) -> bool:
+        return len(self.validation_errors) > 0
 
 
 class HierarchicalParser:
@@ -62,14 +62,14 @@ class HierarchicalParser:
     def parse_and_validate(self) -> ChangeSet:
         self.df = self._read_excel()
         if self.df is None:
-            self.changes.validationerrors.append(ValidationError(0, 'File', 'Failed to read Excel file'))
+            self.changes.validation_errors.append(ValidationError(0, 'File', 'Failed to read Excel file'))
             return self.changes
 
         self.existingstructure = self._load_existing_structure()
         self._validate_data_format()
-        if not self.changes.haserrors() or len(self.changes.validationerrors) < self.MAXERRORS:
+        if not self.changes.has_errors() or len(self.changes.validation_errors) < self.MAXERRORS:
             self._detect_changes()
-        if len(self.changes.validationerrors) < self.MAXERRORS:
+        if len(self.changes.validation_errors) < self.MAXERRORS:
             self._validate_business_logic()
         return self.changes
 
@@ -79,7 +79,7 @@ class HierarchicalParser:
             df.columns = df.columns.str.strip()
             return df
         except Exception as e:
-            self.changes.validationerrors.append(ValidationError(0, 'File', f'Error reading Excel: {e}'))
+            self.changes.validation_errors.append(ValidationError(0, 'File', f'Error reading Excel: {e}'))
             return None
 
     def _load_existing_structure(self) -> Dict:
@@ -122,20 +122,20 @@ class HierarchicalParser:
                     structure['categories'][p] = c
 
         except Exception as e:
-            self.changes.validationerrors.append(ValidationError(0, 'Database', f'Error loading existing structure: {e}'))
+            self.changes.validation_errors.append(ValidationError(0, 'Database', f'Error loading existing structure: {e}'))
         return structure
 
     def _validate_data_format(self):
         required = ['Type', 'CategoryPath', 'Level', 'SortOrder']
         missing = [c for c in required if c not in self.df.columns]
         if missing:
-            self.changes.validationerrors.append(ValidationError(0, 'Columns', f"Missing required columns: {', '.join(missing)}"))
+            self.changes.validation_errors.append(ValidationError(0, 'Columns', f"Missing required columns: {', '.join(missing)}"))
             return
 
         seenpaths: Dict[str, int] = {}
         for idx, row in self.df.iterrows():
-            if len(self.changes.validationerrors) >= self.MAXERRORS:
-                self.changes.validationwarnings.append(ValidationError(0, 'Validation', f'Validation stopped at {self.MAXERRORS} errors.', 'warning'))
+            if len(self.changes.validation_errors) >= self.MAXERRORS:
+                self.changes.validation_warnings.append(ValidationError(0, 'Validation', f'Validation stopped at {self.MAXERRORS} errors.', 'warning'))
                 break
             excelrow = idx + 3
             if row.isna().all():
@@ -143,21 +143,21 @@ class HierarchicalParser:
 
             rowtype = str(row.get('Type', '')).strip()
             if not rowtype:
-                self.changes.validationerrors.append(ValidationError(excelrow, 'Type', 'Type is required'))
+                self.changes.validation_errors.append(ValidationError(excelrow, 'Type', 'Type is required'))
                 continue
             if rowtype not in self.VALIDTYPES:
-                self.changes.validationerrors.append(ValidationError(excelrow, 'Type', f'Invalid Type {rowtype}'))
+                self.changes.validation_errors.append(ValidationError(excelrow, 'Type', f'Invalid Type {rowtype}'))
                 continue
 
             catpath = str(row.get('CategoryPath', '')).strip()
             if not catpath:
-                self.changes.validationerrors.append(ValidationError(excelrow, 'CategoryPath', 'CategoryPath is required'))
+                self.changes.validation_errors.append(ValidationError(excelrow, 'CategoryPath', 'CategoryPath is required'))
                 continue
 
             pathkey = catpath.lower()
             if rowtype in {'Area', 'Category'}:
                 if pathkey in seenpaths:
-                    self.changes.validationerrors.append(ValidationError(excelrow, 'CategoryPath', f'Duplicate CategoryPath; already used in row {seenpaths[pathkey]}'))
+                    self.changes.validation_errors.append(ValidationError(excelrow, 'CategoryPath', f'Duplicate CategoryPath; already used in row {seenpaths[pathkey]}'))
                 else:
                     seenpaths[pathkey] = excelrow
 
@@ -167,32 +167,32 @@ class HierarchicalParser:
             if rowtype == 'Attribute':
                 datatype = str(row.get('DataType', '')).strip()
                 if not datatype:
-                    self.changes.validationerrors.append(ValidationError(excelrow, 'DataType', 'DataType is required for Attributes'))
+                    self.changes.validation_errors.append(ValidationError(excelrow, 'DataType', 'DataType is required for Attributes'))
                 elif datatype not in self.VALIDDATATYPES:
-                    self.changes.validationerrors.append(ValidationError(excelrow, 'DataType', f'Invalid DataType {datatype}'))
+                    self.changes.validation_errors.append(ValidationError(excelrow, 'DataType', f'Invalid DataType {datatype}'))
 
                 attrname = str(row.get('AttributeName', '')).strip()
                 if not attrname:
-                    self.changes.validationerrors.append(ValidationError(excelrow, 'AttributeName', 'AttributeName is required for Attributes'))
+                    self.changes.validation_errors.append(ValidationError(excelrow, 'AttributeName', 'AttributeName is required for Attributes'))
 
                 isreq = row.get('IsRequired', '')
                 if pd.notna(isreq) and str(isreq).strip() and str(isreq).strip() not in self.VALIDREQUIRED:
-                    self.changes.validationerrors.append(ValidationError(excelrow, 'IsRequired', f'Invalid IsRequired {isreq}. Must be TRUE/FALSE'))
+                    self.changes.validation_errors.append(ValidationError(excelrow, 'IsRequired', f'Invalid IsRequired {isreq}. Must be TRUE/FALSE'))
 
                 vtype = str(row.get('ValidationType', '')).strip().lower()
                 if vtype and vtype not in self.VALIDVTYPE:
-                    self.changes.validationerrors.append(ValidationError(excelrow, 'ValidationType', f'Invalid ValidationType {vtype}. Must be none/suggest/enum'))
+                    self.changes.validation_errors.append(ValidationError(excelrow, 'ValidationType', f'Invalid ValidationType {vtype}. Must be none/suggest/enum'))
 
                 catname = str(row.get('Category', '')).strip()
                 if catname and catname != lastpart:
-                    self.changes.validationerrors.append(ValidationError(excelrow, 'Category', f'Category mismatch: Category is {catname} but path ends with {lastpart}'))
+                    self.changes.validation_errors.append(ValidationError(excelrow, 'Category', f'Category mismatch: Category is {catname} but path ends with {lastpart}'))
 
             elif rowtype == 'Category':
                 catname = str(row.get('Category', '')).strip()
                 if not catname:
-                    self.changes.validationerrors.append(ValidationError(excelrow, 'Category', 'Category name is required for Categories'))
+                    self.changes.validation_errors.append(ValidationError(excelrow, 'Category', 'Category name is required for Categories'))
                 elif catname != lastpart:
-                    self.changes.validationerrors.append(ValidationError(excelrow, 'Category', f'Category mismatch: Category is {catname} but path ends with {lastpart}'))
+                    self.changes.validation_errors.append(ValidationError(excelrow, 'Category', f'Category mismatch: Category is {catname} but path ends with {lastpart}'))
 
     def _parse_text_options(self, s: str) -> List[str]:
         if not s:
@@ -269,11 +269,11 @@ class HierarchicalParser:
             if newsort != (existing.get('sortorder') or 0):
                 updates['sortorder'] = newsort
             if updates:
-                self.changes.updatedareas.append({'id': existing['id'], 'updates': updates, 'excelrow': excelrow})
+                self.changes.updated_areas.append({'id': existing['id'], 'updates': updates, 'excelrow': excelrow})
         else:
             aid = str(uuid.uuid4())
             createdareas[areaname.lower()] = aid
-            self.changes.newareas.append({'uuid': aid, 'name': areaname, 'sortorder': newsort, 'description': newdesc, 'excelrow': excelrow})
+            self.changes.new_areas.append({'uuid': aid, 'name': areaname, 'sortorder': newsort, 'description': newdesc, 'excelrow': excelrow})
 
     def _process_category_row(self, row, excelrow: int, createdareas: Dict[str, str], createdcategories: Dict[str, str]):
         catpath = str(row.get('CategoryPath', '')).strip()
@@ -291,7 +291,7 @@ class HierarchicalParser:
         elif areaname.lower() in createdareas:
             areaid = createdareas[areaname.lower()]
         else:
-            self.changes.validationerrors.append(ValidationError(excelrow, 'CategoryPath', f'Area {areaname} not found'))
+            self.changes.validation_errors.append(ValidationError(excelrow, 'CategoryPath', f'Area {areaname} not found'))
             return
 
         parentcategoryid = None
@@ -302,7 +302,7 @@ class HierarchicalParser:
             elif parentpath.lower() in createdcategories:
                 parentcategoryid = createdcategories[parentpath.lower()]
             else:
-                self.changes.validationerrors.append(ValidationError(excelrow, 'CategoryPath', f'Parent category {parentpath} not found'))
+                self.changes.validation_errors.append(ValidationError(excelrow, 'CategoryPath', f'Parent category {parentpath} not found'))
                 return
 
         existing = self.existingstructure['categories'].get(catpath.lower())
@@ -318,11 +318,11 @@ class HierarchicalParser:
             if newsort != (existing.get('sortorder') or 0):
                 updates['sortorder'] = newsort
             if updates:
-                self.changes.updatedcategories.append({'id': existing['id'], 'updates': updates, 'excelrow': excelrow})
+                self.changes.updated_categories.append({'id': existing['id'], 'updates': updates, 'excelrow': excelrow})
         else:
             cid = str(uuid.uuid4())
             createdcategories[catpath.lower()] = cid
-            self.changes.newcategories.append({
+            self.changes.new_categories.append({
                 'uuid': cid,
                 'areaid': areaid,
                 'parentcategoryid': parentcategoryid,
@@ -346,7 +346,7 @@ class HierarchicalParser:
         elif catpath.lower() in createdcategories:
             category = {'id': createdcategories[catpath.lower()]}
         else:
-            self.changes.validationerrors.append(ValidationError(excelrow, 'CategoryPath', f'Category {catpath} not found'))
+            self.changes.validation_errors.append(ValidationError(excelrow, 'CategoryPath', f'Category {catpath} not found'))
             return
 
         categoryid = category['id']
@@ -399,10 +399,10 @@ class HierarchicalParser:
                 updates['description'] = desc
 
             if updates:
-                self.changes.updatedattributes.append({'id': existing['id'], 'updates': updates, 'excelrow': excelrow})
+                self.changes.updated_attributes.append({'id': existing['id'], 'updates': updates, 'excelrow': excelrow})
         else:
             aid = str(uuid.uuid4())
-            self.changes.newattributes.append({
+            self.changes.new_attributes.append({
                 'uuid': aid,
                 'categoryid': categoryid,
                 'name': attrname,
@@ -419,30 +419,30 @@ class HierarchicalParser:
 
     def _validate_business_logic(self):
         total = sum([
-            len(self.changes.newareas), len(self.changes.newcategories), len(self.changes.newattributes),
-            len(self.changes.updatedareas), len(self.changes.updatedcategories), len(self.changes.updatedattributes)
+            len(self.changes.new_areas), len(self.changes.new_categories), len(self.changes.new_attributes),
+            len(self.changes.updated_areas), len(self.changes.updated_categories), len(self.changes.updated_attributes)
         ])
         if total > 50:
-            self.changes.validationwarnings.append(ValidationError(0, 'Changes', f'Large number of changes detected ({total}). Please review carefully.', 'warning'))
+            self.changes.validation_warnings.append(ValidationError(0, 'Changes', f'Large number of changes detected ({total}). Please review carefully.', 'warning'))
 
     def apply_changes(self) -> Tuple[bool, str]:
-        if self.changes.haserrors():
+        if self.changes.has_errors():
             return False, 'Cannot apply changes due to validation errors.'
-        if not self.changes.haschanges():
+        if not self.changes.has_changes():
             return True, 'No changes to apply.'
 
         try:
-            if self.changes.newareas:
+            if self.changes.new_areas:
                 payload = [{
                     'id': a['uuid'], 'userid': self.userid, 'name': a['name'],
                     'icon': '', 'color': '4472C4',
                     'sortorder': a.get('sortorder', 0),
                     'description': a.get('description', ''),
                     'slug': a['name'].lower().replace(' ', '-')
-                } for a in self.changes.newareas]
+                } for a in self.changes.new_areas]
                 self.client.table('areas').insert(payload).execute()
 
-            if self.changes.newcategories:
+            if self.changes.new_categories:
                 payload = [{
                     'id': c['uuid'], 'userid': self.userid,
                     'areaid': c['areaid'],
@@ -452,12 +452,12 @@ class HierarchicalParser:
                     'sortorder': c.get('sortorder', 0),
                     'description': c.get('description', ''),
                     'slug': c['name'].lower().replace(' ', '-'),
-                } for c in self.changes.newcategories]
+                } for c in self.changes.new_categories]
                 self.client.table('categories').insert(payload).execute()
 
-            if self.changes.newattributes:
+            if self.changes.new_attributes:
                 payload = []
-                for a in self.changes.newattributes:
+                for a in self.changes.new_attributes:
                     payload.append({
                         'id': a['uuid'], 'userid': self.userid,
                         'categoryid': a['categoryid'],
@@ -473,21 +473,21 @@ class HierarchicalParser:
                     })
                 self.client.table('attributedefinitions').insert(payload).execute()
 
-            for upd in self.changes.updatedareas:
+            for upd in self.changes.updated_areas:
                 self.client.table('areas').update(upd['updates']).eq('id', upd['id']).eq('userid', self.userid).execute()
-            for upd in self.changes.updatedcategories:
+            for upd in self.changes.updated_categories:
                 self.client.table('categories').update(upd['updates']).eq('id', upd['id']).eq('userid', self.userid).execute()
-            for upd in self.changes.updatedattributes:
+            for upd in self.changes.updated_attributes:
                 self.client.table('attributedefinitions').update(upd['updates']).eq('id', upd['id']).eq('userid', self.userid).execute()
 
             parts = []
             for name, lst in [
-                ('new areas', self.changes.newareas),
-                ('new categories', self.changes.newcategories),
-                ('new attributes', self.changes.newattributes),
-                ('updated areas', self.changes.updatedareas),
-                ('updated categories', self.changes.updatedcategories),
-                ('updated attributes', self.changes.updatedattributes),
+                ('new areas', self.changes.new_areas),
+                ('new categories', self.changes.new_categories),
+                ('new attributes', self.changes.new_attributes),
+                ('updated areas', self.changes.updated_areas),
+                ('updated categories', self.changes.updated_categories),
+                ('updated attributes', self.changes.updated_attributes),
             ]:
                 if lst:
                     parts.append(f"{len(lst)} {name}")
