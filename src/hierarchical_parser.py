@@ -51,10 +51,10 @@ class HierarchicalParser:
     VALIDVTYPE = {'none', 'suggest', 'enum'}
     MAXERRORS = 20
 
-    def __init__(self, client, user_id: str, excelpath: str):
+    def __init__(self, client, user_id: str, excel_path: str):
         self.client = client
         self.userid = user_id
-        self.excelpath = excelpath
+        self.excelpath = excel_path
         self.df: Optional[pd.DataFrame] = None
         self.existingstructure: Dict = {}
         self.changes = ChangeSet()

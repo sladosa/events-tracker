@@ -35,11 +35,11 @@ import json
 
 
 class EnhancedStructureExporter:
-    def __init__(self, client, user_id: str, filterarea: Optional[str] = None, filtercategory: Optional[str] = None):
+    def __init__(self, client, user_id: str, filter_area: Optional[str] = None, filter_category: Optional[str] = None):
         self.client = client
         self.userid = user_id
-        self.filterarea = filterarea if filterarea != 'All Areas' else None
-        self.filtercategory = filtercategory if filtercategory != 'All Categories' else None
+        self.filterarea = filter_area if filter_area != 'All Areas' else None
+        self.filtercategory = filter_category if filter_category != 'All Categories' else None
 
         self.PINKFILL = PatternFill(start_color='FFE6F0', end_color='FFE6F0', fill_type='solid')
         self.BLUEFILL = PatternFill(start_color='E6F2FF', end_color='E6F2FF', fill_type='solid')
