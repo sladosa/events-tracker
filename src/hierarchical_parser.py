@@ -409,10 +409,14 @@ class HierarchicalParser:
                 updates['default_value'] = default_value
 
             # FIXED: column is validation_rules
+            # Handle double-escaped JSON from legacy imports
             old_vr = existing.get('validation_rules')
             if isinstance(old_vr, str):
                 try:
                     old_vr = json.loads(old_vr)
+                    # Check if still string (double-escaped)
+                    if isinstance(old_vr, str):
+                        old_vr = json.loads(old_vr)
                 except Exception:
                     old_vr = {}
             if not isinstance(old_vr, dict):

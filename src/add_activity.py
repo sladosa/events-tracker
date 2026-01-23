@@ -593,15 +593,27 @@ def save_activity_event(client, user_id: str, category_id: str,
 # UI COMPONENTS
 # ============================================
 
+
 def render_attribute_input(attr: Dict, key_prefix: str) -> any:
-    """Render appropriate input widget based on attribute data type."""
+    """
+    Render appropriate input widget based on attribute data type.
+    
+    For text attributes, checks validation_rules for enum/suggest options:
+    - enum: strict dropdown (only listed values allowed)
+    - suggest: dropdown with listed values (user picks from suggestions)
+    - none/empty: free text input
+    """
+    import json
+    
     attr_id = attr['id']
     attr_name = attr['name']
     data_type = attr['data_type']
     unit = attr.get('unit', '')
     is_required = attr.get('is_required', False)
     default = attr.get('default_value')
+    description = attr.get('description', '')
     
+    # Build label
     label = attr_name
     if unit:
         label += f" ({unit})"
@@ -610,6 +622,22 @@ def render_attribute_input(attr: Dict, key_prefix: str) -> any:
     
     key = f"{key_prefix}_{attr_id}"
     
+    # Parse validation_rules (handle double-escaped JSON from legacy imports)
+    validation_rules = attr.get('validation_rules', {})
+    if isinstance(validation_rules, str):
+        try:
+            validation_rules = json.loads(validation_rules)
+            # Check if it's still a string (double-escaped)
+            if isinstance(validation_rules, str):
+                validation_rules = json.loads(validation_rules)
+        except:
+            validation_rules = {}
+    if not isinstance(validation_rules, dict):
+        validation_rules = {}
+    
+    # ─────────────────────────────────────────
+    # NUMBER type
+    # ─────────────────────────────────────────
     if data_type == 'number':
         default_num = None
         if default:
@@ -620,33 +648,85 @@ def render_attribute_input(attr: Dict, key_prefix: str) -> any:
         
         return st.number_input(
             label, value=default_num, step=1.0, format="%.2f",
-            key=key, help=attr.get('description', '')
+            key=key, help=description
         )
     
+    # ─────────────────────────────────────────
+    # TEXT type - check for enum/suggest options
+    # ─────────────────────────────────────────
     elif data_type == 'text':
-        return st.text_input(
-            label, value=default or '', key=key,
-            help=attr.get('description', '')
-        )
+        vtype = validation_rules.get('type', '').lower()
+        
+        # Get options from enum or suggest
+        options = validation_rules.get('enum') or validation_rules.get('suggest') or []
+        
+        if options and isinstance(options, list) and len(options) > 0:
+            # We have options - use selectbox
+            
+            # Clean options (filter empty strings)
+            options = [str(opt) for opt in options if str(opt).strip()]
+            
+            if not options:
+                # All options were empty, fall back to text input
+                return st.text_input(
+                    label, value=default or '', key=key,
+                    help=description
+                )
+            
+            # Determine default index
+            default_idx = 0
+            if default and default in options:
+                default_idx = options.index(default)
+            
+            # For enum: strict dropdown
+            # For suggest: also dropdown (user picks from suggestions)
+            if vtype == 'enum':
+                help_text = description or "Select one option"
+            else:
+                help_text = description or f"Suggestions: {', '.join(options)}"
+            
+            return st.selectbox(
+                label,
+                options=options,
+                index=default_idx,
+                key=key,
+                help=help_text
+            )
+        else:
+            # No options - regular text input
+            return st.text_input(
+                label, value=default or '', key=key,
+                help=description
+            )
     
+    # ─────────────────────────────────────────
+    # BOOLEAN type
+    # ─────────────────────────────────────────
     elif data_type == 'boolean':
         default_bool = default and str(default).lower() in ('true', '1', 'yes')
         return st.checkbox(
             label, value=default_bool, key=key,
-            help=attr.get('description', '')
+            help=description
         )
     
+    # ─────────────────────────────────────────
+    # DATETIME type
+    # ─────────────────────────────────────────
     elif data_type == 'datetime':
         return st.date_input(
             label, value=date.today(), key=key,
-            help=attr.get('description', '')
+            help=description
         )
     
+    # ─────────────────────────────────────────
+    # Default: text input
+    # ─────────────────────────────────────────
     else:
         return st.text_input(
             label, value=default or '', key=key,
-            help=attr.get('description', '')
+            help=description
         )
+
 
 
 def render_workflow_progress(current_step: int, total_steps: int, step_name: str):

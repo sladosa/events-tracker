@@ -171,10 +171,14 @@ class EnhancedStructureExporter:
             
             for attr in attrs:
                 # FIXED: column is validation_rules
+                # Handle double-escaped JSON from legacy imports
                 vr = attr.get('validation_rules')
                 if isinstance(vr, str):
                     try:
                         vr = json.loads(vr)
+                        # Check if still string (double-escaped)
+                        if isinstance(vr, str):
+                            vr = json.loads(vr)
                     except Exception:
                         vr = {}
                 if not isinstance(vr, dict):
@@ -258,15 +262,13 @@ class EnhancedStructureExporter:
                     cell.fill = self.BLUE_FILL
                     cell.alignment = self.LEFT_ALIGN if c in (6, 7, 12, 15) else self.CENTER_ALIGN
 
-            if ws.cell(r, 1).value == 'Area':
-                ws.cell(r, 2, 0)
-            else:
-                level_formula = f"=LEN(E{r})-LEN(SUBSTITUTE(E{r},\" > \",\"\"))/3"
-                ws.cell(r, 2).value = level_formula
-                ws.cell(r, 2).fill = self.PINK_FILL
-                ws.cell(r, 2).alignment = self.CENTER_ALIGN
+            # Level is already calculated in data - just ensure it's set correctly
+            # Column B (2) = Level, already has value from DataFrame
+            ws.cell(r, 2).fill = self.PINK_FILL
+            ws.cell(r, 2).alignment = self.CENTER_ALIGN
 
-            area_formula = f"=TRIM(LEFT(E{r},IFERROR(FIND(\" > \",E{r})-1,LEN(E{r}))))"
+            # Area formula - extract first part before " > "
+            area_formula = f'=IFERROR(LEFT(E{r},FIND(" > ",E{r})-1),E{r})'
             ws.cell(r, 4).value = area_formula
             ws.cell(r, 4).fill = self.PINK_FILL
             ws.cell(r, 4).alignment = self.LEFT_ALIGN
