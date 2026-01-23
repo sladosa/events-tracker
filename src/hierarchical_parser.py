@@ -114,7 +114,7 @@ class HierarchicalParser:
                 area = area_by_id.get(cat.get('areaid'))
                 if area:
                     parts.insert(0, area.get('name',''))
-                return ' '.join([p for p in parts if p])
+                return ' > '.join([p for p in parts if p])
 
             for c in cats:
                 p = build_path(c['id']).lower()
@@ -161,7 +161,7 @@ class HierarchicalParser:
                 else:
                     seenpaths[pathkey] = excelrow
 
-            parts = [p.strip() for p in catpath.split(' ') if p.strip()]
+            parts = [p.strip() for p in catpath.split(' > ') if p.strip()]
             lastpart = parts[-1] if parts else ''
 
             if rowtype == 'Attribute':
@@ -179,7 +179,12 @@ class HierarchicalParser:
                 if pd.notna(isreq) and str(isreq).strip() and str(isreq).strip() not in self.VALIDREQUIRED:
                     self.changes.validation_errors.append(ValidationError(excelrow, 'IsRequired', f'Invalid IsRequired {isreq}. Must be TRUE/FALSE'))
 
-                vtype = str(row.get('ValidationType', '')).strip().lower()
+                vtype = row.get('ValidationType', '')
+                # Handle NaN values properly
+                if pd.isna(vtype):
+                    vtype = ''
+                else:
+                    vtype = str(vtype).strip().lower()
                 if vtype and vtype not in self.VALIDVTYPE:
                     self.changes.validation_errors.append(ValidationError(excelrow, 'ValidationType', f'Invalid ValidationType {vtype}. Must be none/suggest/enum'))
 
