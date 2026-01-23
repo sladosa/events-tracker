@@ -34,7 +34,7 @@ from typing import Dict, List, Optional
 import json
 
 
-class EnhancedStructureExporterV4:
+class EnhancedStructureExporter:
     def __init__(self, client, userid: str, filterarea: Optional[str] = None, filtercategory: Optional[str] = None):
         self.client = client
         self.userid = userid
