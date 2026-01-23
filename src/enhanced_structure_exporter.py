@@ -35,9 +35,9 @@ import json
 
 
 class EnhancedStructureExporter:
-    def __init__(self, client, userid: str, filterarea: Optional[str] = None, filtercategory: Optional[str] = None):
+    def __init__(self, client, user_id: str, filterarea: Optional[str] = None, filtercategory: Optional[str] = None):
         self.client = client
-        self.userid = userid
+        self.userid = user_id
         self.filterarea = filterarea if filterarea != 'All Areas' else None
         self.filtercategory = filtercategory if filtercategory != 'All Categories' else None
 
