@@ -44,7 +44,7 @@ class ChangeSet:
         return len(self.validationerrors) > 0
 
 
-class HierarchicalParserV4:
+class HierarchicalParser:
     VALIDTYPES = {'Area', 'Category', 'Attribute'}
     VALIDDATATYPES = {'number', 'text', 'datetime', 'boolean', 'link', 'image'}
     VALIDREQUIRED = {'TRUE', 'FALSE', 'True', 'False', 'true', 'false'}
