@@ -53,15 +53,15 @@ See `SQL schema_V2.sql` for complete schema.
 
 ### **Core Modules** (`src/`)
 
-| Module | Version | Purpose |
-|--------|---------|---------|
-| **interactive_structure_viewer.py** | v1.13.3 | **Primary hub** for structure management. Excel-like viewer with Read-only/Edit modes. Manages Areas, Categories, Attributes. Features: bulk operations, Excel import/export, validation, auto-bootstrap for empty DB. |
-| **add_activity.py** | v2.4.0 | Mobile-optimized activity entry form. Filter-first design (Area → Category drill-down). Multi-session support, photo attachments, Bootstrap integration. ⚠️ **KNOWN ISSUE**: Shortcuts system doesn't work - cannot add new shortcuts. |
-| **show_events.py** | v2.6.6 | View/edit/delete events with table UI. Filters: Area + Category (downstream) + Date range. Bulk delete, sort order (newest/oldest). Integrated Excel export/import. Parent-child event grouping. |
-| **excel_events_io.py** | v2.5.8 | Unified Excel export/import for events. Features: LEGEND-based import, session merging, change detection, 3-color formatting. Exports events with full attribute hierarchy. |
-| **bulk_import.py** | - | Bulk event import from Excel/CSV. Supports mixed categories, duplicate detection, comprehensive validation. Uses `>` separator for hierarchical paths. |
-| **view_data_export.py** | - | **DEPRECATED** - Export functionality now integrated into `show_events.py` and `excel_events_io.py`. |
-| **view_data_import.py** | - | **DEPRECATED** - Import functionality now integrated into `show_events.py` and `excel_events_io.py`. |
+| Module                              | Version | Purpose                                                                                                                                                                                                                                |
+| ----------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **interactive_structure_viewer.py** | v1.13.3 | **Primary hub** for structure management. Excel-like viewer with Read-only/Edit modes. Manages Areas, Categories, Attributes. Features: bulk operations, Excel import/export, validation, auto-bootstrap for empty DB.                 |
+| **add_activity.py**                 | v2.4.0  | Mobile-optimized activity entry form. Filter-first design (Area → Category drill-down). Multi-session support, photo attachments, Bootstrap integration. ⚠️ **KNOWN ISSUE**: Shortcuts system doesn't work - cannot add new shortcuts. |
+| **show_events.py**                  | v2.6.6  | View/edit/delete events with table UI. Filters: Area + Category (downstream) + Date range. Bulk delete, sort order (newest/oldest). Integrated Excel export/import. Parent-child event grouping.                                       |
+| **excel_events_io.py**              | v2.5.8  | Unified Excel export/import for events. Features: LEGEND-based import, session merging, change detection, 3-color formatting. Exports events with full attribute hierarchy.                                                            |
+| **bulk_import.py**                  | -       | Bulk event import from Excel/CSV. Supports mixed categories, duplicate detection, comprehensive validation. Uses `>` separator for hierarchical paths.                                                                                 |
+| **view_data_export.py**             | -       | **DEPRECATED** - Export functionality now integrated into `show_events.py` and `excel_events_io.py`.                                                                                                                                   |
+| **view_data_import.py**             | -       | **DEPRECATED** - Import functionality now integrated into `show_events.py` and `excel_events_io.py`.                                                                                                                                   |
 
 ### **Structure Management**
 
