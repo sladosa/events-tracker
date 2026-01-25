@@ -298,26 +298,23 @@ class EnhancedStructureExporter:
     def _setup_column_groups(self, ws):
         """Setup column grouping for collapsible sections.
         
-        Groups (summary column to the right):
-        - B (Level) - collapsible, summary is C
-        - D (Area) - collapsible, summary is E  
-        - F (Category) - collapsible, summary is G
-        - I-N (Unit through ValidationMax) - collapsible, summary is O
+        Groups (summary column to the LEFT - summaryRight=False):
+        - B (Level) - collapsible
+        - D (Area) - collapsible  
+        - F (Category) - collapsible
+        - I-N (Unit through ValidationMax) - collapsible as one group
         """
         # Set outline properties: summary columns are to the LEFT of detail
         ws.sheet_properties.outlinePr = Outline(summaryRight=False)
         
-        # Group column B (Level) - outline level 1
-        ws.column_dimensions.group('B', 'B', outline_level=1, hidden=False)
+        # Group individual columns by setting outlineLevel
+        ws.column_dimensions['B'].outlineLevel = 1  # Level
+        ws.column_dimensions['D'].outlineLevel = 1  # Area
+        ws.column_dimensions['F'].outlineLevel = 1  # Category
         
-        # Group column D (Area) - outline level 1
-        ws.column_dimensions.group('D', 'D', outline_level=1, hidden=False)
-        
-        # Group column F (Category) - outline level 1
-        ws.column_dimensions.group('F', 'F', outline_level=1, hidden=False)
-        
-        # Group columns I-N (Unit, IsRequired, ValidationType, DefaultValue, ValidationMin, ValidationMax)
-        ws.column_dimensions.group('I', 'N', outline_level=1, hidden=False)
+        # Group columns I-N together (Unit, IsRequired, ValidationType, DefaultValue, ValidationMin, ValidationMax)
+        for col in ['I', 'J', 'K', 'L', 'M', 'N']:
+            ws.column_dimensions[col].outlineLevel = 1
 
     def _autosize_columns(self, ws):
         for col in ws.columns:
