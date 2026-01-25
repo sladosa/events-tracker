@@ -287,7 +287,12 @@ class HierarchicalParser:
             if new_sort != (existing.get('sort_order') or 0):
                 updates['sort_order'] = new_sort
             if updates:
-                self.changes.updated_areas.append({'id': existing['id'], 'updates': updates, 'excel_row': excelrow})
+                self.changes.updated_areas.append({
+                    'id': existing['id'],
+                    'name': area_name,
+                    'updates': updates,
+                    'excel_row': excelrow
+                })
         else:
             aid = str(uuid.uuid4())
             created_areas[area_name.lower()] = aid
@@ -342,7 +347,12 @@ class HierarchicalParser:
             if new_sort != (existing.get('sort_order') or 0):
                 updates['sort_order'] = new_sort
             if updates:
-                self.changes.updated_categories.append({'id': existing['id'], 'updates': updates, 'excel_row': excelrow})
+                self.changes.updated_categories.append({
+                    'id': existing['id'],
+                    'path': catpath,
+                    'updates': updates,
+                    'excel_row': excelrow
+                })
         else:
             cid = str(uuid.uuid4())
             created_categories[catpath.lower()] = cid
@@ -432,7 +442,13 @@ class HierarchicalParser:
                 updates['description'] = desc
 
             if updates:
-                self.changes.updated_attributes.append({'id': existing['id'], 'updates': updates, 'excel_row': excelrow})
+                self.changes.updated_attributes.append({
+                    'id': existing['id'],
+                    'name': attrname,
+                    'category_path': catpath,
+                    'updates': updates,
+                    'excel_row': excelrow
+                })
         else:
             aid = str(uuid.uuid4())
             self.changes.new_attributes.append({
