@@ -33,6 +33,7 @@ from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.comments import Comment
+from openpyxl.worksheet.properties import Outline
 from datetime import datetime
 from typing import Dict, List, Optional
 import json
@@ -86,6 +87,7 @@ class EnhancedStructureExporter:
         self._setup_headers(ws)
         self._populate_data(ws, df)
         self._add_data_validations(ws)
+        self._setup_column_groups(ws)
         self._autosize_columns(ws)
 
         ws.freeze_panes = 'G3'
@@ -293,6 +295,30 @@ class EnhancedStructureExporter:
         ws.add_data_validation(vtype_dv)
         vtype_dv.add(f'K3:K{maxrow}')
 
+    def _setup_column_groups(self, ws):
+        """Setup column grouping for collapsible sections.
+        
+        Groups (summary column to the right):
+        - B (Level) - collapsible, summary is C
+        - D (Area) - collapsible, summary is E  
+        - F (Category) - collapsible, summary is G
+        - I-N (Unit through ValidationMax) - collapsible, summary is O
+        """
+        # Set outline properties: summary columns are to the LEFT of detail
+        ws.sheet_properties.outlinePr = Outline(summaryRight=False)
+        
+        # Group column B (Level) - outline level 1
+        ws.column_dimensions.group('B', 'B', outline_level=1, hidden=False)
+        
+        # Group column D (Area) - outline level 1
+        ws.column_dimensions.group('D', 'D', outline_level=1, hidden=False)
+        
+        # Group column F (Category) - outline level 1
+        ws.column_dimensions.group('F', 'F', outline_level=1, hidden=False)
+        
+        # Group columns I-N (Unit, IsRequired, ValidationType, DefaultValue, ValidationMin, ValidationMax)
+        ws.column_dimensions.group('I', 'N', outline_level=1, hidden=False)
+
     def _autosize_columns(self, ws):
         for col in ws.columns:
             col_letter = col[0].column_letter
@@ -308,44 +334,150 @@ class EnhancedStructureExporter:
 
     def _add_help_sheet(self, wb: Workbook):
         ws = wb.create_sheet('Help')
-        title = 'EVENTS TRACKER - Structure Import/Export Guide (v4 FIXED)'
+        
+        # Title
+        title = 'EVENTS TRACKER - Structure Import/Export Guide'
         ws.cell(1, 1, title).font = Font(bold=True, size=14, color='FFFFFF')
         ws.cell(1, 1).fill = self.HEADER_FILL
-
+        
         lines = [
             '',
-            'FIXED VERSION (2026-01-23)',
-            '- Database column names now use snake_case (sort_order, area_id, etc.)',
-            '- CategoryPath now uses " > " as separator (with spaces)',
+            '═══════════════════════════════════════════════════════════════════',
+            '📋 COLUMN REFERENCE',
+            '═══════════════════════════════════════════════════════════════════',
             '',
-            'NEW IN v4',
-            '- ValidationType column (K). Default for text is suggest (even if you do not provide options).',
-            '- Dropdown in K offers only: none, enum. (Suggest is default.)',
-            '- For text attributes, ValidationMin column (M) can hold TextOptions as pipe-separated list (Run|Hiking|Cycling).',
+            '🟪 PINK COLUMNS (Auto-calculated / Read-only):',
+            '   A - Type: Area, Category, or Attribute. Do NOT change for existing rows.',
+            '   B - Level: Auto-calculated from CategoryPath depth. NOT required in upload - will be auto-filled on download.',
+            '   D - Area: Auto-extracted from CategoryPath (formula). Read-only.',
             '',
-            'ValidationType meaning',
-            '- suggest: free text allowed; if M has options they can be used as suggestions in UI.',
-            '- enum: strict; only values from M are allowed (UI should use dropdown).',
-            '- none: no validation/suggestions; free text.',
+            '🟨 YELLOW COLUMNS (Key identifiers - Edit ONLY for NEW rows):',
+            '   C - SortOrder: Position within parent. Edit to change display order.',
+            '   E - CategoryPath: KEY identifier using " > " separator.',
+            '       ⚠️ For EXISTING rows DO NOT CHANGE - creates duplicates!',
             '',
-            'COLUMN REFERENCE',
-            'A - Type',
-            'B - Level (auto)',
-            'C - SortOrder (key)',
-            'D - Area (auto)',
-            'E - CategoryPath (key) - use " > " separator',
-            'F - Category',
-            'G - AttributeName',
-            'H - DataType',
-            'I - Unit',
-            'J - IsRequired',
-            'K - ValidationType (none/enum; suggest default)',
-            'L - DefaultValue',
-            'M - ValidationMin (number) OR TextOptions (text)',
-            'N - ValidationMax (number)',
-            'O - Description',
+            '🟦 BLUE COLUMNS (Freely editable):',
+            '   F  - Category: Must match the LAST part of CategoryPath.',
+            '   G  - AttributeName: Name of the attribute (only for Attribute rows).',
+            '   H  - DataType: number, text, datetime, boolean, link, image.',
+            '   I  - Unit: Measurement unit (kg, hours, EUR, km, bpm, %, etc.).',
+            '   J  - IsRequired: TRUE or FALSE.',
+            '   K  - ValidationType: Controls validation behavior:',
+            '        • suggest (default for text): free text + optional suggestions from M',
+            '        • enum: STRICT - only values from M are allowed',
+            '        • none: no validation/suggestions',
+            '   L  - DefaultValue: Default value for new events.',
+            '   M  - ValidationMin (number) OR TextOptions (text).',
+            '        For text: pipe-separated list e.g. Run|Hiking|Cycling',
+            '   N  - ValidationMax: Maximum allowed value (number only).',
+            '   O  - Description: Documentation / notes (recommended).',
+            '',
+            '═══════════════════════════════════════════════════════════════════',
+            '🎨 COLOR CODING (3 Colors):',
+            '═══════════════════════════════════════════════════════════════════',
+            '',
+            '🟪 PINK = Auto-calculated, READ-ONLY',
+            '   Columns: Type (A), Level (B), Area (D)',
+            '   → Do NOT edit these columns',
+            '',
+            '🟨 YELLOW = KEY IDENTIFIER - Edit ONLY for NEW rows',
+            '   Columns: SortOrder (C), CategoryPath (E)',
+            '   → For EXISTING rows: DO NOT CHANGE!',
+            '   → For NEW rows: Set the values correctly',
+            '   ⚠️ Changing CategoryPath for existing items creates DUPLICATES!',
+            '',
+            '🟦 BLUE = Freely EDITABLE',
+            '   Columns: Category (F), AttributeName (G), DataType (H),',
+            '            Unit (I), IsRequired (J), ValidationType (K), DefaultValue (L),',
+            '            ValidationMin (M), ValidationMax (N), Description (O)',
+            '   → Edit these freely for existing or new rows',
+            '',
+            '═══════════════════════════════════════════════════════════════════',
+            '📌 SCENARIO 1: Add New Category with Attributes',
+            '═══════════════════════════════════════════════════════════════════',
+            '',
+            'You only need to add NEW rows - not the entire structure!',
+            '',
+            "Example - Add 'Novi auto' category under 'Finance > Domacinstvo > Automobili':",
+            '',
+            "Row 1: Type=Category, CategoryPath='Finance > Domacinstvo > Automobili > Novi auto',",
+            "       Category='Novi auto', SortOrder=3",
+            "Row 2: Type=Attribute, CategoryPath='Finance > Domacinstvo > Automobili > Novi auto',",
+            "       Category='Novi auto', AttributeName='Registracija', DataType='number'",
+            "Row 3: Type=Attribute, CategoryPath='Finance > Domacinstvo > Automobili > Novi auto',",
+            "       Category='Novi auto', AttributeName='Gorivo', DataType='number'",
+            '',
+            '⚠️ IMPORTANT: Category column (F) MUST match the LAST part of CategoryPath!',
+            '',
+            '═══════════════════════════════════════════════════════════════════',
+            '📌 SCENARIO 2: Edit Existing Item Properties',
+            '═══════════════════════════════════════════════════════════════════',
+            '',
+            '1. Find the row by CategoryPath',
+            '2. Edit ONLY the BLUE columns (Description, Unit, DataType, etc.)',
+            '3. DO NOT change CategoryPath or SortOrder!',
+            '4. Upload the file',
+            '',
+            '═══════════════════════════════════════════════════════════════════',
+            '📌 SCENARIO 3: Change Display Order',
+            '═══════════════════════════════════════════════════════════════════',
+            '',
+            'To reorder items within the same parent:',
+            '1. Edit the SortOrder values (column C)',
+            '2. Use consecutive numbers (1, 2, 3...)',
+            '3. Items with lower SortOrder appear first',
+            '',
+            '═══════════════════════════════════════════════════════════════════',
+            '⚠️ COMMON MISTAKES TO AVOID:',
+            '═══════════════════════════════════════════════════════════════════',
+            '',
+            "❌ MISTAKE 1: Category doesn't match CategoryPath",
+            "   Wrong: Path='Area > Cat > SubCat', Category='DifferentName'",
+            "   Right: Path='Area > Cat > SubCat', Category='SubCat'",
+            '   → Category MUST be the LAST part of the path!',
+            '',
+            '❌ MISTAKE 2: Changing CategoryPath for existing item',
+            '   This creates a NEW item instead of updating the existing one!',
+            '   → To rename: Edit Category column (F), keep path unchanged',
+            '   → To move: Use app UI instead (safer)',
+            '',
+            '❌ MISTAKE 3: Missing parent in hierarchy',
+            "   Can't add 'Area > Cat > SubCat' if 'Area > Cat' doesn't exist!",
+            '   → Add parent categories first, or use existing parents',
+            '',
+            '❌ MISTAKE 4: Duplicate CategoryPath in upload',
+            '   Each path must be unique in the file!',
+            '',
+            '❌ MISTAKE 5: Wrong Attribute parent reference',
+            '   Attributes must point to existing Category via CategoryPath',
+            '',
+            '═══════════════════════════════════════════════════════════════════',
+            '✅ VALIDATION TYPES EXPLAINED',
+            '═══════════════════════════════════════════════════════════════════',
+            '',
+            'For TEXT attributes (DataType=text):',
+            '',
+            '• suggest (default): Free text input with optional suggestions',
+            '  - User can type anything',
+            '  - If ValidationMin has values (e.g., Run|Walk|Cycle), they appear as suggestions',
+            '  - Good for: comments, notes, activity types with common values',
+            '',
+            '• enum: Strict dropdown - ONLY listed values allowed',
+            '  - User must pick from ValidationMin list',
+            '  - Good for: status fields, fixed categories',
+            '',
+            '• none: No validation, no suggestions',
+            '  - Pure free text',
+            '  - Good for: unique descriptions, free-form notes',
+            '',
+            'For NUMBER attributes:',
+            '  - ValidationMin = minimum allowed value',
+            '  - ValidationMax = maximum allowed value',
+            '',
         ]
+        
         for i, t in enumerate(lines, start=2):
             ws.cell(i, 1, t)
+        
         ws.freeze_panes = 'A2'
         ws.column_dimensions['A'].width = 110
