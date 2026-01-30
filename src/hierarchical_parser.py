@@ -1,4 +1,4 @@
-"""Hierarchical Parser v5 - WITH DEPENDENCIES SUPPORT
+"""Hierarchical Parser v5 - WITH DEPENDENCIES SUPPORT_
 
 CHANGES FROM V4 (2026-01-30):
 - Added support for DependsOn column (P) - references parent attribute slug
