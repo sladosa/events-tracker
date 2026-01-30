@@ -102,7 +102,7 @@ class HierarchicalParser:
         """Load existing structure from database."""
         structure = {'areas': {}, 'categories': {}, 'attributes': {}}
         try:
-            # Load areas
+            # Load areas FIRST
             areas_response = self.client.table('areas').select('*').eq('user_id', self.user_id).execute()
             areas = getattr(areas_response, 'data', None) or []
             for a in areas:
@@ -110,13 +110,13 @@ class HierarchicalParser:
                 if name:
                     structure['areas'][name.lower()] = a
 
-            # Load categories
+            # Load categories - pass areas dict to helper
             cats_response = self.client.table('categories').select('*').eq('user_id', self.user_id).execute()
             cats = getattr(cats_response, 'data', None) or []
             
             for c in cats:
                 if isinstance(c, dict):
-                    path = self._build_category_path(c, cats)
+                    path = self._build_category_path(c, cats, structure['areas'])
                     structure['categories'][path.lower()] = c
 
             # Load attributes
@@ -130,15 +130,15 @@ class HierarchicalParser:
                     structure['attributes'][key] = a
 
         except Exception as e:
-            import traceback
             error_detail = f'{type(e).__name__}: {e}'
             self.changes.validation_errors.append(ValidationError(0, 'Database', f'Failed to load existing structure: {error_detail}'))
         return structure
 
-    def _build_category_path(self, category: Dict, all_categories: List[Dict]) -> str:
+    def _build_category_path(self, category: Dict, all_categories: List[Dict], areas_dict: Dict = None) -> str:
+        """Build full category path. areas_dict is passed during initial load."""
         parts = [category.get('name', '')]
         current = category
-        cat_map = {c['id']: c for c in all_categories}
+        cat_map = {c['id']: c for c in all_categories if isinstance(c, dict) and 'id' in c}
         
         while current.get('parent_category_id'):
             parent = cat_map.get(current['parent_category_id'])
@@ -147,15 +147,19 @@ class HierarchicalParser:
             parts.insert(0, parent.get('name', ''))
             current = parent
         
-        area = self._get_area_name(category.get('area_id'))
+        # Use passed areas_dict if available, otherwise use self.existing_structure
+        area = self._get_area_name(category.get('area_id'), areas_dict)
         if area:
             parts.insert(0, area)
         return ' > '.join(parts)
 
-    def _get_area_name(self, area_id: str) -> str:
-        for name, a in self.existing_structure['areas'].items():
-            if a['id'] == area_id:
-                return a['name']
+    def _get_area_name(self, area_id: str, areas_dict: Dict = None) -> str:
+        """Get area name by ID. Uses passed dict or falls back to existing_structure."""
+        if areas_dict is None:
+            areas_dict = getattr(self, 'existing_structure', {}).get('areas', {})
+        for name, a in areas_dict.items():
+            if isinstance(a, dict) and a.get('id') == area_id:
+                return a.get('name', '')
         return ''
 
     def _validate_data_format(self):
