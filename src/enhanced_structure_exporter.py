@@ -1,11 +1,11 @@
-"""Enhanced Structure Exporter v4 - FIXED VERSION
+"""Enhanced Structure Exporter v5 - WITH DEPENDENCIES
 
-FIXES APPLIED (2026-01-23):
-- Fixed database naming convention: all table/column names now use snake_case
-- Table: attributedefinitions → attribute_definitions  
-- Columns: areaid → area_id, categoryid → category_id, sortorder → sort_order, etc.
-
-Adds ValidationType column (K) and supports text ValidationOptions stored in ValidationMin column (M).
+CHANGES FROM V4 (2026-01-30):
+- Added DependsOn column (P) - GREEN color
+- Added WhenValue column (Q) - GREEN color
+- Renamed ValidationMin to TextOptions (M) for clarity
+- Support for exporting dependency configurations from validation_rules
+- Backward compatible: existing files without dependencies still work
 
 Column layout (HierarchicalView):
 A Type (pink)
@@ -18,14 +18,15 @@ G AttributeName (blue)
 H DataType (blue)
 I Unit (blue)
 J IsRequired (blue)
-K ValidationType (blue) -> dropdown offers: none, enum
-   - suggest is the default for text attributes (exporter writes it when blank)
+K ValidationType (blue)
 L DefaultValue (blue)
-M ValidationMin / TextOptions (blue)
+M TextOptions (blue) - was ValidationMin
 N ValidationMax (blue)
 O Description (blue)
+P DependsOn (green) - NEW
+Q WhenValue (green) - NEW
 
-Compatible with HierarchicalParser v4.
+Compatible with HierarchicalParser v5.
 """
 
 import pandas as pd
@@ -35,7 +36,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.comments import Comment
 from openpyxl.worksheet.properties import Outline
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import json
 
 
@@ -49,6 +50,7 @@ class EnhancedStructureExporter:
         self.PINK_FILL = PatternFill(start_color='FFE6F0', end_color='FFE6F0', fill_type='solid')
         self.BLUE_FILL = PatternFill(start_color='E6F2FF', end_color='E6F2FF', fill_type='solid')
         self.YELLOW_FILL = PatternFill(start_color='FFF2CC', end_color='FFF2CC', fill_type='solid')
+        self.GREEN_FILL = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='solid')  # NEW
         self.HEADER_FILL = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
         self.BOLD_FONT = Font(bold=True, color='FFFFFF')
         self.THIN_BORDER = Border(
@@ -65,172 +67,258 @@ class EnhancedStructureExporter:
             'B': 'Level: Auto-calculated from CategoryPath depth. Read-only.',
             'C': 'SortOrder: Position within parent element. Edit to change display order.',
             'D': 'Area: Auto-extracted from CategoryPath. Read-only.',
-            'E': 'CategoryPath: KEY identifier. For existing rows DO NOT change, or you create duplicates.',
+            'E': 'CategoryPath: KEY identifier. For existing rows DO NOT change.',
             'F': 'Category: Must match the LAST part of CategoryPath.',
             'G': 'AttributeName: Only for Attribute rows.',
             'H': 'DataType: number, text, datetime, boolean, link, image.',
             'I': 'Unit: kg, hours, EUR, km, bpm...',
             'J': 'IsRequired: TRUE or FALSE.',
-            'K': 'ValidationType: controls text validation behavior. suggest = free text + optional suggestions from M. enum = STRICT; only values from M are allowed. none = no validation / no suggestions.',
+            'K': 'ValidationType: suggest (default for text), enum, none.',
             'L': 'DefaultValue: Default value for new events.',
-            'M': 'ValidationMin (number) OR TextOptions (text). For text, use pipe-separated e.g. Run|Hiking|Cycling.',
+            'M': 'TextOptions: Pipe-separated options (Run|Walk|Cycle). For numbers: minimum value.',
             'N': 'ValidationMax: Maximum allowed value (number only).',
-            'O': 'Description: Documentation / notes (recommended).',
+            'O': 'Description: Documentation / notes.',
+            'P': 'DependsOn: Slug of parent attribute (for dependent dropdowns). Must be in same category.',
+            'Q': 'WhenValue: Value of parent attribute for these options. Use "*" for fallback/default.',
         }
 
     def export_hierarchical_view(self, output_path: Optional[str] = None) -> str:
-        df = self._load_hierarchical_data()
+        rows = self._load_hierarchical_data()
         wb = Workbook()
         ws = wb.active
         ws.title = 'HierarchicalView'
 
         self._setup_headers(ws)
-        self._populate_data(ws, df)
+        self._populate_data(ws, rows)
         self._add_data_validations(ws)
         self._setup_column_groups(ws)
         self._autosize_columns(ws)
 
         ws.freeze_panes = 'G3'
-        ws.auto_filter.ref = f'A2:O{len(df)+2}'
+        ws.auto_filter.ref = f'A2:Q{len(rows)+2}'
 
         self._add_help_sheet(wb)
 
         if not output_path:
             ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-            output_path = f'structure_hierarchical_v4_{ts}.xlsx'
+            output_path = f'structure_hierarchical_v5_{ts}.xlsx'
         wb.save(output_path)
         return output_path
 
-    def _load_hierarchical_data(self) -> pd.DataFrame:
-        """Load hierarchical structure from database using correct snake_case naming."""
+    def _load_hierarchical_data(self) -> List[Dict]:
+        """Load hierarchical structure from database."""
         rows: List[Dict] = []
         
-        # FIXED: use snake_case column names
         areas_q = self.client.table('areas').select('*').eq('user_id', self.user_id)
         if self.filter_area:
             areas_q = areas_q.eq('name', self.filter_area)
-        areas = areas_q.order('sort_order').execute().data or []  # FIXED: sort_order
+        areas = areas_q.order('sort_order').execute().data or []
 
         for area in areas:
-            rows.append({
-                'Type': 'Area', 
-                'Level': 0, 
-                'SortOrder': area.get('sort_order', 0),  # FIXED
-                'Area': area.get('name', ''),
-                'CategoryPath': area.get('name', ''),
-                'Category': '', 
-                'AttributeName': '', 
-                'DataType': '', 
-                'Unit': '',
-                'IsRequired': '',
-                'ValidationType': '',
-                'DefaultValue': '', 
-                'ValidationMin': '', 
-                'ValidationMax': '',
-                'Description': area.get('description', '')
-            })
+            rows.append(self._create_row(
+                row_type='Area',
+                level=0,
+                sort_order=area.get('sort_order', 0),
+                area_name=area.get('name', ''),
+                category_path=area.get('name', ''),
+                description=area.get('description', '')
+            ))
             self._load_categories_recursive(area['id'], area.get('name', ''), rows)
 
-        df = pd.DataFrame(rows)
-        if self.filter_category and not df.empty:
-            mask = df['CategoryPath'].str.contains(f' {self.filter_category}', case=False, na=False, regex=False) | df['CategoryPath'].str.endswith(self.filter_category, na=False)
-            df = df[mask | (df['Type'] == 'Area')]
-        return df
+        if self.filter_category and rows:
+            rows = [r for r in rows if 
+                    self.filter_category in r.get('CategoryPath', '') or 
+                    r.get('Type') == 'Area']
+        
+        return rows
+
+    def _create_row(self, row_type: str, level: int, sort_order: int, area_name: str,
+                    category_path: str, category_name: str = '', attribute_name: str = '',
+                    data_type: str = '', unit: str = '', is_required: str = '',
+                    validation_type: str = '', default_value: str = '', text_options: str = '',
+                    validation_max: str = '', description: str = '', 
+                    depends_on: str = '', when_value: str = '') -> Dict:
+        """Create a standardized row dictionary."""
+        return {
+            'Type': row_type,
+            'Level': level,
+            'SortOrder': sort_order,
+            'Area': area_name,
+            'CategoryPath': category_path,
+            'Category': category_name,
+            'AttributeName': attribute_name,
+            'DataType': data_type,
+            'Unit': unit,
+            'IsRequired': is_required,
+            'ValidationType': validation_type,
+            'DefaultValue': default_value,
+            'TextOptions': text_options,
+            'ValidationMax': validation_max,
+            'Description': description,
+            'DependsOn': depends_on,
+            'WhenValue': when_value,
+        }
 
     def _load_categories_recursive(self, area_id: str, area_name: str, rows: List[Dict], 
                                     parent_id: Optional[str] = None, parent_path: str = '', level: int = 1):
-        """Recursively load categories using correct snake_case naming."""
-        # FIXED: use snake_case column names
+        """Recursively load categories and their attributes."""
         q = self.client.table('categories').select('*').eq('user_id', self.user_id).eq('area_id', area_id).eq('level', level)
         if parent_id:
-            q = q.eq('parent_category_id', parent_id)  # FIXED
+            q = q.eq('parent_category_id', parent_id)
         else:
-            q = q.is_('parent_category_id', 'null')  # FIXED
-        cats = q.order('sort_order').execute().data or []  # FIXED
+            q = q.is_('parent_category_id', 'null')
+        cats = q.order('sort_order').execute().data or []
 
         for cat in cats:
             catpath = f"{parent_path} > {cat['name']}" if parent_path else f"{area_name} > {cat['name']}"
-            rows.append({
-                'Type': 'Category', 
-                'Level': level, 
-                'SortOrder': cat.get('sort_order', 0),  # FIXED
-                'Area': area_name,
-                'CategoryPath': catpath,
-                'Category': cat.get('name', ''),
-                'AttributeName': '', 
-                'DataType': '', 
-                'Unit': '',
-                'IsRequired': '',
-                'ValidationType': '',
-                'DefaultValue': '', 
-                'ValidationMin': '', 
-                'ValidationMax': '',
-                'Description': cat.get('description', '')
-            })
+            rows.append(self._create_row(
+                row_type='Category',
+                level=level,
+                sort_order=cat.get('sort_order', 0),
+                area_name=area_name,
+                category_path=catpath,
+                category_name=cat.get('name', ''),
+                description=cat.get('description', '')
+            ))
 
-            # FIXED: table name is attribute_definitions
+            # Load attributes for this category
             attrs = self.client.table('attribute_definitions').select('*').eq('user_id', self.user_id).eq('category_id', cat['id']).order('sort_order').execute().data or []
             
             for attr in attrs:
-                # FIXED: column is validation_rules
-                # Handle double-escaped JSON from legacy imports
-                vr = attr.get('validation_rules')
-                if isinstance(vr, str):
-                    try:
-                        vr = json.loads(vr)
-                        # Check if still string (double-escaped)
-                        if isinstance(vr, str):
-                            vr = json.loads(vr)
-                    except Exception:
-                        vr = {}
-                if not isinstance(vr, dict):
-                    vr = {}
-
-                # FIXED: column is data_type
-                datatype = (attr.get('data_type') or 'text').strip()
-                vtype = (vr.get('type') or '').strip()
-
-                # Default: suggest for text. Exporter will write 'suggest' even if options are empty.
-                if not vtype and datatype == 'text':
-                    vtype = 'suggest'
-
-                text_options = ''
-                if datatype == 'text':
-                    opt_list = vr.get('enum') or vr.get('suggest')
-                    if isinstance(opt_list, list):
-                        text_options = '|'.join([str(x) for x in opt_list if str(x).strip()])
-
-                valmin = vr.get('min', '')
-                valmax = vr.get('max', '')
-
-                rows.append({
-                    'Type': 'Attribute', 
-                    'Level': level + 1, 
-                    'SortOrder': attr.get('sort_order', 0),  # FIXED
-                    'Area': area_name,
-                    'CategoryPath': catpath,
-                    'Category': cat.get('name', ''),
-                    'AttributeName': attr.get('name', ''),
-                    'DataType': datatype,
-                    'Unit': attr.get('unit', ''),
-                    # FIXED: column is is_required
-                    'IsRequired': 'TRUE' if attr.get('is_required', False) else 'FALSE',
-                    'ValidationType': vtype,
-                    # FIXED: column is default_value
-                    'DefaultValue': attr.get('default_value', ''),
-                    'ValidationMin': text_options if datatype == 'text' else valmin,
-                    'ValidationMax': '' if datatype == 'text' else valmax,
-                    'Description': attr.get('description', ''),
-                })
+                attr_rows = self._process_attribute(attr, area_name, catpath, cat.get('name', ''), level)
+                rows.extend(attr_rows)
 
             if level < 10:
                 self._load_categories_recursive(area_id, area_name, rows, cat['id'], catpath, level + 1)
 
+    def _process_attribute(self, attr: Dict, area_name: str, catpath: str, 
+                           category_name: str, level: int) -> List[Dict]:
+        """Process an attribute and return one or more rows (multiple if has dependencies)."""
+        vr = self._parse_validation_rules(attr.get('validation_rules'))
+        datatype = (attr.get('data_type') or 'text').strip()
+        vtype = (vr.get('type') or '').strip()
+
+        if not vtype and datatype == 'text':
+            vtype = 'suggest'
+
+        # Check for dependencies
+        depends_on_config = vr.get('depends_on', {})
+        
+        if depends_on_config and 'options_map' in depends_on_config:
+            # Attribute has dependencies - create multiple rows
+            return self._create_dependency_rows(
+                attr, area_name, catpath, category_name, level, 
+                datatype, vtype, depends_on_config
+            )
+        else:
+            # Simple attribute - single row
+            text_options = self._extract_text_options(vr, datatype)
+            valmin = vr.get('min', '')
+            valmax = vr.get('max', '')
+            
+            return [self._create_row(
+                row_type='Attribute',
+                level=level + 1,
+                sort_order=attr.get('sort_order', 0),
+                area_name=area_name,
+                category_path=catpath,
+                category_name=category_name,
+                attribute_name=attr.get('name', ''),
+                data_type=datatype,
+                unit=attr.get('unit', ''),
+                is_required='TRUE' if attr.get('is_required', False) else 'FALSE',
+                validation_type=vtype,
+                default_value=attr.get('default_value', ''),
+                text_options=text_options if datatype == 'text' else str(valmin) if valmin else '',
+                validation_max='' if datatype == 'text' else str(valmax) if valmax else '',
+                description=attr.get('description', ''),
+            )]
+
+    def _create_dependency_rows(self, attr: Dict, area_name: str, catpath: str,
+                                 category_name: str, level: int, datatype: str,
+                                 vtype: str, depends_on_config: Dict) -> List[Dict]:
+        """Create multiple rows for an attribute with dependencies."""
+        rows = []
+        parent_slug = depends_on_config.get('attribute_slug', '')
+        options_map = depends_on_config.get('options_map', {})
+        
+        for when_value, options_list in options_map.items():
+            if isinstance(options_list, list):
+                text_options = '|'.join([str(x) for x in options_list if str(x).strip()])
+            else:
+                text_options = str(options_list) if options_list else ''
+            
+            rows.append(self._create_row(
+                row_type='Attribute',
+                level=level + 1,
+                sort_order=attr.get('sort_order', 0),
+                area_name=area_name,
+                category_path=catpath,
+                category_name=category_name,
+                attribute_name=attr.get('name', ''),
+                data_type=datatype,
+                unit=attr.get('unit', ''),
+                is_required='TRUE' if attr.get('is_required', False) else 'FALSE',
+                validation_type=vtype,
+                default_value=attr.get('default_value', ''),
+                text_options=text_options,
+                validation_max='',
+                description=attr.get('description', ''),
+                depends_on=parent_slug,
+                when_value=when_value,
+            ))
+        
+        # Add fallback row if not present
+        if '*' not in options_map:
+            rows.append(self._create_row(
+                row_type='Attribute',
+                level=level + 1,
+                sort_order=attr.get('sort_order', 0),
+                area_name=area_name,
+                category_path=catpath,
+                category_name=category_name,
+                attribute_name=attr.get('name', ''),
+                data_type=datatype,
+                unit=attr.get('unit', ''),
+                is_required='TRUE' if attr.get('is_required', False) else 'FALSE',
+                validation_type=vtype,
+                default_value=attr.get('default_value', ''),
+                text_options='',
+                validation_max='',
+                description=attr.get('description', ''),
+                depends_on=parent_slug,
+                when_value='*',
+            ))
+        
+        return rows
+
+    def _parse_validation_rules(self, vr) -> Dict:
+        """Parse validation_rules, handling double-escaped JSON."""
+        if isinstance(vr, str):
+            try:
+                vr = json.loads(vr)
+                if isinstance(vr, str):
+                    vr = json.loads(vr)
+            except Exception:
+                vr = {}
+        if not isinstance(vr, dict):
+            vr = {}
+        return vr
+
+    def _extract_text_options(self, vr: Dict, datatype: str) -> str:
+        """Extract text options from validation rules."""
+        if datatype != 'text':
+            return ''
+        opt_list = vr.get('enum') or vr.get('suggest') or vr.get('static_options')
+        if isinstance(opt_list, list):
+            return '|'.join([str(x) for x in opt_list if str(x).strip()])
+        return ''
+
     def _setup_headers(self, ws):
         headers = [
             'Type', 'Level', 'SortOrder', 'Area', 'CategoryPath', 'Category', 'AttributeName', 
-            'DataType', 'Unit', 'IsRequired', 'ValidationType', 'DefaultValue', 'ValidationMin', 
-            'ValidationMax', 'Description'
+            'DataType', 'Unit', 'IsRequired', 'ValidationType', 'DefaultValue', 'TextOptions', 
+            'ValidationMax', 'Description', 'DependsOn', 'WhenValue'
         ]
         for col_idx, header in enumerate(headers, start=1):
             cell = ws.cell(row=2, column=col_idx, value=header)
@@ -239,7 +327,7 @@ class EnhancedStructureExporter:
             cell.alignment = self.CENTER_ALIGN
             cell.border = self.THIN_BORDER
 
-        col_letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O']
+        col_letters = 'ABCDEFGHIJKLMNOPQ'
         for i, col in enumerate(col_letters, start=1):
             if col in self.HEADER_COMMENTS:
                 c = ws.cell(row=2, column=i)
@@ -248,32 +336,37 @@ class EnhancedStructureExporter:
                 comment.height = 150
                 c.comment = comment
 
-    def _populate_data(self, ws, df: pd.DataFrame):
-        for r, row in enumerate(df.itertuples(index=False), start=3):
-            values = list(row)
-            for c, val in enumerate(values, start=1):
+    def _populate_data(self, ws, rows: List[Dict]):
+        col_order = [
+            'Type', 'Level', 'SortOrder', 'Area', 'CategoryPath', 'Category', 'AttributeName',
+            'DataType', 'Unit', 'IsRequired', 'ValidationType', 'DefaultValue', 'TextOptions',
+            'ValidationMax', 'Description', 'DependsOn', 'WhenValue'
+        ]
+        
+        for r, row_data in enumerate(rows, start=3):
+            for c, col_name in enumerate(col_order, start=1):
+                val = row_data.get(col_name, '')
                 cell = ws.cell(row=r, column=c, value=val)
                 cell.border = self.THIN_BORDER
-                if c in (1, 2, 4):
+                
+                # Apply colors
+                if c in (1, 2, 4):  # A, B, D - pink
                     cell.fill = self.PINK_FILL
                     cell.alignment = self.CENTER_ALIGN if c != 4 else self.LEFT_ALIGN
-                elif c in (3, 5):
+                elif c in (3, 5):  # C, E - yellow
                     cell.fill = self.YELLOW_FILL
                     cell.alignment = self.CENTER_ALIGN if c == 3 else self.LEFT_ALIGN
-                else:
+                elif c in (16, 17):  # P, Q - green (NEW)
+                    cell.fill = self.GREEN_FILL
+                    cell.alignment = self.LEFT_ALIGN
+                else:  # blue
                     cell.fill = self.BLUE_FILL
-                    cell.alignment = self.LEFT_ALIGN if c in (6, 7, 12, 15) else self.CENTER_ALIGN
+                    cell.alignment = self.LEFT_ALIGN if c in (6, 7, 12, 13, 15) else self.CENTER_ALIGN
 
-            # Level is already calculated in data - just ensure it's set correctly
-            # Column B (2) = Level, already has value from DataFrame
-            ws.cell(r, 2).fill = self.PINK_FILL
-            ws.cell(r, 2).alignment = self.CENTER_ALIGN
-
-            # Area formula - extract first part before " > "
+            # Area formula
             area_formula = f'=IFERROR(LEFT(E{r},FIND(" > ",E{r})-1),E{r})'
             ws.cell(r, 4).value = area_formula
             ws.cell(r, 4).fill = self.PINK_FILL
-            ws.cell(r, 4).alignment = self.LEFT_ALIGN
 
     def _add_data_validations(self, ws):
         maxrow = max(ws.max_row, 100)
@@ -290,186 +383,120 @@ class EnhancedStructureExporter:
         ws.add_data_validation(required_dv)
         required_dv.add(f'J3:J{maxrow}')
 
-        # Dropdown excludes suggest; suggest is the default.
-        vtype_dv = DataValidation(type='list', formula1='"none,enum"', allow_blank=True)
+        vtype_dv = DataValidation(type='list', formula1='"suggest,enum,none"', allow_blank=True)
         ws.add_data_validation(vtype_dv)
         vtype_dv.add(f'K3:K{maxrow}')
 
     def _setup_column_groups(self, ws):
-        """Setup column grouping for collapsible sections.
-        
-        Groups (summary column to the LEFT - summaryRight=False):
-        - B (Level) - collapsible
-        - D (Area) - collapsible  
-        - F (Category) - collapsible
-        - I-N (Unit through ValidationMax) - collapsible as one group
-        """
-        # Set outline properties: summary columns are to the LEFT of detail
         ws.sheet_properties.outlinePr = Outline(summaryRight=False)
-        
-        # Group individual columns by setting outlineLevel
-        ws.column_dimensions['B'].outlineLevel = 1  # Level
-        ws.column_dimensions['D'].outlineLevel = 1  # Area
-        ws.column_dimensions['F'].outlineLevel = 1  # Category
-        
-        # Group columns I-N together (Unit, IsRequired, ValidationType, DefaultValue, ValidationMin, ValidationMax)
+        ws.column_dimensions['B'].outlineLevel = 1
+        ws.column_dimensions['D'].outlineLevel = 1
+        ws.column_dimensions['F'].outlineLevel = 1
         for col in ['I', 'J', 'K', 'L', 'M', 'N']:
             ws.column_dimensions[col].outlineLevel = 1
 
     def _autosize_columns(self, ws):
-        for col in ws.columns:
-            col_letter = col[0].column_letter
-            maxlen = 0
-            for cell in col:
-                if cell.value is None:
-                    continue
-                maxlen = max(maxlen, len(str(cell.value)))
-            if col_letter in ('A', 'B', 'C', 'D'):
-                ws.column_dimensions[col_letter].width = 10
-            else:
-                ws.column_dimensions[col_letter].width = min(max(10, maxlen + 2), 60)
+        col_widths = {
+            'A': 10, 'B': 8, 'C': 10, 'D': 10, 'E': 50, 'F': 12, 'G': 18,
+            'H': 10, 'I': 8, 'J': 10, 'K': 14, 'L': 12, 'M': 45,
+            'N': 12, 'O': 25, 'P': 15, 'Q': 12
+        }
+        for col, width in col_widths.items():
+            ws.column_dimensions[col].width = width
 
     def _add_help_sheet(self, wb: Workbook):
         ws = wb.create_sheet('Help')
         
-        # Title
-        title = 'EVENTS TRACKER - Structure Import/Export Guide'
+        title = 'EVENTS TRACKER - Structure Import/Export Guide V5'
         ws.cell(1, 1, title).font = Font(bold=True, size=14, color='FFFFFF')
         ws.cell(1, 1).fill = self.HEADER_FILL
         
         lines = [
             '',
             '═══════════════════════════════════════════════════════════════════',
-            '📋 COLUMN REFERENCE',
+            '📋 COLUMN REFERENCE (V5 - with Dependencies)',
             '═══════════════════════════════════════════════════════════════════',
             '',
             '🟪 PINK COLUMNS (Auto-calculated / Read-only):',
-            '   A - Type: Area, Category, or Attribute. Do NOT change for existing rows.',
-            '   B - Level: Auto-calculated from CategoryPath depth. NOT required in upload - will be auto-filled on download.',
-            '   D - Area: Auto-extracted from CategoryPath (formula). Read-only.',
+            '   A - Type: Area, Category, or Attribute',
+            '   B - Level: Auto-calculated from CategoryPath depth',
+            '   D - Area: Auto-extracted from CategoryPath',
             '',
             '🟨 YELLOW COLUMNS (Key identifiers - Edit ONLY for NEW rows):',
-            '   C - SortOrder: Position within parent. Edit to change display order.',
-            '   E - CategoryPath: KEY identifier using " > " separator.',
+            '   C - SortOrder: Position within parent',
+            '   E - CategoryPath: KEY identifier using " > " separator',
             '       ⚠️ For EXISTING rows DO NOT CHANGE - creates duplicates!',
             '',
             '🟦 BLUE COLUMNS (Freely editable):',
-            '   F  - Category: Must match the LAST part of CategoryPath.',
-            '   G  - AttributeName: Name of the attribute (only for Attribute rows).',
-            '   H  - DataType: number, text, datetime, boolean, link, image.',
-            '   I  - Unit: Measurement unit (kg, hours, EUR, km, bpm, %, etc.).',
-            '   J  - IsRequired: TRUE or FALSE.',
-            '   K  - ValidationType: Controls validation behavior:',
-            '        • suggest (default for text): free text + optional suggestions from M',
-            '        • enum: STRICT - only values from M are allowed',
-            '        • none: no validation/suggestions',
-            '   L  - DefaultValue: Default value for new events.',
-            '   M  - ValidationMin (number) OR TextOptions (text).',
-            '        For text: pipe-separated list e.g. Run|Hiking|Cycling',
-            '   N  - ValidationMax: Maximum allowed value (number only).',
-            '   O  - Description: Documentation / notes (recommended).',
+            '   F  - Category: Must match the LAST part of CategoryPath',
+            '   G  - AttributeName: Name of the attribute',
+            '   H  - DataType: number, text, datetime, boolean, link, image',
+            '   I  - Unit: Measurement unit (kg, min, EUR, km...)',
+            '   J  - IsRequired: TRUE or FALSE',
+            '   K  - ValidationType: suggest (default), enum, none',
+            '   L  - DefaultValue: Default value for new events',
+            '   M  - TextOptions: Pipe-separated options (Run|Walk|Cycle)',
+            '        For numbers: minimum value',
+            '   N  - ValidationMax: Maximum value (number only)',
+            '   O  - Description: Documentation / notes',
+            '',
+            '🟢 GREEN COLUMNS (NEW - Conditional Dropdowns):',
+            '   P  - DependsOn: Slug of parent attribute that controls this dropdown',
+            '        Must be in the SAME category',
+            '   Q  - WhenValue: Value of parent attribute for these options',
+            '        • Specific value: "Upp", "Low", "Core"',
+            '        • Wildcard "*": Fallback for undefined parent values',
             '',
             '═══════════════════════════════════════════════════════════════════',
-            '🎨 COLOR CODING (3 Colors):',
+            '📌 HOW TO USE DEPENDENCIES (Conditional Dropdowns)',
+            '═══════════════════════════════════════════════════════════════════',
+            '',
+            'Use case: exercise_name options depend on strength_type selection',
+            '',
+            'Step 1: Define the parent attribute (no DependsOn)',
+            '| AttributeName  | TextOptions    | DependsOn | WhenValue |',
+            '| strength_type  | Upp|Low|Core   |           |           |',
+            '',
+            'Step 2: Add child rows for EACH parent value',
+            '| AttributeName  | TextOptions              | DependsOn      | WhenValue |',
+            '| exercise_name  | pull.m|biceps|triceps    | strength_type  | Upp       |',
+            '| exercise_name  | squat-bw|iskoraci        | strength_type  | Low       |',
+            '| exercise_name  | plank|leg.raises         | strength_type  | Core      |',
+            '| exercise_name  |                          | strength_type  | *         |',
+            '',
+            'Rules:',
+            '• Same AttributeName can appear MULTIPLE TIMES with different WhenValue',
+            '• DependsOn must reference attribute in SAME category',
+            '• WhenValue = "*" is fallback (empty TextOptions = free text input)',
+            '• All rows for same attribute should have same SortOrder',
+            '• Import process merges all rows into single validation_rules JSON',
+            '',
+            '═══════════════════════════════════════════════════════════════════',
+            '🎨 COLOR CODING (4 Colors)',
             '═══════════════════════════════════════════════════════════════════',
             '',
             '🟪 PINK = Auto-calculated, READ-ONLY',
-            '   Columns: Type (A), Level (B), Area (D)',
-            '   → Do NOT edit these columns',
-            '',
-            '🟨 YELLOW = KEY IDENTIFIER - Edit ONLY for NEW rows',
-            '   Columns: SortOrder (C), CategoryPath (E)',
-            '   → For EXISTING rows: DO NOT CHANGE!',
-            '   → For NEW rows: Set the values correctly',
-            '   ⚠️ Changing CategoryPath for existing items creates DUPLICATES!',
-            '',
+            '🟨 YELLOW = KEY IDENTIFIER - Edit carefully',
             '🟦 BLUE = Freely EDITABLE',
-            '   Columns: Category (F), AttributeName (G), DataType (H),',
-            '            Unit (I), IsRequired (J), ValidationType (K), DefaultValue (L),',
-            '            ValidationMin (M), ValidationMax (N), Description (O)',
-            '   → Edit these freely for existing or new rows',
+            '🟢 GREEN = DEPENDENCIES (NEW in V5)',
             '',
             '═══════════════════════════════════════════════════════════════════',
-            '📌 SCENARIO 1: Add New Category with Attributes',
+            '✅ VALIDATION TYPES',
             '═══════════════════════════════════════════════════════════════════',
             '',
-            'You only need to add NEW rows - not the entire structure!',
-            '',
-            "Example - Add 'Novi auto' category under 'Finance > Domacinstvo > Automobili':",
-            '',
-            "Row 1: Type=Category, CategoryPath='Finance > Domacinstvo > Automobili > Novi auto',",
-            "       Category='Novi auto', SortOrder=3",
-            "Row 2: Type=Attribute, CategoryPath='Finance > Domacinstvo > Automobili > Novi auto',",
-            "       Category='Novi auto', AttributeName='Registracija', DataType='number'",
-            "Row 3: Type=Attribute, CategoryPath='Finance > Domacinstvo > Automobili > Novi auto',",
-            "       Category='Novi auto', AttributeName='Gorivo', DataType='number'",
-            '',
-            '⚠️ IMPORTANT: Category column (F) MUST match the LAST part of CategoryPath!',
-            '',
-            '═══════════════════════════════════════════════════════════════════',
-            '📌 SCENARIO 2: Edit Existing Item Properties',
-            '═══════════════════════════════════════════════════════════════════',
-            '',
-            '1. Find the row by CategoryPath',
-            '2. Edit ONLY the BLUE columns (Description, Unit, DataType, etc.)',
-            '3. DO NOT change CategoryPath or SortOrder!',
-            '4. Upload the file',
-            '',
-            '═══════════════════════════════════════════════════════════════════',
-            '📌 SCENARIO 3: Change Display Order',
-            '═══════════════════════════════════════════════════════════════════',
-            '',
-            'To reorder items within the same parent:',
-            '1. Edit the SortOrder values (column C)',
-            '2. Use consecutive numbers (1, 2, 3...)',
-            '3. Items with lower SortOrder appear first',
-            '',
-            '═══════════════════════════════════════════════════════════════════',
-            '⚠️ COMMON MISTAKES TO AVOID:',
-            '═══════════════════════════════════════════════════════════════════',
-            '',
-            "❌ MISTAKE 1: Category doesn't match CategoryPath",
-            "   Wrong: Path='Area > Cat > SubCat', Category='DifferentName'",
-            "   Right: Path='Area > Cat > SubCat', Category='SubCat'",
-            '   → Category MUST be the LAST part of the path!',
-            '',
-            '❌ MISTAKE 2: Changing CategoryPath for existing item',
-            '   This creates a NEW item instead of updating the existing one!',
-            '   → To rename: Edit Category column (F), keep path unchanged',
-            '   → To move: Use app UI instead (safer)',
-            '',
-            '❌ MISTAKE 3: Missing parent in hierarchy',
-            "   Can't add 'Area > Cat > SubCat' if 'Area > Cat' doesn't exist!",
-            '   → Add parent categories first, or use existing parents',
-            '',
-            '❌ MISTAKE 4: Duplicate CategoryPath in upload',
-            '   Each path must be unique in the file!',
-            '',
-            '❌ MISTAKE 5: Wrong Attribute parent reference',
-            '   Attributes must point to existing Category via CategoryPath',
-            '',
-            '═══════════════════════════════════════════════════════════════════',
-            '✅ VALIDATION TYPES EXPLAINED',
-            '═══════════════════════════════════════════════════════════════════',
-            '',
-            'For TEXT attributes (DataType=text):',
-            '',
-            '• suggest (default): Free text input with optional suggestions',
-            '  - User can type anything',
-            '  - If ValidationMin has values (e.g., Run|Walk|Cycle), they appear as suggestions',
-            '  - Good for: comments, notes, activity types with common values',
+            'For TEXT attributes:',
+            '• suggest (default): Free text + optional suggestions from TextOptions',
+            '  User CAN type values not in the list',
+            '  User CAN add new values through "Other..." option',
             '',
             '• enum: Strict dropdown - ONLY listed values allowed',
-            '  - User must pick from ValidationMin list',
-            '  - Good for: status fields, fixed categories',
+            '  User must pick from TextOptions list',
             '',
-            '• none: No validation, no suggestions',
-            '  - Pure free text',
-            '  - Good for: unique descriptions, free-form notes',
+            '• none: No validation, no suggestions - pure free text',
             '',
             'For NUMBER attributes:',
-            '  - ValidationMin = minimum allowed value',
-            '  - ValidationMax = maximum allowed value',
+            '  TextOptions (M) = minimum value',
+            '  ValidationMax (N) = maximum value',
             '',
         ]
         
@@ -477,4 +504,4 @@ class EnhancedStructureExporter:
             ws.cell(i, 1, t)
         
         ws.freeze_panes = 'A2'
-        ws.column_dimensions['A'].width = 110
+        ws.column_dimensions['A'].width = 85
