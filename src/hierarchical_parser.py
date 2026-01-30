@@ -1,4 +1,4 @@
-"""Hierarchical Parser v5 - WITH DEPENDENCIES SUPPORT_
+"""Hierarchical Parser v5 - WITH DEPENDENCIES SUPPORT
 
 CHANGES FROM V4 (2026-01-30):
 - Added support for DependsOn column (P) - references parent attribute slug
@@ -102,23 +102,37 @@ class HierarchicalParser:
         """Load existing structure from database."""
         structure = {'areas': {}, 'categories': {}, 'attributes': {}}
         try:
-            areas = self.client.table('areas').select('*').eq('user_id', self.user_id).execute().data or []
+            # Load areas
+            areas_response = self.client.table('areas').select('*').eq('user_id', self.user_id).execute()
+            areas = getattr(areas_response, 'data', None) or []
             for a in areas:
-                structure['areas'][(a.get('name') or '').lower()] = a
+                name = a.get('name') if isinstance(a, dict) else None
+                if name:
+                    structure['areas'][name.lower()] = a
 
-            cats = self.client.table('categories').select('*').eq('user_id', self.user_id).execute().data or []
+            # Load categories
+            cats_response = self.client.table('categories').select('*').eq('user_id', self.user_id).execute()
+            cats = getattr(cats_response, 'data', None) or []
             
             for c in cats:
-                path = self._build_category_path(c, cats)
-                structure['categories'][path.lower()] = c
+                if isinstance(c, dict):
+                    path = self._build_category_path(c, cats)
+                    structure['categories'][path.lower()] = c
 
-            attrs = self.client.table('attribute_definitions').select('*').eq('user_id', self.user_id).execute().data or []
+            # Load attributes
+            attrs_response = self.client.table('attribute_definitions').select('*').eq('user_id', self.user_id).execute()
+            attrs = getattr(attrs_response, 'data', None) or []
             for a in attrs:
-                key = f"{a['category_id']}::{(a.get('name') or '').lower()}"
-                structure['attributes'][key] = a
+                if isinstance(a, dict):
+                    cat_id = a.get('category_id') or a.get('categoryid') or ''
+                    name = a.get('name') or ''
+                    key = f"{cat_id}::{name.lower()}"
+                    structure['attributes'][key] = a
 
         except Exception as e:
-            self.changes.validation_errors.append(ValidationError(0, 'Database', f'Failed to load existing structure: {e}'))
+            import traceback
+            error_detail = f'{type(e).__name__}: {e}'
+            self.changes.validation_errors.append(ValidationError(0, 'Database', f'Failed to load existing structure: {error_detail}'))
         return structure
 
     def _build_category_path(self, category: Dict, all_categories: List[Dict]) -> str:
