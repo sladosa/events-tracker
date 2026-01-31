@@ -492,6 +492,7 @@ class HierarchicalParser:
                 self.changes.updated_attributes.append({
                     'id': existing['id'],
                     'name': attrname,
+                    'category_path': catpath,
                     'updates': updates,
                     'excel_row': first_excelrow
                 })
