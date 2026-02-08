@@ -1779,101 +1779,70 @@ def add_new_category(
                 return False, f"❌ Category '{name}' already exists!"
         return False, f"❌ Error adding category: {error_msg}"
 
-
-def insert_category_between(
+def remove_category_between(
     client,
     user_id: str,
-    target_category_id: str,
-    name: str,
-    description: str = ""
+    category_id: str
 ) -> Tuple[bool, str]:
-    """
-    Insert new category BETWEEN a category and its parent.
-    
-    v1.12.3 - Complete rewrite for correct "Insert Parent" behavior.
-    
-    This inserts a NEW category that becomes the new parent of the target category.
-    The target category (and all its children) move down one level.
-    
-    Example:
-        BEFORE: Automobili > A_test > A_test2
-        INSERT "SSL" before "A_test"
-        AFTER:  Automobili > SSL > A_test > A_test2
-        
-    The operation:
-    1. Create SSL with parent = Automobili (A_test's old parent)
-    2. Change A_test's parent to SSL
-    3. Increment level for A_test and ALL its descendants
-    
-    Args:
-        client: Supabase client
-        user_id: User ID
-        target_category_id: Category that will become child of new category
-        name: New category name
-        description: Category description
-    
-    Returns:
-        Tuple of (success, message)
-    """
     try:
-        # 1. Get target category info
-        target = client.table('categories')\
-            .select('id, name, parent_category_id, area_id, level, sort_order')\
-            .eq('id', target_category_id)\
-            .eq('user_id', user_id)\
-            .single().execute()
+        # Get category
+        response = (client.table('categories')
+                    .select('id,name,slug,path,level')
+                    .eq('id', category_id)
+                    .eq('userid', user_id)
+                    .single()
+                    .execute())
+        if not response.data:
+            return False, "Category not found"
+        cat = response.data
+        cat_name = cat['name']
+        cat_path = cat['path']  # ltree: 'Fitness.Activity.test'
+        cat_level = cat['level']
         
-        if not target.data:
-            return False, "❌ Target category not found"
+        # Parse parent_path (remove last .name)
+        path_parts = str(cat_path).split('.')
+        if len(path_parts) <= 1:
+            return False, f"'{cat_name}' is root (path='{cat_path}')"
+        parent_path = '.'.join(path_parts[:-1])
         
-        target_name = target.data['name']
-        old_parent_id = target.data['parent_category_id']
-        area_id = target.data['area_id']
-        target_level = target.data['level']
-        target_sort_order = target.data['sort_order']
+        # Get direct children (path like cat_path.* )
+        children = (client.table('categories')
+                    .select('id,name,path')
+                    .eq('userid', user_id)
+                    .lte('level', cat_level + 5)  # Limit depth
+                    .execute())  # Filter children by path later
+        children_data = [c for c in children.data if str(c['path']).startswith(str(cat_path) + '.') ]
         
-        # 2. Generate new category data
-        new_id = str(uuid.uuid4())
-        slug = generate_slug(name)
+        promoted_children = []
+        for child in children_data:
+            child_id = child['id']
+            child_path = child['path']
+            # New path: parent_path + child_name (e.g. Fitness.Activity.Gym)
+            child_name_parts = str(child_path).split('.')[-1:]
+            new_path = parent_path + '.' + '.'.join(child_name_parts)
+            # Update path + level
+            client.table('categories').update({
+                'path': new_path,
+                'level': len(new_path.split('.')) 
+            }).eq('id', child_id).eq('userid', user_id).execute()
+            promoted_children.append(child['name'])
         
-        new_category = {
-            'id': new_id,
-            'user_id': user_id,
-            'area_id': area_id,
-            'parent_category_id': old_parent_id,  # Takes target's old parent
-            'name': name,
-            'slug': slug,
-            'description': description if description else None,
-            'level': target_level,  # Same level as target (will push target down)
-            'sort_order': target_sort_order  # Same sort order as target
-        }
+        # Delete direct attrs/events/category
+        client.table('attributedefinitions').delete().eq('categoryid', category_id).eq('userid', user_id).execute()
+        client.table('events').delete().eq('categoryid', category_id).eq('userid', user_id).execute()
+        client.table('categories').delete().eq('id', category_id).eq('userid', user_id).execute()
         
-        # 3. Insert new category
-        result = client.table('categories').insert(new_category).execute()
+        if 'loadallstructuredata' in globals():
+            loadallstructuredata.clear()
         
-        if not result.data or len(result.data) == 0:
-            return False, "❌ Failed to create new category"
-        
-        # 4. Update target category - new parent is the inserted category
-        client.table('categories')\
-            .update({
-                'parent_category_id': new_id,
-                'level': target_level + 1
-            })\
-            .eq('id', target_category_id)\
-            .eq('user_id', user_id)\
-            .execute()
-        
-        # 5. Recursively increment level for ALL descendants of target
-        _increment_descendant_levels(client, user_id, target_category_id)
-        
-        # Clear cache
-        load_all_structure_data.clear()
-        
-        return True, f"✅ Inserted '{name}' above '{target_name}'"
+        count = len(promoted_children)
+        msg = f"Removed '{cat_name}' (path='{cat_path}')"
+        if count:
+            msg += f", promoted {count}: {', '.join(promoted_children)}"
+        return True, msg
         
     except Exception as e:
-        return False, f"❌ Error inserting category: {str(e)}"
+        return False, f"Error: {str(e)}"
 
 
 def _increment_descendant_levels(client, user_id: str, parent_id: str):
