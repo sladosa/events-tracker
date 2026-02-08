@@ -1909,96 +1909,93 @@ def _increment_descendant_levels(client, user_id: str, parent_id: str):
         # Recursively process this child's children
         _increment_descendant_levels(client, user_id, child['id'])
 
-
-def remove_category_between(
-    client,
-    user_id: str,
-    category_id: str
-) -> Tuple[bool, str]:
+def removecategorybetween(client, userid: str, categoryid: str) -> Tuple[bool, str]:
     """
-    Remove category and promote its children to parent level.
-    FIXED: Removed grandchildren check to allow multi-level subtrees.
-    Promotes ALL direct children (handles multiple like Gym + Outdoor).
+    FIXED version: Removes middle category, promotes ALL children.
     """
     try:
+        print(f"DEBUG: Starting remove for categoryid={categoryid}")  # TEMP debug
         # 1. Get category info
         category = (client.table('categories')
-                    .select('id, name, parentcategoryid, areaid, level')
+                    .select('id,name,parentcategoryid,areaid,level')
                     .eq('id', categoryid)
                     .eq('userid', userid)
                     .single()
                     .execute())
         if not category.data:
             return False, "Category not found"
-        
         cat = category.data
         catname = cat['name']
         parentid = cat['parentcategoryid']
         catlevel = cat['level']
         areaid = cat['areaid']
+        print(f"DEBUG: Category {catname}, parent={parentid}")  # TEMP
         
-        # 2. Get direct children (Gym, Outdoor, etc.)
+        # 2. Get direct children
         children = (client.table('categories')
-                    .select('id, name')
+                    .select('id,name')
                     .eq('parentcategoryid', categoryid)
                     .eq('userid', userid)
                     .execute())
         childrendata = children.data or []
         childrencount = len(childrendata)
+        print(f"DEBUG: Found {childrencount} children")  # TEMP
         
-        # Name conflict check (zadržano za sigurnost)
+        # Name conflict check
+        existingnames = set()
         if parentid:
-            existingsiblings = (client.table('categories')
-                                .select('name')
-                                .eq('parentcategoryid', parentid)
-                                .eq('userid', userid)
-                                .neq('id', categoryid)
-                                .execute())
+            siblings = (client.table('categories')
+                        .select('name')
+                        .eq('parentcategoryid', parentid)
+                        .eq('userid', userid)
+                        .neq('id', categoryid)
+                        .execute())
         else:
-            existingsiblings = (client.table('categories')
-                                .select('name')
-                                .eq('areaid', areaid)
-                                .eq('userid', userid)
-                                .is_('parentcategoryid', None)
-                                .neq('id', categoryid)
-                                .execute())
-        existingnames = set(s['name'] for s in existingsiblings.data or [])
+            siblings = (client.table('categories')
+                        .select('name')
+                        .eq('areaid', areaid)
+                        .eq('userid', userid)
+                        .is_('parentcategoryid', None)
+                        .neq('id', categoryid)
+                        .execute())
+        existingnames = {s['name'] for s in siblings.data or []}
         
         for child in childrendata:
             if child['name'] in existingnames:
-                return False, f"Cannot promote {child['name']} - name conflict under target parent"
+                return False, f"Name conflict: {child['name']} already exists under parent"
         
-        # Promote ALL children (Gym keeps Cardio/Strength)
+        # Promote children
         promotedchildren = []
         for child in childrendata:
-            updateresult = (client.table('categories')
-                            .update({
-                                'parentcategoryid': parentid,
-                                'level': catlevel  # Level removed category
-                            })
-                            .eq('id', child['id'])
-                            .eq('userid', userid)
-                            .execute())
-            if not updateresult.data:
+            result = (client.table('categories')
+                      .update({'parentcategoryid': parentid, 'level': catlevel})
+                      .eq('id', child['id'])
+                      .eq('userid', userid)
+                      .execute())
+            if result.data:
+                promotedchildren.append(child['name'])
+            else:
                 return False, f"Failed to promote {child['name']}"
-            promotedchildren.append(child['name'])
         
-        # Delete direct attributes/events (ne dira djecu)
+        # Delete direct deps
         client.table('attributedefinitions').delete().eq('categoryid', categoryid).eq('userid', userid).execute()
         client.table('events').delete().eq('categoryid', categoryid).eq('userid', userid).execute()
-        
-        # Delete category
         client.table('categories').delete().eq('id', categoryid).eq('userid', userid).execute()
         
-        # Clear cache
+        # Clear cache if exists
         if 'loadallstructuredata' in globals():
             loadallstructuredata.clear()
         
-        msg = f"Removed '{catname}' and promoted {childrencount} children: {', '.join(promotedchildren)}"
+        msg = f"Removed '{catname}', promoted {len(promotedchildren)} children: {', '.join(promotedchildren)}"
+        print(f"DEBUG: Success - {msg}")  # TEMP
         return True, msg
         
+    except NameError as ne:
+        print(f"DEBUG NameError: {ne}")  # TEMP
+        return False, f"Code error (NameError): {str(ne)} - check function params"
     except Exception as e:
-        return False, f"Error removing category: {str(e)}"
+        print(f"DEBUG Error: {str(e)}")  # TEMP
+        return False, f"DB error: {str(e)}"
 
 
 
