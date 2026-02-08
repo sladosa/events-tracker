@@ -869,37 +869,39 @@ def check_category_has_dependencies(client, category_id: str, user_id: str) -> T
     
     Returns:
         Tuple of (has_dependencies, warning_message)
+        FIXED: Path-based deps count for preview.
     """
     try:
-        # Check attributes
-        attr_result = client.table('attribute_definitions').select('id').eq('category_id', category_id).eq('user_id', user_id).execute()
-        num_attributes = len(attr_result.data) if attr_result.data else 0
+        cat_resp = client.table('categories').select('id,name,path').eq('id', categoryid).eq('userid', userid).single().execute()
+        if not cat_resp.data:
+            return False, ""
+        cat_path = str(cat_resp.data['path'])
         
-        # Check events
-        event_result = client.table('events').select('id').eq('category_id', category_id).eq('user_id', user_id).execute()
-        num_events = len(event_result.data) if event_result.data else 0
+        # Attributes
+        attrs_resp = client.table('attributedefinitions').select('count', raw={'count': 'count(*)'}).eq('categoryid', categoryid).eq('userid', userid).single().execute()
+        attrs_count = attrs_resp.data[0]['count'] if attrs_resp.data else 0
         
-        # Check child categories
-        child_result = client.table('categories').select('id').eq('parent_category_id', category_id).eq('user_id', user_id).execute()
-        num_children = len(child_result.data) if child_result.data else 0
+        # Events
+        events_resp = client.table('events').select('count', raw={'count': 'count(*)'}).eq('categoryid', categoryid).eq('userid', userid).single().execute()
+        events_count = events_resp.data[0]['count'] if events_resp.data else 0
         
-        if num_attributes > 0 or num_events > 0 or num_children > 0:
-            msg = f"⚠️ **WARNING:** This category has"
-            parts = []
-            if num_children > 0:
-                parts.append(f"{num_children} child categories")
-            if num_attributes > 0:
-                parts.append(f"{num_attributes} attributes")
-            if num_events > 0:
-                parts.append(f"{num_events} events")
-            msg += " " + ", ".join(parts) + ". Deleting it will CASCADE DELETE all of them!"
-            return True, msg
+        # Children (path prefix)
+        all_resp = client.table('categories').select('count', raw={'count': 'count(*)'}).eq('userid', userid).execute()
+        children_count = sum(1 for c in all_resp.data if str(c['path']).startswith(cat_path + '.'))
         
+        parts = []
+        if children_count:
+            parts.append(f"{children_count} child categories")
+        if attrs_count:
+            parts.append(f"{attrs_count} attributes")
+        if events_count:
+            parts.append(f"{events_count} events")
+        
+        if parts:
+            return True, f"Delete {' & '.join(parts)}"
         return False, ""
-    
     except Exception as e:
-        return False, f"Error checking dependencies: {str(e)}"
-
+        return False, f"Preview error: {str(e)}"
 
 # ============================================
 # CACHED DATA LOADING
@@ -1784,65 +1786,53 @@ def remove_category_between(
     user_id: str,
     category_id: str
 ) -> Tuple[bool, str]:
+    """
+    FULL GENERAL: Remove any middle layer using PATH ONLY.
+    Fitness.Activity.test → delete test
+    Fitness.Activity.test.Gym.Cardio → Fitness.Activity.Gym.Cardio
+    """
     try:
-        # Get category
-        response = (client.table('categories')
-                    .select('id,name,slug,path,level')
-                    .eq('id', category_id)
-                    .eq('userid', user_id)
-                    .single()
-                    .execute())
-        if not response.data:
+        cat_resp = client.table('categories').select('id,name,path,level').eq('id', category_id).eq('userid', user_id).single().execute()
+        if not cat_resp.data:
             return False, "Category not found"
-        cat = response.data
+        cat = cat_resp.data
         cat_name = cat['name']
-        cat_path = cat['path']  # ltree: 'Fitness.Activity.test'
-        cat_level = cat['level']
+        cat_path_str = str(cat['path'])
+        path_parts = cat_path_str.split('.')
+        if len(path_parts) < 2:
+            return False, f"Root '{cat_name}' (path='{cat_path_str}') – use regular delete"
+        parent_path_str = '.'.join(path_parts[:-1])
         
-        # Parse parent_path (remove last .name)
-        path_parts = str(cat_path).split('.')
-        if len(path_parts) <= 1:
-            return False, f"'{cat_name}' is root (path='{cat_path}')"
-        parent_path = '.'.join(path_parts[:-1])
+        # Direct children: path starts with cat_path + '.'
+        all_cats_resp = client.table('categories').select('id,name,path,level').eq('userid', user_id).execute()
+        children_data = [c for c in all_cats_resp.data if str(c['path']).startswith(cat_path_str + '.') ]
         
-        # Get direct children (path like cat_path.* )
-        children = (client.table('categories')
-                    .select('id,name,path')
-                    .eq('userid', user_id)
-                    .lte('level', cat_level + 5)  # Limit depth
-                    .execute())  # Filter children by path later
-        children_data = [c for c in children.data if str(c['path']).startswith(str(cat_path) + '.') ]
-        
-        promoted_children = []
+        promoted = []
         for child in children_data:
-            child_id = child['id']
-            child_path = child['path']
-            # New path: parent_path + child_name (e.g. Fitness.Activity.Gym)
-            child_name_parts = str(child_path).split('.')[-1:]
-            new_path = parent_path + '.' + '.'.join(child_name_parts)
-            # Update path + level
-            client.table('categories').update({
-                'path': new_path,
-                'level': len(new_path.split('.')) 
-            }).eq('id', child_id).eq('userid', user_id).execute()
-            promoted_children.append(child['name'])
+            child_path_str = str(child['path'])
+            # Suffix after cat_name (Gym.Cardio → Gym.Cardio)
+            suffix_start = len(path_parts)
+            child_suffix = '.'.join(child_path_str.split('.')[suffix_start:])
+            new_path_str = parent_path_str + ('.' + child_suffix if child_suffix else '')
+            new_level = len(new_path_str.split('.'))
+            
+            client.table('categories').update({'path': new_path_str, 'level': new_level}).eq('id', child['id']).eq('userid', user_id).execute()
+            promoted.append(child['name'])
         
-        # Delete direct attrs/events/category
+        # Delete
         client.table('attributedefinitions').delete().eq('categoryid', category_id).eq('userid', user_id).execute()
         client.table('events').delete().eq('categoryid', category_id).eq('userid', user_id).execute()
         client.table('categories').delete().eq('id', category_id).eq('userid', user_id).execute()
+        loadallstructuredata.clear() if 'loadallstructuredata' in globals() else None
         
-        if 'loadallstructuredata' in globals():
-            loadallstructuredata.clear()
-        
-        count = len(promoted_children)
-        msg = f"Removed '{cat_name}' (path='{cat_path}')"
+        count = len(promoted)
+        msg = f"✅ Removed '{cat_name}'"
         if count:
-            msg += f", promoted {count}: {', '.join(promoted_children)}"
+            msg += f" | ↑ {count} children: {', '.join(promoted)}"
         return True, msg
         
     except Exception as e:
-        return False, f"Error: {str(e)}"
+        return False, f"❌ {str(e)}"
 
 
 def _increment_descendant_levels(client, user_id: str, parent_id: str):
