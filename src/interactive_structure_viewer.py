@@ -1909,94 +1909,95 @@ def _increment_descendant_levels(client, user_id: str, parent_id: str):
         # Recursively process this child's children
         _increment_descendant_levels(client, user_id, child['id'])
 
-def removecategorybetween(client, userid: str, categoryid: str) -> Tuple[bool, str]:
+def remove_category_between(
+    client,
+    user_id: str,
+    category_id: str
+) -> Tuple[bool, str]:
     """
-    FIXED version: Removes middle category, promotes ALL children.
+    FIXED: Removes middle layer "test", promotes ALL direct children (Gym, Outdoor).
+    Handles multi-children + subtrees (Gym keeps Cardio/Strength).
     """
     try:
-        print(f"DEBUG: Starting remove for categoryid={categoryid}")  # TEMP debug
+        print(f"DEBUG: Removing category_id={category_id}")  # TEMP - check console
+        
         # 1. Get category info
         category = (client.table('categories')
                     .select('id,name,parentcategoryid,areaid,level')
-                    .eq('id', categoryid)
-                    .eq('userid', userid)
+                    .eq('id', category_id)
+                    .eq('userid', user_id)
                     .single()
                     .execute())
         if not category.data:
             return False, "Category not found"
         cat = category.data
-        catname = cat['name']
-        parentid = cat['parentcategoryid']
-        catlevel = cat['level']
-        areaid = cat['areaid']
-        print(f"DEBUG: Category {catname}, parent={parentid}")  # TEMP
+        cat_name = cat['name']
+        parent_id = cat['parentcategoryid']
+        cat_level = cat['level']
+        area_id = cat['areaid']
         
-        # 2. Get direct children
+        # 2. Get direct children (Gym, Outdoor)
         children = (client.table('categories')
                     .select('id,name')
-                    .eq('parentcategoryid', categoryid)
-                    .eq('userid', userid)
+                    .eq('parentcategoryid', category_id)
+                    .eq('userid', user_id)
                     .execute())
-        childrendata = children.data or []
-        childrencount = len(childrendata)
-        print(f"DEBUG: Found {childrencount} children")  # TEMP
+        children_data = children.data or []
+        children_count = len(children_data)
+        print(f"DEBUG: {children_count} children found")  # TEMP
         
         # Name conflict check
-        existingnames = set()
-        if parentid:
+        existing_names = set()
+        if parent_id:
             siblings = (client.table('categories')
                         .select('name')
-                        .eq('parentcategoryid', parentid)
-                        .eq('userid', userid)
-                        .neq('id', categoryid)
+                        .eq('parentcategoryid', parent_id)
+                        .eq('userid', user_id)
+                        .neq('id', category_id)
                         .execute())
         else:
             siblings = (client.table('categories')
                         .select('name')
-                        .eq('areaid', areaid)
-                        .eq('userid', userid)
+                        .eq('areaid', area_id)
+                        .eq('userid', user_id)
                         .is_('parentcategoryid', None)
-                        .neq('id', categoryid)
+                        .neq('id', category_id)
                         .execute())
-        existingnames = {s['name'] for s in siblings.data or []}
+        existing_names = {s['name'] for s in siblings.data or []}
         
-        for child in childrendata:
-            if child['name'] in existingnames:
-                return False, f"Name conflict: {child['name']} already exists under parent"
+        for child in children_data:
+            if child['name'] in existing_names:
+                return False, f"Conflict: '{child['name']}' already under parent"
         
-        # Promote children
-        promotedchildren = []
-        for child in childrendata:
+        # Promote ALL children
+        promoted_children = []
+        for child in children_data:
             result = (client.table('categories')
-                      .update({'parentcategoryid': parentid, 'level': catlevel})
+                      .update({'parentcategoryid': parent_id, 'level': cat_level})
                       .eq('id', child['id'])
-                      .eq('userid', userid)
+                      .eq('userid', user_id)
                       .execute())
             if result.data:
-                promotedchildren.append(child['name'])
+                promoted_children.append(child['name'])
             else:
-                return False, f"Failed to promote {child['name']}"
+                return False, f"Failed promoting '{child['name']}'"
         
-        # Delete direct deps
-        client.table('attributedefinitions').delete().eq('categoryid', categoryid).eq('userid', userid).execute()
-        client.table('events').delete().eq('categoryid', categoryid).eq('userid', userid).execute()
-        client.table('categories').delete().eq('id', categoryid).eq('userid', userid).execute()
+        # Delete DIRECT attributes/events (children safe)
+        client.table('attributedefinitions').delete().eq('categoryid', category_id).eq('userid', user_id).execute()
+        client.table('events').delete().eq('categoryid', category_id).eq('userid', user_id).execute()
+        client.table('categories').delete().eq('id', category_id).eq('userid', user_id).execute()
         
-        # Clear cache if exists
+        # Clear cache
         if 'loadallstructuredata' in globals():
             loadallstructuredata.clear()
         
-        msg = f"Removed '{catname}', promoted {len(promotedchildren)} children: {', '.join(promotedchildren)}"
-        print(f"DEBUG: Success - {msg}")  # TEMP
+        msg = f"Removed '{cat_name}', promoted {len(promoted_children)}: {', '.join(promoted_children)}"
+        print(f"DEBUG SUCCESS: {msg}")  # TEMP
         return True, msg
         
-    except NameError as ne:
-        print(f"DEBUG NameError: {ne}")  # TEMP
-        return False, f"Code error (NameError): {str(ne)} - check function params"
     except Exception as e:
-        print(f"DEBUG Error: {str(e)}")  # TEMP
-        return False, f"DB error: {str(e)}"
-
+        print(f"DEBUG ERROR: {str(e)}")  # TEMP
+        return False, f"Error: {str(e)}"
 
 
 def add_new_attribute(
