@@ -2,9 +2,23 @@
 Events Tracker - Interactive Structure Viewer Module
 ====================================================
 Created: 2025-11-25 10:00 UTC
-Last Modified: 2025-01-11 16:30 UTC
+Last Modified: 2025-02-09 12:00 UTC
 Python: 3.11
-Version: 1.13.3 - HOTFIX: Text Input State Issue
+Version: 1.14.0 - FIX: Remove Between handles deep chains
+
+CHANGELOG v1.14.0 (Remove Between - Deep Chain Support):
+- 🐛 CRITICAL FIX: Remove Category Between now handles chains of ANY depth
+  - OLD: Blocked removal if children had sub-categories (grandchildren check)
+  - NEW: Recursively promotes children and decrements levels for all descendants
+  - Example: Fitness > Activity > test > Gym > Cardio/Strength
+    - Can now delete "test" → Fitness > Activity > Gym > Cardio/Strength
+- 🆕 NEW: _decrement_descendant_levels() helper function
+  - Recursively decrements level for all descendants after promotion
+  - Mirrors existing _increment_descendant_levels() used by insert_between
+- 🎨 IMPROVED: Impact preview now shows total descendants count
+  - Shows "1 child categories will be promoted (3 total in subtree)"
+- ✅ Keeps all safety checks: name conflict detection, proper error handling
+- 🔒 Maintains correct naming conventions (user_id, category_id, parent_category_id)
 
 CHANGELOG v1.13.3 (HOTFIX - Critical):
 - 🐛 CRITICAL FIX: Apply Changes button stayed disabled
@@ -869,39 +883,37 @@ def check_category_has_dependencies(client, category_id: str, user_id: str) -> T
     
     Returns:
         Tuple of (has_dependencies, warning_message)
-        FIXED: Path-based deps count for preview.
     """
     try:
-        cat_resp = client.table('categories').select('id,name,path').eq('id', categoryid).eq('userid', userid).single().execute()
-        if not cat_resp.data:
-            return False, ""
-        cat_path = str(cat_resp.data['path'])
+        # Check attributes
+        attr_result = client.table('attribute_definitions').select('id').eq('category_id', category_id).eq('user_id', user_id).execute()
+        num_attributes = len(attr_result.data) if attr_result.data else 0
         
-        # Attributes
-        attrs_resp = client.table('attributedefinitions').select('count', raw={'count': 'count(*)'}).eq('categoryid', categoryid).eq('userid', userid).single().execute()
-        attrs_count = attrs_resp.data[0]['count'] if attrs_resp.data else 0
+        # Check events
+        event_result = client.table('events').select('id').eq('category_id', category_id).eq('user_id', user_id).execute()
+        num_events = len(event_result.data) if event_result.data else 0
         
-        # Events
-        events_resp = client.table('events').select('count', raw={'count': 'count(*)'}).eq('categoryid', categoryid).eq('userid', userid).single().execute()
-        events_count = events_resp.data[0]['count'] if events_resp.data else 0
+        # Check child categories
+        child_result = client.table('categories').select('id').eq('parent_category_id', category_id).eq('user_id', user_id).execute()
+        num_children = len(child_result.data) if child_result.data else 0
         
-        # Children (path prefix)
-        all_resp = client.table('categories').select('count', raw={'count': 'count(*)'}).eq('userid', userid).execute()
-        children_count = sum(1 for c in all_resp.data if str(c['path']).startswith(cat_path + '.'))
+        if num_attributes > 0 or num_events > 0 or num_children > 0:
+            msg = f"⚠️ **WARNING:** This category has"
+            parts = []
+            if num_children > 0:
+                parts.append(f"{num_children} child categories")
+            if num_attributes > 0:
+                parts.append(f"{num_attributes} attributes")
+            if num_events > 0:
+                parts.append(f"{num_events} events")
+            msg += " " + ", ".join(parts) + ". Deleting it will CASCADE DELETE all of them!"
+            return True, msg
         
-        parts = []
-        if children_count:
-            parts.append(f"{children_count} child categories")
-        if attrs_count:
-            parts.append(f"{attrs_count} attributes")
-        if events_count:
-            parts.append(f"{events_count} events")
-        
-        if parts:
-            return True, f"Delete {' & '.join(parts)}"
         return False, ""
+    
     except Exception as e:
-        return False, f"Preview error: {str(e)}"
+        return False, f"Error checking dependencies: {str(e)}"
+
 
 # ============================================
 # CACHED DATA LOADING
@@ -1781,58 +1793,101 @@ def add_new_category(
                 return False, f"❌ Category '{name}' already exists!"
         return False, f"❌ Error adding category: {error_msg}"
 
-def remove_category_between(
+
+def insert_category_between(
     client,
     user_id: str,
-    category_id: str
+    target_category_id: str,
+    name: str,
+    description: str = ""
 ) -> Tuple[bool, str]:
     """
-    FULL GENERAL: Remove any middle layer using PATH ONLY.
-    Fitness.Activity.test → delete test
-    Fitness.Activity.test.Gym.Cardio → Fitness.Activity.Gym.Cardio
+    Insert new category BETWEEN a category and its parent.
+    
+    v1.12.3 - Complete rewrite for correct "Insert Parent" behavior.
+    
+    This inserts a NEW category that becomes the new parent of the target category.
+    The target category (and all its children) move down one level.
+    
+    Example:
+        BEFORE: Automobili > A_test > A_test2
+        INSERT "SSL" before "A_test"
+        AFTER:  Automobili > SSL > A_test > A_test2
+        
+    The operation:
+    1. Create SSL with parent = Automobili (A_test's old parent)
+    2. Change A_test's parent to SSL
+    3. Increment level for A_test and ALL its descendants
+    
+    Args:
+        client: Supabase client
+        user_id: User ID
+        target_category_id: Category that will become child of new category
+        name: New category name
+        description: Category description
+    
+    Returns:
+        Tuple of (success, message)
     """
     try:
-        cat_resp = client.table('categories').select('id,name,path,level').eq('id', category_id).eq('userid', user_id).single().execute()
-        if not cat_resp.data:
-            return False, "Category not found"
-        cat = cat_resp.data
-        cat_name = cat['name']
-        cat_path_str = str(cat['path'])
-        path_parts = cat_path_str.split('.')
-        if len(path_parts) < 2:
-            return False, f"Root '{cat_name}' (path='{cat_path_str}') – use regular delete"
-        parent_path_str = '.'.join(path_parts[:-1])
+        # 1. Get target category info
+        target = client.table('categories')\
+            .select('id, name, parent_category_id, area_id, level, sort_order')\
+            .eq('id', target_category_id)\
+            .eq('user_id', user_id)\
+            .single().execute()
         
-        # Direct children: path starts with cat_path + '.'
-        all_cats_resp = client.table('categories').select('id,name,path,level').eq('userid', user_id).execute()
-        children_data = [c for c in all_cats_resp.data if str(c['path']).startswith(cat_path_str + '.') ]
+        if not target.data:
+            return False, "❌ Target category not found"
         
-        promoted = []
-        for child in children_data:
-            child_path_str = str(child['path'])
-            # Suffix after cat_name (Gym.Cardio → Gym.Cardio)
-            suffix_start = len(path_parts)
-            child_suffix = '.'.join(child_path_str.split('.')[suffix_start:])
-            new_path_str = parent_path_str + ('.' + child_suffix if child_suffix else '')
-            new_level = len(new_path_str.split('.'))
-            
-            client.table('categories').update({'path': new_path_str, 'level': new_level}).eq('id', child['id']).eq('userid', user_id).execute()
-            promoted.append(child['name'])
+        target_name = target.data['name']
+        old_parent_id = target.data['parent_category_id']
+        area_id = target.data['area_id']
+        target_level = target.data['level']
+        target_sort_order = target.data['sort_order']
         
-        # Delete
-        client.table('attributedefinitions').delete().eq('categoryid', category_id).eq('userid', user_id).execute()
-        client.table('events').delete().eq('categoryid', category_id).eq('userid', user_id).execute()
-        client.table('categories').delete().eq('id', category_id).eq('userid', user_id).execute()
-        loadallstructuredata.clear() if 'loadallstructuredata' in globals() else None
+        # 2. Generate new category data
+        new_id = str(uuid.uuid4())
+        slug = generate_slug(name)
         
-        count = len(promoted)
-        msg = f"✅ Removed '{cat_name}'"
-        if count:
-            msg += f" | ↑ {count} children: {', '.join(promoted)}"
-        return True, msg
+        new_category = {
+            'id': new_id,
+            'user_id': user_id,
+            'area_id': area_id,
+            'parent_category_id': old_parent_id,  # Takes target's old parent
+            'name': name,
+            'slug': slug,
+            'description': description if description else None,
+            'level': target_level,  # Same level as target (will push target down)
+            'sort_order': target_sort_order  # Same sort order as target
+        }
+        
+        # 3. Insert new category
+        result = client.table('categories').insert(new_category).execute()
+        
+        if not result.data or len(result.data) == 0:
+            return False, "❌ Failed to create new category"
+        
+        # 4. Update target category - new parent is the inserted category
+        client.table('categories')\
+            .update({
+                'parent_category_id': new_id,
+                'level': target_level + 1
+            })\
+            .eq('id', target_category_id)\
+            .eq('user_id', user_id)\
+            .execute()
+        
+        # 5. Recursively increment level for ALL descendants of target
+        _increment_descendant_levels(client, user_id, target_category_id)
+        
+        # Clear cache
+        load_all_structure_data.clear()
+        
+        return True, f"✅ Inserted '{name}' above '{target_name}'"
         
     except Exception as e:
-        return False, f"❌ {str(e)}"
+        return False, f"❌ Error inserting category: {str(e)}"
 
 
 def _increment_descendant_levels(client, user_id: str, parent_id: str):
@@ -1868,86 +1923,181 @@ def _increment_descendant_levels(client, user_id: str, parent_id: str):
         # Recursively process this child's children
         _increment_descendant_levels(client, user_id, child['id'])
 
+
+def _decrement_descendant_levels(client, user_id: str, parent_id: str):
+    """
+    Recursively decrement level by 1 for all descendants of a category.
+    
+    Helper function for remove_category_between.
+    Called AFTER the direct children have been promoted.
+    
+    Args:
+        client: Supabase client
+        user_id: User ID
+        parent_id: Parent category whose children need level updates
+    """
+    children = client.table('categories')\
+        .select('id, level')\
+        .eq('parent_category_id', parent_id)\
+        .eq('user_id', user_id)\
+        .execute()
+    
+    if not children.data:
+        return
+    
+    for child in children.data:
+        client.table('categories')\
+            .update({'level': child['level'] - 1})\
+            .eq('id', child['id'])\
+            .eq('user_id', user_id)\
+            .execute()
+        
+        # Recursively process this child's children
+        _decrement_descendant_levels(client, user_id, child['id'])
+
+
 def remove_category_between(
     client,
     user_id: str,
     category_id: str
 ) -> Tuple[bool, str]:
+    """
+    Remove category and promote its children to parent level.
+    
+    v1.14.0 - FULL GENERAL: Handles chains of any depth.
+    
+    This "removes the middle layer" - deletes a category but keeps its
+    children by promoting them up one level to the deleted category's parent.
+    All grandchildren and deeper descendants are preserved with correct levels.
+    
+    Example:
+        BEFORE: Fitness > Activity > test > Gym > Cardio
+        REMOVE "test"
+        AFTER:  Fitness > Activity > Gym > Cardio
+    
+    WARNING: This will also delete:
+    - All attributes attached to this category
+    - All events in this category
+    
+    SAFETY: Will NOT delete if:
+    - Promotion would create duplicate names under same parent
+    
+    Args:
+        client: Supabase client
+        user_id: User ID
+        category_id: Category UUID to remove
+    
+    Returns:
+        Tuple of (success, message)
+    """
     try:
-        print(f"DEBUG: category_id={category_id}")
+        # 1. Get category info
+        category = client.table('categories')\
+            .select('id, name, parent_category_id, area_id, level')\
+            .eq('id', category_id)\
+            .eq('user_id', user_id)\
+            .single().execute()
         
-        # Get category (safe single)
-        response = (client.table('categories')
-                    .select('id,name,parentcategoryid,areaid,level')
-                    .eq('id', category_id)
-                    .eq('userid', user_id)
-                    .single()
-                    .execute())
-        print(f"DEBUG response.data: {response.data}")  # TEMP - vidi što vraća
-        if not response.data:
-            return False, "Category not found"
-        cat = response.data
-        cat_name = cat.get('name', 'Unknown')
-        parent_id = cat.get('parentcategoryid')
-        cat_level = cat.get('level', 1)
-        area_id = cat.get('areaid')
-        print(f"DEBUG cat: name={cat_name}, parent={parent_id}, level={cat_level}")  # TEMP
+        if not category.data:
+            return False, "❌ Category not found"
         
-        if not parent_id:
-            return False, "Cannot remove root category (no parent to promote to)"
+        cat_name = category.data['name']
+        parent_id = category.data['parent_category_id']
+        cat_level = category.data['level']
+        area_id = category.data['area_id']
         
-        # Children
-        children_resp = (client.table('categories')
-                         .select('id,name')
-                         .eq('parentcategoryid', category_id)
-                         .eq('userid', user_id)
-                         .execute())
-        children_data = children_resp.data or []
-        print(f"DEBUG children_count={len(children_data)}")  # TEMP
+        # 2. Get direct children
+        children = client.table('categories')\
+            .select('id, name, level')\
+            .eq('parent_category_id', category_id)\
+            .eq('user_id', user_id)\
+            .execute()
         
-        # Name conflict
-        siblings_resp = (client.table('categories')
-                         .select('name')
-                         .eq('parentcategoryid', parent_id)
-                         .eq('userid', user_id)
-                         .neq('id', category_id)
-                         .execute())
-        existing_names = {s.get('name') for s in siblings_resp.data or []}
+        children_data = children.data if children.data else []
+        children_count = len(children_data)
         
+        # 3. SAFETY CHECK: Check for name conflicts after promotion
+        # Get existing children of the new parent (siblings after promotion)
+        if parent_id:
+            existing_siblings = client.table('categories')\
+                .select('name')\
+                .eq('parent_category_id', parent_id)\
+                .eq('user_id', user_id)\
+                .neq('id', category_id)\
+                .execute()
+        else:
+            # Will become root categories
+            existing_siblings = client.table('categories')\
+                .select('name')\
+                .eq('area_id', area_id)\
+                .eq('user_id', user_id)\
+                .is_('parent_category_id', 'null')\
+                .neq('id', category_id)\
+                .execute()
+        
+        existing_names = set(s['name'] for s in (existing_siblings.data or []))
+        for child in children_data:
+            if child['name'] in existing_names:
+                return False, f"❌ Cannot promote - '{child['name']}' would conflict with existing category at target level"
+        
+        # 4. PROMOTE DIRECT CHILDREN (before any deletion!)
+        # Set their parent_category_id to the deleted category's parent
+        # Set their level to the deleted category's level (they move up 1)
         promoted_children = []
         for child in children_data:
-            child_name = child.get('name', 'Unknown')
-            if child_name in existing_names:
-                return False, f"Conflict: '{child_name}'"
-            update_resp = (client.table('categories')
-                           .update({'parentcategoryid': parent_id, 'level': cat_level})
-                           .eq('id', child['id'])
-                           .eq('userid', user_id)
-                           .execute())
-            if update_resp.data:
-                promoted_children.append(child_name)
+            update_result = client.table('categories')\
+                .update({
+                    'parent_category_id': parent_id,
+                    'level': cat_level  # Same level as the category being deleted
+                })\
+                .eq('id', child['id'])\
+                .eq('user_id', user_id)\
+                .execute()
+            
+            if update_result.data:
+                promoted_children.append(child['name'])
+                
+                # 5. Recursively decrement levels for ALL descendants of this child
+                # (grandchildren, great-grandchildren, etc.)
+                _decrement_descendant_levels(client, user_id, child['id'])
             else:
-                return False, f"Failed '{child_name}'"
+                return False, f"❌ Failed to promote child '{child['name']}'. Operation aborted."
         
-        # Delete direct
-        client.table('attributedefinitions').delete().eq('categoryid', category_id).eq('userid', user_id).execute()
-        client.table('events').delete().eq('categoryid', category_id).eq('userid', user_id).execute()
-        delete_resp = client.table('categories').delete().eq('id', category_id).eq('userid', user_id).execute()
-        print(f"DEBUG delete_resp.data: {delete_resp.data}")  # TEMP
+        # 6. Delete attributes for THIS category only
+        client.table('attribute_definitions')\
+            .delete()\
+            .eq('category_id', category_id)\
+            .eq('user_id', user_id)\
+            .execute()
         
-        if 'loadallstructuredata' in globals():
-            loadallstructuredata.clear()
+        # 7. Delete events for THIS category only
+        client.table('events')\
+            .delete()\
+            .eq('category_id', category_id)\
+            .eq('user_id', user_id)\
+            .execute()
         
-        msg = f"Removed '{cat_name}' ({len(promoted_children)} promoted: {', '.join(promoted_children)})"
-        print(f"SUCCESS: {msg}")  # TEMP
+        # 8. Finally delete the category
+        delete_result = client.table('categories')\
+            .delete()\
+            .eq('id', category_id)\
+            .eq('user_id', user_id)\
+            .execute()
+        
+        if not delete_result.data:
+            return False, f"❌ Failed to delete category '{cat_name}'"
+        
+        # Clear cache
+        load_all_structure_data.clear()
+        
+        msg = f"✅ Removed '{cat_name}'"
+        if children_count > 0:
+            msg += f" and promoted {children_count} child categories: {', '.join(promoted_children)}"
+        
         return True, msg
         
-    except KeyError as ke:
-        print(f"DEBUG KeyError: {ke} in cat={cat}")
-        return False, f"Missing field '{ke}' - check DB schema"
     except Exception as e:
-        print(f"DEBUG: {str(e)}")
-        return False, f"Error: {str(e)}"
+        return False, f"❌ Error: {str(e)}"
 
 
 def add_new_attribute(
@@ -3422,13 +3572,30 @@ def render_interactive_structure_viewer(client, user_id: str):
                             
                                 # Get dependencies info
                                 try:
-                                    # Count children
+                                    # Count ALL descendant categories (children, grandchildren, etc.)
+                                    def count_all_descendants(cat_id):
+                                        """Recursively count all descendants."""
+                                        direct = client.table('categories')\
+                                            .select('id')\
+                                            .eq('parent_category_id', cat_id)\
+                                            .eq('user_id', user_id)\
+                                            .execute()
+                                        direct_ids = [c['id'] for c in (direct.data or [])]
+                                        total = len(direct_ids)
+                                        for child_id in direct_ids:
+                                            total += count_all_descendants(child_id)
+                                        return total
+                                    
+                                    # Direct children (these get promoted)
                                     children = client.table('categories')\
                                         .select('id')\
                                         .eq('parent_category_id', category_id)\
                                         .eq('user_id', user_id)\
                                         .execute()
                                     children_count = len(children.data) if children.data else 0
+                                    
+                                    # Total descendants (children + grandchildren + ...)
+                                    total_descendants = count_all_descendants(category_id)
                                     
                                     # Count attributes
                                     attrs = client.table('attribute_definitions')\
@@ -3451,7 +3618,8 @@ def render_interactive_structure_viewer(client, user_id: str):
                                     col1, col2, col3 = st.columns(3)
                                     with col1:
                                         if children_count > 0:
-                                            st.success(f"✅ **{children_count}** child categories will be **promoted**")
+                                            desc_info = f" ({total_descendants} total in subtree)" if total_descendants > children_count else ""
+                                            st.success(f"✅ **{children_count}** child categories will be **promoted**{desc_info}")
                                         else:
                                             st.info("ℹ️ No child categories")
                                     with col2:
